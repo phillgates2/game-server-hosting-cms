@@ -143,14 +143,33 @@ EOF
 ### Step 3: Install SteamCMD (for Steam games)
 
 ```bash
+# Install 32-bit libraries (required for SteamCMD)
+sudo dpkg --add-architecture i386
+sudo apt update
+sudo apt install -y lib32gcc-s1 lib32stdc++6 libc6-i386
+
+# Create steamcmd directory and download
 sudo mkdir -p /opt/steamcmd
 cd /opt/steamcmd
 sudo curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | sudo tar xzf -
-sudo ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
 
-# Test
+# Fix permissions
+sudo chmod +x /opt/steamcmd/steamcmd.sh
+sudo chmod +x /opt/steamcmd/linux32/steamcmd
+
+# Create a wrapper script that runs from the correct directory
+sudo tee /usr/local/bin/steamcmd > /dev/null << 'STEAMWRAPPER'
+#!/bin/bash
+cd /opt/steamcmd
+exec ./steamcmd.sh "$@"
+STEAMWRAPPER
+sudo chmod +x /usr/local/bin/steamcmd
+
+# Test SteamCMD
 steamcmd +quit
 ```
+
+**Note:** SteamCMD must run from its installation directory. The wrapper script handles this automatically.
 
 ### Step 4: Clone & Install the Panel
 
@@ -185,28 +204,84 @@ EOF
 # Build the application
 npm run build
 
-# Start in production mode
+# Start in production mode (for testing)
 npm start
-
-# Or use PM2 for process management
-npm install -g pm2
-pm2 start npm --name "gsm-panel" -- start
-pm2 save
-pm2 startup
 ```
 
-### Step 7: Run the Web Installer
+### Step 7: Setup PM2 Process Manager (Recommended)
+
+PM2 keeps your panel running and auto-restarts on crashes/reboots.
+
+```bash
+# Install PM2 globally (requires sudo)
+sudo npm install -g pm2
+
+# Start the panel with PM2
+cd /opt/game-server-hosting-cms
+pm2 start npm --name "gsm-panel" -- start
+
+# Save PM2 process list
+pm2 save
+
+# Generate startup script (run the command it outputs)
+pm2 startup
+
+# Example output - run the sudo command it provides:
+# sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u admin --hp /home/admin
+
+# Verify it's running
+pm2 status
+pm2 logs gsm-panel
+```
+
+#### PM2 Useful Commands
+
+```bash
+# View status
+pm2 status
+
+# View logs
+pm2 logs gsm-panel
+
+# Restart panel
+pm2 restart gsm-panel
+
+# Stop panel
+pm2 stop gsm-panel
+
+# Monitor resources
+pm2 monit
+```
+
+### Step 8: Run the Web Installer
 
 1. Open your browser: `http://YOUR_SERVER_IP:3000`
 2. The installation wizard will appear
 3. Configure your panel name and admin credentials
 4. Click "Install Now" — this will:
-   - Create all database tables
+   - Create all database tables with multi-node support
    - Create the admin user
-   - Seed 5 game definitions (ET:Legacy, OpenRA, Palworld, Satisfactory, Terraria)
+   - Make 30+ game templates available (install as needed)
    - Create forum categories
    - Save panel settings
 5. Log in with your admin credentials
+
+### Step 9: Initial Setup (After Installation)
+
+1. **Add a Node:**
+   - Go to **Nodes** panel
+   - Click **"+ Add Local Node"** to add this server
+   - This auto-detects your server's resources
+
+2. **Install Game Templates:**
+   - Go to **Games** → **Templates** tab
+   - Click on a game to view details
+   - Click **"Install Game"** to make it available
+
+3. **Create Your First Server:**
+   - Go to **Servers** panel
+   - Click **"+ New Server"**
+   - Select your node, game, and configure settings
 
 ---
 
@@ -544,6 +619,117 @@ game-server-hosting-cms/
 - The database manager is admin-only
 - Buffer clearing requires admin role
 - First registered user automatically gets admin role
+
+---
+
+## 🔧 Troubleshooting
+
+### SteamCMD Issues
+
+**"No such file or directory" error:**
+```bash
+# Install 32-bit libraries
+sudo dpkg --add-architecture i386
+sudo apt update
+sudo apt install -y lib32gcc-s1 lib32stdc++6 libc6-i386
+
+# Reinstall SteamCMD
+cd /opt/steamcmd
+sudo rm -rf *
+sudo curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | sudo tar xzf -
+sudo chmod +x steamcmd.sh linux32/steamcmd
+```
+
+**"Permission denied" error:**
+```bash
+# Fix permissions
+sudo chown -R $USER:$USER /opt/steamcmd
+chmod +x /opt/steamcmd/steamcmd.sh
+chmod +x /opt/steamcmd/linux32/steamcmd
+```
+
+### PM2 Issues
+
+**"EACCES permission denied" when installing PM2:**
+```bash
+# Use sudo for global install
+sudo npm install -g pm2
+```
+
+**PM2 not found after install:**
+```bash
+# Check if installed globally
+which pm2
+# or
+sudo which pm2
+
+# If using sudo, you may need to run pm2 with full path
+sudo /usr/lib/node_modules/pm2/bin/pm2 status
+```
+
+### Database Connection Issues
+
+**"ECONNREFUSED" error:**
+```bash
+# Check PostgreSQL is running
+sudo systemctl status postgresql
+
+# Start if not running
+sudo systemctl start postgresql
+```
+
+**"password authentication failed":**
+```bash
+# Reset user password
+sudo -u postgres psql
+ALTER USER gsmadmin WITH PASSWORD 'new_password_here';
+\q
+
+# Update .env file
+nano /opt/game-server-hosting-cms/.env
+```
+
+### Panel Not Loading
+
+**Check if Node.js app is running:**
+```bash
+pm2 status
+pm2 logs gsm-panel
+```
+
+**Check if port 3000 is in use:**
+```bash
+sudo lsof -i :3000
+sudo netstat -tlnp | grep 3000
+```
+
+**Check firewall:**
+```bash
+# UFW
+sudo ufw allow 3000/tcp
+
+# iptables
+sudo iptables -A INPUT -p tcp --dport 3000 -j ACCEPT
+```
+
+### Caddy Not Working
+
+**Check Caddy status:**
+```bash
+sudo systemctl status caddy
+sudo journalctl -u caddy -f
+```
+
+**Validate configuration:**
+```bash
+caddy validate --config /etc/caddy/Caddyfile
+```
+
+**Test without Caddy:**
+```bash
+# Access directly on port 3000
+curl http://localhost:3000/api/health
+```
 
 ---
 
