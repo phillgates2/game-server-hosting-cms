@@ -47,6 +47,8 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   const [games, setGames] = useState<GameDef[]>([]);
   const [nodeList, setNodeList] = useState<NodeInfo[]>([]);
   const [showCreate, setShowCreate] = useState(false);
+  const [installingId, setInstallingId] = useState<number | null>(null);
+  const [installLog, setInstallLog] = useState<{ id: number; show: boolean; text: string } | null>(null);
   const [form, setForm] = useState({
     name: "",
     gameId: "",
@@ -86,7 +88,6 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
         const d = await results[2].value.json();
         const online = (d.nodes || []).filter((n: NodeInfo) => n.status === "online");
         setNodeList(online);
-        // Set default node
         const def = online.find((n: NodeInfo) => n.isDefault);
         if (def) {
           setForm((f) => ({
@@ -112,7 +113,12 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
     const node = nodeList.find((n) => n.id === Number(form.nodeId));
     const base = node?.gameServerPath || "/opt/gameservers";
     if (game) {
-      setForm((f) => ({ ...f, gameId, port: String(game.defaultPort), installPath: `${base}/${game.slug}` }));
+      setForm((f) => ({
+        ...f,
+        gameId,
+        port: String(game.defaultPort),
+        installPath: `${base}/${game.slug}`,
+      }));
     } else {
       setForm((f) => ({ ...f, gameId }));
     }
@@ -153,6 +159,45 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
     }
   }
 
+  async function installServer(id: number, name: string) {
+    if (!confirm(`Install game server files for "${name}"?\n\nThis will download game files to the server. It may take several minutes.`)) return;
+
+    setInstallingId(id);
+    setInstallLog({ id, show: true, text: "Starting installation...\n" });
+
+    try {
+      const res = await fetch(`/api/servers/${id}/install`, { method: "POST" });
+      const data = await res.json();
+
+      if (data.output) {
+        setInstallLog({ id, show: true, text: data.output });
+      }
+      if (data.success) {
+        setInstallLog((prev) => ({
+          id,
+          show: true,
+          text: (prev?.text || "") + "\n✅ Game server files installed successfully!",
+        }));
+      } else {
+        setInstallLog((prev) => ({
+          id,
+          show: true,
+          text: (prev?.text || "") + "\n⚠️ Installation completed but there may be issues. Check the logs.",
+        }));
+      }
+      loadData();
+    } catch (err: unknown) {
+      setInstallLog({
+        id,
+        show: true,
+        text: `❌ Error: ${err instanceof Error ? err.message : "Installation failed"}`,
+      });
+    } finally {
+      setInstallingId(null);
+      loadData();
+    }
+  }
+
   async function toggleStatus(id: number, current: string) {
     const next = current === "running" ? "stopped" : "running";
     try {
@@ -174,22 +219,6 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
       loadData();
     } catch (e) {
       console.error("Delete error:", e);
-    }
-  }
-
-  async function testWebhook(url: string, name: string) {
-    try {
-      await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: "GameServer Manager",
-          embeds: [{ title: "🔔 Test", description: `Test from **${name}**`, color: 0x3b82f6 }],
-        }),
-      });
-      alert("✅ Webhook sent!");
-    } catch {
-      alert("❌ Webhook failed");
     }
   }
 
@@ -224,6 +253,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
       {showCreate && onlineNodes.length > 0 && games.length > 0 && (
         <form onSubmit={createServer} className="bg-bg-card border border-border rounded-xl p-6 space-y-4">
           <h3 className="font-semibold">Create New Server</h3>
+          <p className="text-xs text-text-muted">After creating the server, use the <strong>Install Files</strong> button to download game server files.</p>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div>
               <label className="block text-xs text-text-muted mb-1">Server Name *</label>
@@ -312,10 +342,10 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                 <div className="flex items-center gap-4">
                   <span className="text-3xl">{server.gameIcon || "🎮"}</span>
                   <div>
-                    <h3 className="font-semibold flex items-center gap-2">
-                      {server.name}
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold">{server.name}</h3>
                       {server.discordWebhook && <span className="text-xs bg-[#5865F2]/20 text-[#5865F2] px-1.5 py-0.5 rounded">🔔</span>}
-                    </h3>
+                    </div>
                     <p className="text-sm text-text-secondary">{server.gameName}</p>
                     <div className="flex gap-3 mt-1 text-xs text-text-muted">
                       {server.nodeName && <span>🖥️ {server.nodeName}</span>}
@@ -326,19 +356,70 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                    server.status === "running" ? "bg-success/15 text-success" : "bg-bg-secondary text-text-muted"
+                    server.status === "running" ? "bg-success/15 text-success"
+                    : server.status === "installing" ? "bg-warning/15 text-warning"
+                    : server.status === "error" ? "bg-danger/15 text-danger"
+                    : "bg-bg-secondary text-text-muted"
                   }`}>{server.status}</span>
-                  <button onClick={() => toggleStatus(server.id, server.status)} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
-                    server.status === "running" ? "bg-danger/15 text-danger" : "bg-success/15 text-success"
-                  }`}>{server.status === "running" ? "Stop" : "Start"}</button>
-                  {server.discordWebhook && (
-                    <button onClick={() => testWebhook(server.discordWebhook!, server.name)} className="px-3 py-1.5 bg-[#5865F2]/15 text-[#5865F2] rounded-lg text-xs font-medium">Test 🔔</button>
+
+                  {user.role === "admin" && server.status === "stopped" && (
+                    <button
+                      onClick={() => installServer(server.id, server.name)}
+                      disabled={installingId === server.id}
+                      className="px-3 py-1.5 bg-accent/15 text-accent hover:bg-accent/25 rounded-lg text-xs font-medium disabled:opacity-50"
+                    >
+                      {installingId === server.id ? "Installing..." : "📦 Install Files"}
+                    </button>
                   )}
+
+                  {(server.status === "stopped" || server.status === "running") && (
+                    <button
+                      onClick={() => toggleStatus(server.id, server.status)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
+                        server.status === "running" ? "bg-danger/15 text-danger" : "bg-success/15 text-success"
+                      }`}
+                    >
+                      {server.status === "running" ? "Stop" : "Start"}
+                    </button>
+                  )}
+
+                  {server.discordWebhook && (
+                    <button onClick={() => {
+                      fetch(server.discordWebhook!, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          username: "GameServer Manager",
+                          embeds: [{ title: "🔔 Test", description: `Test from **${server.name}**`, color: 0x3b82f6 }],
+                        }),
+                      }).catch(() => {});
+                      alert("✅ Webhook sent!");
+                    }} className="px-3 py-1.5 bg-[#5865F2]/15 text-[#5865F2] rounded-lg text-xs font-medium">Test 🔔</button>
+                  )}
+
                   {user.role === "admin" && (
                     <button onClick={() => deleteServer(server.id)} className="px-3 py-1.5 bg-danger/10 text-danger rounded-lg text-xs font-medium">Delete</button>
                   )}
                 </div>
               </div>
+
+              {/* Install log output */}
+              {installLog && installLog.id === server.id && installLog.show && (
+                <div className="mt-4 bg-bg-primary border border-border rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-text-muted font-medium">Install Log</span>
+                    <button
+                      onClick={() => setInstallLog(null)}
+                      className="text-xs text-text-muted hover:text-text-primary"
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <pre className="text-xs font-mono text-text-secondary whitespace-pre-wrap max-h-60 overflow-y-auto">
+                    {installLog.text}
+                  </pre>
+                </div>
+              )}
             </div>
           ))}
         </div>
