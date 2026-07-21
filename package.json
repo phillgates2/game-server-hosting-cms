@@ -1,5 +1,13 @@
 {
-  "name": "nextjs-postgresql-template",
+  "name": "game-server-hosting-cms",
+  "version": "1.0.0",
+  "description": "Professional game server hosting panel with automatic installation, management, and community forums",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/phillgates2/game-server-hosting-cms.git"
+  },
+  "author": "phillgates2",
+  "license": "MIT",
   "private": true,
   "scripts": {
     "dev": "next dev",

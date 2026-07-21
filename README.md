@@ -176,13 +176,9 @@ sudo systemctl restart postgresql
 sudo mkdir -p /var/www/gamepanel
 sudo chown $USER:$USER /var/www/gamepanel
 
-# Clone or download the repository
+# Clone the repository
 cd /var/www/gamepanel
-git clone https://github.com/yourusername/gamepanel.git .
-
-# Or download and extract release
-# wget https://github.com/yourusername/gamepanel/releases/latest/download/gamepanel.tar.gz
-# tar -xzf gamepanel.tar.gz
+git clone https://github.com/phillgates2/game-server-hosting-cms.git .
 ```
 
 ---
@@ -624,9 +620,9 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## 💬 Support
 
-- **Documentation**: [Wiki](https://github.com/yourusername/gamepanel/wiki)
-- **Issues**: [GitHub Issues](https://github.com/yourusername/gamepanel/issues)
-- **Discord**: [Join our community](https://discord.gg/gamepanel)
+- **Documentation**: [Wiki](https://github.com/phillgates2/game-server-hosting-cms/wiki)
+- **Issues**: [GitHub Issues](https://github.com/phillgates2/game-server-hosting-cms/issues)
+- **Repository**: [GitHub](https://github.com/phillgates2/game-server-hosting-cms)
 
 ---
 
