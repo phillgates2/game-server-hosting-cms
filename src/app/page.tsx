@@ -6,7 +6,7 @@ import InstallWizard from "@/components/InstallWizard";
 import LoginForm from "@/components/LoginForm";
 import Dashboard from "@/components/Dashboard";
 
-type AppState = "loading" | "install" | "login" | "dashboard" | "error";
+type AppState = "loading" | "install" | "login" | "dashboard";
 
 interface AuthUser {
   id: number;
@@ -36,7 +36,7 @@ export default function Home() {
         return;
       }
 
-      // Check if logged in
+      // Check if logged in by verifying cookie
       const meRes = await fetch("/api/auth/me");
       if (meRes.ok) {
         const meData = await meRes.json();
@@ -59,7 +59,25 @@ export default function Home() {
     checkStatus();
   }, [checkStatus]);
 
-  function handleLogin(u: AuthUser) {
+  async function handleLogin(u: AuthUser) {
+    // After login, verify the cookie was actually set by calling /api/auth/me
+    try {
+      const meRes = await fetch("/api/auth/me");
+      if (meRes.ok) {
+        const meData = await meRes.json();
+        if (meData.user) {
+          // Cookie works — use the verified user data
+          setUser(meData.user);
+          setState("dashboard");
+          return;
+        }
+      }
+    } catch {
+      // Fall through
+    }
+
+    // Fallback — cookie might not have been verified, but login response was ok
+    // This can happen if there's a timing issue
     setUser(u);
     setState("dashboard");
   }
@@ -100,7 +118,6 @@ export default function Home() {
   }
 
   if (!user) {
-    // Safety: if somehow we're in dashboard state without a user, go to login
     setState("login");
     return (
       <div className="min-h-screen flex items-center justify-center">

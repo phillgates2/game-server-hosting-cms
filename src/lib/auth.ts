@@ -35,3 +35,18 @@ export async function getCurrentUser(headers: Headers) {
   if (!token) return null;
   return verifyToken(token);
 }
+
+// Cookie options — secure only when behind HTTPS (detected via x-forwarded-proto)
+export function getCookieOptions(headers?: Headers) {
+  // Check if request is coming through HTTPS (via reverse proxy or direct)
+  const proto = headers?.get("x-forwarded-proto");
+  const isHttps = proto === "https";
+
+  return {
+    httpOnly: true,
+    secure: isHttps,
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge: 60 * 60 * 24 * 7, // 7 days
+  };
+}

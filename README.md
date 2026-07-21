@@ -142,56 +142,104 @@ psql -h 127.0.0.1 -U gsmadmin -d gameserver_db -c "SELECT 1;"
 
 ---
 
-### Step 4: Install SteamCMD (Optional - for Steam games)
+### Step 4: Install SteamCMD (Optional — for Steam games)
+
+SteamCMD is needed for CS2, Rust, ARK, Valheim, and other Steam-based servers. Skip this step if you only plan to run non-Steam games (Minecraft, Terraria, Factorio, etc.).
 
 ```bash
-# Add 32-bit architecture support (SteamCMD is a 32-bit application)
+# 1. Install 32-bit libraries (SteamCMD is a 32-bit application)
 sudo dpkg --add-architecture i386
 sudo apt update
 sudo apt install -y lib32gcc-s1 lib32stdc++6 ca-certificates
 
-# Create directory and download SteamCMD
+# 2. Create directory, download, and extract SteamCMD
 sudo mkdir -p /opt/steamcmd
 cd /opt/steamcmd
 sudo curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | sudo tar xzf -
 
-# Set executable permissions
-sudo chmod +x /opt/steamcmd/steamcmd.sh
-sudo chmod +x /opt/steamcmd/linux32/steamcmd
+# 3. Set ownership to YOUR user (NOT root — this prevents permission errors)
+sudo chown -R $USER:$USER /opt/steamcmd
 
-# Create a wrapper script
-# (SteamCMD MUST run from /opt/steamcmd — a symlink does NOT work)
+# 4. Set executable permissions
+chmod +x /opt/steamcmd/steamcmd.sh
+chmod +x /opt/steamcmd/linux32/steamcmd
+
+# 5. Create a wrapper script
+#    SteamCMD MUST run from /opt/steamcmd — a symlink does NOT work.
+#    This wrapper cd's into the correct directory before running.
 sudo bash -c 'cat > /usr/local/bin/steamcmd << "WRAPPER"
 #!/bin/bash
 cd /opt/steamcmd && exec ./steamcmd.sh "$@"
 WRAPPER'
 sudo chmod +x /usr/local/bin/steamcmd
 
-# First run — downloads ~40MB of updates (may take a minute)
-# If it fails on the first try, just run it again
-steamcmd +quit
+# 6. Create package directory with correct permissions
+mkdir -p /opt/steamcmd/package
+
+# 7. First run — DO NOT use sudo!
+#    Downloads ~40MB of updates. May take a few minutes.
+cd /opt/steamcmd
+./steamcmd.sh +quit
 ```
 
-> **Why a wrapper and not a symlink?**
-> SteamCMD's `steamcmd.sh` uses relative paths internally (e.g., `./linux32/steamcmd`).
-> A symlink like `ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd` runs from
-> `/usr/local/bin/` where `./linux32/steamcmd` doesn't exist, causing
-> `"No such file or directory"`. The wrapper `cd`s into the correct directory first.
+> ⚠️ **Important:** Do NOT run SteamCMD with `sudo`. Running as root writes cache
+> files to `/root/Steam/` which then can't be read by non-root parts of the script.
+> Always run as your regular user.
 
-#### If SteamCMD update fails
+#### If SteamCMD update fails ("Download of package failed")
+
+This is a common SteamCMD bug where the download finishes but package verification fails.
 
 ```bash
-# Clean cached data and retry
-rm -rf ~/Steam /opt/steamcmd/package
-steamcmd +quit
+# Clean ALL cached data
+rm -rf ~/Steam ~/.steam /opt/steamcmd/package /tmp/dumps
 
-# If still failing, retry in a loop (network issues)
-until steamcmd +quit; do
-    echo "Retrying in 5s..."
-    rm -rf ~/Steam/package
-    sleep 5
-done
+# Recreate package directory
+mkdir -p /opt/steamcmd/package
+
+# Re-extract fresh SteamCMD binaries
+cd /opt/steamcmd
+rm -f steamcmd.sh
+rm -rf linux32
+curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
+chmod +x steamcmd.sh linux32/steamcmd
+
+# Try the direct binary (bypasses the shell script updater)
+./linux32/steamcmd +quit
 ```
+
+If that also fails, try forcing IPv4 (some containers have broken IPv6):
+```bash
+cd /opt/steamcmd
+./steamcmd.sh +@nClientDownloadEnableHTTP2PlatformLinux 0 +@sSteamCmdForcePlatformBitness 32 +quit
+```
+
+#### LXC / Proxmox container users
+
+SteamCMD requires `nesting` to be enabled on your container. Run this on the **host** (not inside the container):
+
+```bash
+# Replace 100 with your LXC container ID
+pct set 100 -features nesting=1,keyctl=1
+pct restart 100
+```
+
+Then retry inside the container:
+```bash
+rm -rf ~/Steam /opt/steamcmd/package
+cd /opt/steamcmd
+./steamcmd.sh +quit
+```
+
+#### Still not working? Skip it.
+
+SteamCMD is only required for Steam-based games. You can install the panel now and set up SteamCMD later. Non-Steam games work without it:
+- ✅ Minecraft (Java, Paper, Bedrock)
+- ✅ Terraria (TShock)
+- ✅ Factorio
+- ✅ OpenRA
+- ✅ Wolfenstein: ET / ET:Legacy
+- ✅ Xonotic
 
 ---
 
@@ -523,39 +571,57 @@ Access from the admin sidebar (admin role required).
 
 **"/usr/local/bin/linux32/steamcmd: No such file or directory":**
 
-This means you used `ln -sf` to create a symlink. SteamCMD doesn't work as a symlink.
-Fix it by replacing the symlink with a wrapper script:
+You used `ln -sf` to create a symlink — this doesn't work with SteamCMD:
 
 ```bash
-# Remove the broken symlink
+# Remove the broken symlink and create a wrapper script
 sudo rm -f /usr/local/bin/steamcmd
-
-# Create a wrapper script instead
 sudo bash -c 'cat > /usr/local/bin/steamcmd << "WRAPPER"
 #!/bin/bash
 cd /opt/steamcmd && exec ./steamcmd.sh "$@"
 WRAPPER'
 sudo chmod +x /usr/local/bin/steamcmd
-
-# Test
-steamcmd +quit
 ```
 
 **"Permission denied" error:**
+
+Don't run SteamCMD with `sudo`. Fix ownership instead:
+
 ```bash
-sudo chmod +x /opt/steamcmd/steamcmd.sh
-sudo chmod +x /opt/steamcmd/linux32/steamcmd
-sudo chmod +x /usr/local/bin/steamcmd
+sudo chown -R $USER:$USER /opt/steamcmd
+chmod +x /opt/steamcmd/steamcmd.sh /opt/steamcmd/linux32/steamcmd
+cd /opt/steamcmd && ./steamcmd.sh +quit
 ```
 
-**"Download of package failed" or update errors:**
+**"Download of package (steamcmd_public_all) failed after 0 bytes":**
+
+This is a common SteamCMD bug — the download succeeds but verification fails:
+
 ```bash
-# Clean cache and retry
-rm -rf ~/Steam /opt/steamcmd/package
-steamcmd +quit
+# 1. Clean everything
+rm -rf ~/Steam ~/.steam /opt/steamcmd/package /tmp/dumps
+
+# 2. Re-extract fresh binaries
+cd /opt/steamcmd
+rm -f steamcmd.sh && rm -rf linux32
+curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
+chmod +x steamcmd.sh linux32/steamcmd
+mkdir -p package
+
+# 3. Run the binary directly (bypasses the shell script)
+./linux32/steamcmd +quit
+
+# 4. If still failing, force IPv4
+./steamcmd.sh +@nClientDownloadEnableHTTP2PlatformLinux 0 +@sSteamCmdForcePlatformBitness 32 +quit
 ```
 
-**32-bit library missing:**
+**LXC/Proxmox containers** — run on the HOST:
+```bash
+pct set YOUR_CONTAINER_ID -features nesting=1,keyctl=1
+pct restart YOUR_CONTAINER_ID
+```
+
+**32-bit libraries missing:**
 ```bash
 sudo dpkg --add-architecture i386
 sudo apt update

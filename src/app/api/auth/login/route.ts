@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { users } from "@/db/schema";
-import { verifyPassword, createToken } from "@/lib/auth";
+import { verifyPassword, createToken, getCookieOptions } from "@/lib/auth";
 import { eq } from "drizzle-orm";
 
 export async function POST(req: NextRequest) {
@@ -27,13 +27,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       user: { id: user.id, username: user.username, role: user.role },
     });
-    res.cookies.set("gsm_token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 7,
-    });
+    res.cookies.set("gsm_token", token, getCookieOptions(req.headers));
     return res;
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Unknown error";
