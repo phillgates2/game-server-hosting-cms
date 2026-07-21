@@ -145,37 +145,53 @@ psql -h 127.0.0.1 -U gsmadmin -d gameserver_db -c "SELECT 1;"
 ### Step 4: Install SteamCMD (Optional - for Steam games)
 
 ```bash
-# Add 32-bit architecture support
+# Add 32-bit architecture support (SteamCMD is a 32-bit application)
 sudo dpkg --add-architecture i386
 sudo apt update
+sudo apt install -y lib32gcc-s1 lib32stdc++6 ca-certificates
 
-# Install 32-bit libraries required by SteamCMD
-sudo apt install -y lib32gcc-s1 lib32stdc++6
-
-# Create SteamCMD directory
+# Create directory and download SteamCMD
 sudo mkdir -p /opt/steamcmd
 cd /opt/steamcmd
-
-# Download and extract SteamCMD
 sudo curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | sudo tar xzf -
 
-# Set permissions
+# Set executable permissions
 sudo chmod +x /opt/steamcmd/steamcmd.sh
 sudo chmod +x /opt/steamcmd/linux32/steamcmd
 
-# Create wrapper script (SteamCMD must run from its directory)
-sudo tee /usr/local/bin/steamcmd > /dev/null << 'EOF'
+# Create a wrapper script
+# (SteamCMD MUST run from /opt/steamcmd — a symlink does NOT work)
+sudo bash -c 'cat > /usr/local/bin/steamcmd << "WRAPPER"
 #!/bin/bash
-cd /opt/steamcmd
-exec ./steamcmd.sh "$@"
-EOF
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER'
 sudo chmod +x /usr/local/bin/steamcmd
 
-# Test SteamCMD (first run downloads updates)
+# First run — downloads ~40MB of updates (may take a minute)
+# If it fails on the first try, just run it again
 steamcmd +quit
 ```
 
-> **Note:** First run of SteamCMD will download ~150MB of updates. This is normal.
+> **Why a wrapper and not a symlink?**
+> SteamCMD's `steamcmd.sh` uses relative paths internally (e.g., `./linux32/steamcmd`).
+> A symlink like `ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd` runs from
+> `/usr/local/bin/` where `./linux32/steamcmd` doesn't exist, causing
+> `"No such file or directory"`. The wrapper `cd`s into the correct directory first.
+
+#### If SteamCMD update fails
+
+```bash
+# Clean cached data and retry
+rm -rf ~/Steam /opt/steamcmd/package
+steamcmd +quit
+
+# If still failing, retry in a loop (network issues)
+until steamcmd +quit; do
+    echo "Retrying in 5s..."
+    rm -rf ~/Steam/package
+    sleep 5
+done
+```
 
 ---
 
@@ -505,25 +521,45 @@ Access from the admin sidebar (admin role required).
 
 ### SteamCMD Issues
 
-**"No such file or directory" error:**
-```bash
-# Install 32-bit libraries
-sudo dpkg --add-architecture i386
-sudo apt update
-sudo apt install -y lib32gcc-s1 lib32stdc++6
+**"/usr/local/bin/linux32/steamcmd: No such file or directory":**
 
-# Reinstall SteamCMD
-cd /opt/steamcmd
-sudo rm -rf *
-sudo curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | sudo tar xzf -
-sudo chmod +x steamcmd.sh linux32/steamcmd
+This means you used `ln -sf` to create a symlink. SteamCMD doesn't work as a symlink.
+Fix it by replacing the symlink with a wrapper script:
+
+```bash
+# Remove the broken symlink
+sudo rm -f /usr/local/bin/steamcmd
+
+# Create a wrapper script instead
+sudo bash -c 'cat > /usr/local/bin/steamcmd << "WRAPPER"
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER'
+sudo chmod +x /usr/local/bin/steamcmd
+
+# Test
+steamcmd +quit
 ```
 
 **"Permission denied" error:**
 ```bash
-sudo chown -R $USER:$USER /opt/steamcmd
-chmod +x /opt/steamcmd/steamcmd.sh
-chmod +x /opt/steamcmd/linux32/steamcmd
+sudo chmod +x /opt/steamcmd/steamcmd.sh
+sudo chmod +x /opt/steamcmd/linux32/steamcmd
+sudo chmod +x /usr/local/bin/steamcmd
+```
+
+**"Download of package failed" or update errors:**
+```bash
+# Clean cache and retry
+rm -rf ~/Steam /opt/steamcmd/package
+steamcmd +quit
+```
+
+**32-bit library missing:**
+```bash
+sudo dpkg --add-architecture i386
+sudo apt update
+sudo apt install -y lib32gcc-s1 lib32stdc++6
 ```
 
 ### PM2 Issues

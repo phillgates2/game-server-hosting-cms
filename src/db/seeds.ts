@@ -210,9 +210,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading Counter-Strike 2 Dedicated Server..."
@@ -250,9 +257,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading Team Fortress 2 Dedicated Server..."
@@ -292,9 +306,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading Garry's Mod Dedicated Server..."
@@ -332,9 +353,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading Left 4 Dead 2 Dedicated Server..."
@@ -377,9 +405,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading Rust Dedicated Server..."
@@ -414,9 +449,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading ARK Dedicated Server (this may take a while ~50GB)..."
@@ -451,9 +493,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading Valheim Dedicated Server..."
@@ -487,9 +536,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading 7 Days to Die Dedicated Server..."
@@ -528,9 +584,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading Palworld Dedicated Server..."
@@ -567,9 +630,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading Satisfactory Dedicated Server..."
@@ -639,9 +709,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading Enshrouded Dedicated Server..."
@@ -684,9 +761,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading Insurgency: Sandstorm Dedicated Server..."
@@ -719,9 +803,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading Squad Dedicated Server..."
@@ -755,9 +846,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading Arma 3 Dedicated Server..."
@@ -874,9 +972,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading Quake Live Dedicated Server..."
@@ -947,9 +1052,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading V Rising Dedicated Server..."
@@ -983,9 +1095,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading Project Zomboid Dedicated Server..."
@@ -1058,9 +1177,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading Don't Starve Together Dedicated Server..."
@@ -1101,9 +1227,16 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 
 if ! command -v steamcmd &> /dev/null; then
+  dpkg --add-architecture i386 2>/dev/null; apt-get update -qq
+  apt-get install -y -qq lib32gcc-s1 lib32stdc++6 2>/dev/null || true
   mkdir -p /opt/steamcmd && cd /opt/steamcmd
   curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-  ln -sf /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+  chmod +x steamcmd.sh linux32/steamcmd
+  cat > /usr/local/bin/steamcmd << 'WRAPPER'
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER
+  chmod +x /usr/local/bin/steamcmd
 fi
 
 echo "Downloading Assetto Corsa Dedicated Server..."
