@@ -375,33 +375,105 @@ For automatic buffer clearing, you can set up a cron job:
 
 ---
 
-## 🔧 Nginx Reverse Proxy (Recommended)
+## 🔧 Caddy Reverse Proxy (Recommended)
 
-```nginx
-server {
-    listen 80;
-    listen [::]:80;
-    server_name panel.yourdomain.com;
+Caddy is a modern web server with **automatic HTTPS** — no manual SSL configuration needed!
 
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
+### Install Caddy
+
+```bash
+# Install Caddy on Ubuntu/Debian
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update
+sudo apt install caddy
+
+# Start and enable Caddy
+sudo systemctl enable caddy
+sudo systemctl start caddy
+```
+
+### Configure Caddy
+
+Create or edit `/etc/caddy/Caddyfile`:
+
+```caddyfile
+panel.yourdomain.com {
+    reverse_proxy localhost:3000
+}
+```
+
+That's it! Caddy automatically:
+- Obtains SSL certificates from Let's Encrypt
+- Redirects HTTP to HTTPS
+- Renews certificates automatically
+
+### Reload Caddy
+
+```bash
+sudo systemctl reload caddy
+```
+
+### With IPv6 Support
+
+```caddyfile
+panel.yourdomain.com {
+    # Listen on both IPv4 and IPv6
+    bind 0.0.0.0 [::]
+    
+    reverse_proxy localhost:3000
+}
+```
+
+### Multiple Panels / Nodes
+
+```caddyfile
+# Main panel
+panel.yourdomain.com {
+    reverse_proxy localhost:3000
+}
+
+# Node 1 panel (if running panel on each node)
+node1.yourdomain.com {
+    reverse_proxy localhost:3000
+}
+
+# Node 2 panel
+node2.yourdomain.com {
+    reverse_proxy localhost:3000
+}
+```
+
+### With WebSocket Support (for real-time features)
+
+```caddyfile
+panel.yourdomain.com {
+    reverse_proxy localhost:3000 {
+        # WebSocket support
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
     }
 }
 ```
 
-### With SSL (Let's Encrypt)
+### Caddy as Systemd Service
+
+Caddy installs as a systemd service automatically. Useful commands:
 
 ```bash
-sudo apt install certbot python3-certbot-nginx
-sudo certbot --nginx -d panel.yourdomain.com
+# Check status
+sudo systemctl status caddy
+
+# View logs
+sudo journalctl -u caddy -f
+
+# Validate Caddyfile
+caddy validate --config /etc/caddy/Caddyfile
+
+# Format Caddyfile
+caddy fmt --overwrite /etc/caddy/Caddyfile
 ```
 
 ---
