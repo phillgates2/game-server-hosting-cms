@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import ErrorBoundary from "./ErrorBoundary";
 import ServersPanel from "./panels/ServersPanel";
 import MonitorPanel from "./panels/MonitorPanel";
 import ForumPanel from "./panels/ForumPanel";
@@ -37,13 +38,38 @@ export default function Dashboard({ user, onLogout }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   async function handleLogout() {
-    await fetch("/api/auth/logout", { method: "POST" });
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // ignore
+    }
     onLogout();
   }
 
   const filteredNav = NAV_ITEMS.filter(
     (item) => !item.adminOnly || user.role === "admin"
   );
+
+  function renderPanel() {
+    switch (tab) {
+      case "overview":
+        return <OverviewPanel user={user} />;
+      case "servers":
+        return <ServersPanel user={user} />;
+      case "nodes":
+        return <NodesPanel user={user} />;
+      case "games":
+        return <GamesPanel />;
+      case "monitor":
+        return <MonitorPanel user={user} />;
+      case "forum":
+        return <ForumPanel user={user} />;
+      case "database":
+        return <DatabasePanel />;
+      default:
+        return <OverviewPanel user={user} />;
+    }
+  }
 
   return (
     <div className="min-h-screen flex">
@@ -53,7 +79,7 @@ export default function Dashboard({ user, onLogout }: Props) {
           sidebarOpen ? "w-64" : "w-16"
         } bg-bg-secondary border-r border-border flex flex-col transition-all duration-300 flex-shrink-0`}
       >
-        {/* Logo area */}
+        {/* Logo */}
         <div className="p-4 border-b border-border flex items-center gap-3">
           <span className="text-2xl">🎮</span>
           {sidebarOpen && (
@@ -64,7 +90,7 @@ export default function Dashboard({ user, onLogout }: Props) {
           )}
         </div>
 
-        {/* Nav items */}
+        {/* Nav */}
         <nav className="flex-1 p-2 space-y-1">
           {filteredNav.map((item) => (
             <button
@@ -82,7 +108,7 @@ export default function Dashboard({ user, onLogout }: Props) {
           ))}
         </nav>
 
-        {/* User section */}
+        {/* User */}
         <div className="p-3 border-t border-border">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-accent text-sm font-bold">
@@ -114,16 +140,12 @@ export default function Dashboard({ user, onLogout }: Props) {
         </div>
       </aside>
 
-      {/* Main content */}
+      {/* Main */}
       <main className="flex-1 overflow-auto">
         <div className="p-6">
-          {tab === "overview" && <OverviewPanel user={user} />}
-          {tab === "servers" && <ServersPanel user={user} />}
-          {tab === "nodes" && <NodesPanel user={user} />}
-          {tab === "games" && <GamesPanel />}
-          {tab === "monitor" && <MonitorPanel user={user} />}
-          {tab === "forum" && <ForumPanel user={user} />}
-          {tab === "database" && <DatabasePanel />}
+          <ErrorBoundary key={tab} name={tab}>
+            {renderPanel()}
+          </ErrorBoundary>
         </div>
       </main>
     </div>

@@ -16,7 +16,7 @@ interface GameDef {
   iconEmoji: string | null;
 }
 
-interface Node {
+interface NodeInfo {
   id: number;
   name: string;
   hostname: string;
@@ -45,7 +45,7 @@ interface Server {
 export default function ServersPanel({ user }: { user: AuthUser }) {
   const [servers, setServers] = useState<Server[]>([]);
   const [games, setGames] = useState<GameDef[]>([]);
-  const [nodes, setNodes] = useState<Node[]>([]);
+  const [nodeList, setNodeList] = useState<NodeInfo[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({
     name: "",
@@ -63,69 +63,69 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [showDiscordSettings, setShowDiscordSettings] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [showDiscord, setShowDiscord] = useState(false);
 
-  const loadServers = useCallback(async () => {
-    const res = await fetch("/api/servers");
-    const data = await res.json();
-    setServers(data.servers || []);
-  }, []);
+  const loadData = useCallback(async () => {
+    try {
+      const results = await Promise.allSettled([
+        fetch("/api/servers"),
+        fetch("/api/games"),
+        fetch("/api/nodes"),
+      ]);
 
-  const loadGames = useCallback(async () => {
-    const res = await fetch("/api/games");
-    const data = await res.json();
-    setGames(data.games || []);
-  }, []);
-
-  const loadNodes = useCallback(async () => {
-    const res = await fetch("/api/nodes");
-    const data = await res.json();
-    const onlineNodes = (data.nodes || []).filter((n: Node) => n.status === "online");
-    setNodes(onlineNodes);
-    
-    // Set default node
-    const defaultNode = onlineNodes.find((n: Node) => n.isDefault);
-    if (defaultNode && !form.nodeId) {
-      setForm((f) => ({
-        ...f,
-        nodeId: String(defaultNode.id),
-        installPath: defaultNode.gameServerPath || "/opt/gameservers",
-      }));
+      if (results[0].status === "fulfilled" && results[0].value.ok) {
+        const d = await results[0].value.json();
+        setServers(d.servers || []);
+      }
+      if (results[1].status === "fulfilled" && results[1].value.ok) {
+        const d = await results[1].value.json();
+        setGames(d.games || []);
+      }
+      if (results[2].status === "fulfilled" && results[2].value.ok) {
+        const d = await results[2].value.json();
+        const online = (d.nodes || []).filter((n: NodeInfo) => n.status === "online");
+        setNodeList(online);
+        // Set default node
+        const def = online.find((n: NodeInfo) => n.isDefault);
+        if (def) {
+          setForm((f) => ({
+            ...f,
+            nodeId: String(def.id),
+            installPath: def.gameServerPath || "/opt/gameservers",
+          }));
+        }
+      }
+    } catch (e) {
+      console.error("ServersPanel load error:", e);
+    } finally {
+      setLoaded(true);
     }
-  }, [form.nodeId]);
+  }, []);
 
   useEffect(() => {
-    loadServers();
-    loadGames();
-    loadNodes();
-  }, [loadServers, loadGames, loadNodes]);
+    loadData();
+  }, [loadData]);
 
   function onGameChange(gameId: string) {
     const game = games.find((g) => g.id === Number(gameId));
-    const selectedNode = nodes.find((n) => n.id === Number(form.nodeId));
-    const basePath = selectedNode?.gameServerPath || "/opt/gameservers";
-    
+    const node = nodeList.find((n) => n.id === Number(form.nodeId));
+    const base = node?.gameServerPath || "/opt/gameservers";
     if (game) {
-      setForm((f) => ({
-        ...f,
-        gameId,
-        port: game.defaultPort.toString(),
-        installPath: `${basePath}/${game.slug}`,
-      }));
+      setForm((f) => ({ ...f, gameId, port: String(game.defaultPort), installPath: `${base}/${game.slug}` }));
     } else {
       setForm((f) => ({ ...f, gameId }));
     }
   }
 
   function onNodeChange(nodeId: string) {
-    const node = nodes.find((n) => n.id === Number(nodeId));
+    const node = nodeList.find((n) => n.id === Number(nodeId));
     const game = games.find((g) => g.id === Number(form.gameId));
-    const basePath = node?.gameServerPath || "/opt/gameservers";
-    
+    const base = node?.gameServerPath || "/opt/gameservers";
     setForm((f) => ({
       ...f,
       nodeId,
-      installPath: game ? `${basePath}/${game.slug}` : basePath,
+      installPath: game ? `${base}/${game.slug}` : base,
     }));
   }
 
@@ -133,91 +133,67 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
     e.preventDefault();
     setLoading(true);
     setError("");
-
     try {
       const res = await fetch("/api/servers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...form,
-          nodeId: form.nodeId ? Number(form.nodeId) : null,
-        }),
+        body: JSON.stringify(form),
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error);
+        setError(data.error || "Failed to create server");
       } else {
         setShowCreate(false);
-        setForm({
-          name: "",
-          gameId: "",
-          nodeId: nodes.find((n) => n.isDefault)?.id.toString() || "",
-          port: "",
-          ipv4: "0.0.0.0",
-          ipv6: "",
-          installPath: "/opt/gameservers",
-          discordWebhook: "",
-          discordNotifyStart: true,
-          discordNotifyStop: true,
-          discordNotifyRestart: true,
-          discordNotifyCrash: true,
-        });
-        loadServers();
+        loadData();
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      setError(msg);
+      setError(err instanceof Error ? err.message : "Network error");
     } finally {
       setLoading(false);
     }
   }
 
+  async function toggleStatus(id: number, current: string) {
+    const next = current === "running" ? "stopped" : "running";
+    try {
+      await fetch(`/api/servers/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: next }),
+      });
+      loadData();
+    } catch (e) {
+      console.error("Toggle error:", e);
+    }
+  }
+
   async function deleteServer(id: number) {
     if (!confirm("Delete this server?")) return;
-    await fetch(`/api/servers/${id}`, { method: "DELETE" });
-    loadServers();
-  }
-
-  async function toggleStatus(id: number, currentStatus: string) {
-    const newStatus = currentStatus === "running" ? "stopped" : "running";
-    await fetch(`/api/servers/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: newStatus }),
-    });
-    loadServers();
-  }
-
-  async function testWebhook(webhookUrl: string, serverName: string) {
-    if (!webhookUrl) {
-      alert("No webhook URL configured");
-      return;
-    }
-
     try {
-      const res = await fetch(webhookUrl, {
+      await fetch(`/api/servers/${id}`, { method: "DELETE" });
+      loadData();
+    } catch (e) {
+      console.error("Delete error:", e);
+    }
+  }
+
+  async function testWebhook(url: string, name: string) {
+    try {
+      await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           username: "GameServer Manager",
-          embeds: [{
-            title: "🔔 Webhook Test",
-            description: `This is a test notification from **${serverName}**`,
-            color: 0x3b82f6,
-            timestamp: new Date().toISOString(),
-          }],
+          embeds: [{ title: "🔔 Test", description: `Test from **${name}**`, color: 0x3b82f6 }],
         }),
       });
-      
-      if (res.ok) {
-        alert("✅ Webhook test sent successfully!");
-      } else {
-        alert(`❌ Webhook failed: ${res.status}`);
-      }
-    } catch (e) {
-      alert(`❌ Webhook error: ${e instanceof Error ? e.message : "Unknown"}`);
+      alert("✅ Webhook sent!");
+    } catch {
+      alert("❌ Webhook failed");
     }
   }
+
+  const onlineNodes = nodeList;
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -228,196 +204,107 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
         </div>
         <button
           onClick={() => setShowCreate(!showCreate)}
-          className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium transition-colors"
+          className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium"
         >
           {showCreate ? "Cancel" : "+ New Server"}
         </button>
       </div>
 
-      {/* Warning if no nodes */}
-      {nodes.length === 0 && (
+      {onlineNodes.length === 0 && loaded && (
         <div className="bg-warning/15 border border-warning/30 rounded-xl p-4 text-warning text-sm">
-          ⚠️ No online nodes available. Add a node from the Nodes panel first.
+          ⚠️ No online nodes. Add a node from the Nodes panel first.
+        </div>
+      )}
+      {games.length === 0 && loaded && (
+        <div className="bg-warning/15 border border-warning/30 rounded-xl p-4 text-warning text-sm">
+          ⚠️ No games installed. Install templates from Games → Templates.
         </div>
       )}
 
-      {/* Warning if no games */}
-      {games.length === 0 && (
-        <div className="bg-warning/15 border border-warning/30 rounded-xl p-4 text-warning text-sm">
-          ⚠️ No games installed. Install game templates from the Games panel first.
-        </div>
-      )}
-
-      {/* Create form */}
-      {showCreate && nodes.length > 0 && games.length > 0 && (
+      {showCreate && onlineNodes.length > 0 && games.length > 0 && (
         <form onSubmit={createServer} className="bg-bg-card border border-border rounded-xl p-6 space-y-4">
           <h3 className="font-semibold">Create New Server</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div>
               <label className="block text-xs text-text-muted mb-1">Server Name *</label>
-              <input
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                required
-                placeholder="My Game Server"
-              />
+              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" required placeholder="My Server" />
             </div>
             <div>
               <label className="block text-xs text-text-muted mb-1">Node *</label>
-              <select
-                value={form.nodeId}
-                onChange={(e) => onNodeChange(e.target.value)}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                required
-              >
-                <option value="">Select a node</option>
-                {nodes.map((n) => (
-                  <option key={n.id} value={n.id}>
-                    {n.name} ({n.hostname}) {n.isDefault ? "★" : ""}
-                  </option>
-                ))}
+              <select value={form.nodeId} onChange={(e) => onNodeChange(e.target.value)} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" required>
+                <option value="">Select node</option>
+                {onlineNodes.map((n) => <option key={n.id} value={n.id}>{n.name} {n.isDefault ? "★" : ""}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-xs text-text-muted mb-1">Game *</label>
-              <select
-                value={form.gameId}
-                onChange={(e) => onGameChange(e.target.value)}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                required
-              >
-                <option value="">Select a game</option>
-                {games.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.iconEmoji} {g.name}
-                  </option>
-                ))}
+              <select value={form.gameId} onChange={(e) => onGameChange(e.target.value)} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" required>
+                <option value="">Select game</option>
+                {games.map((g) => <option key={g.id} value={g.id}>{g.iconEmoji} {g.name}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-xs text-text-muted mb-1">Port *</label>
-              <input
-                type="number"
-                value={form.port}
-                onChange={(e) => setForm({ ...form, port: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                required
-              />
+              <input type="number" value={form.port} onChange={(e) => setForm({ ...form, port: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" required />
             </div>
             <div>
               <label className="block text-xs text-text-muted mb-1">Install Path</label>
-              <input
-                value={form.installPath}
-                onChange={(e) => setForm({ ...form, installPath: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                required
-              />
+              <input value={form.installPath} onChange={(e) => setForm({ ...form, installPath: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" />
             </div>
             <div>
-              <label className="block text-xs text-text-muted mb-1">IPv4 Address</label>
-              <input
-                value={form.ipv4}
-                onChange={(e) => setForm({ ...form, ipv4: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                placeholder="0.0.0.0"
-              />
+              <label className="block text-xs text-text-muted mb-1">IPv4</label>
+              <input value={form.ipv4} onChange={(e) => setForm({ ...form, ipv4: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" placeholder="0.0.0.0" />
             </div>
             <div>
-              <label className="block text-xs text-text-muted mb-1">IPv6 Address</label>
-              <input
-                value={form.ipv6}
-                onChange={(e) => setForm({ ...form, ipv6: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                placeholder="::1"
-              />
+              <label className="block text-xs text-text-muted mb-1">IPv6</label>
+              <input value={form.ipv6} onChange={(e) => setForm({ ...form, ipv6: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" placeholder="::1" />
             </div>
           </div>
 
-          {/* Discord Webhook Section */}
-          <div className="border-t border-border pt-4 mt-4">
-            <button
-              type="button"
-              onClick={() => setShowDiscordSettings(!showDiscordSettings)}
-              className="flex items-center gap-2 text-sm font-medium text-accent hover:text-accent-hover"
-            >
-              <span>🔔</span>
-              <span>Discord Notifications</span>
-              <span className="text-xs text-text-muted">{showDiscordSettings ? "▼" : "▶"}</span>
+          <div className="border-t border-border pt-4">
+            <button type="button" onClick={() => setShowDiscord(!showDiscord)} className="text-sm font-medium text-accent flex items-center gap-2">
+              🔔 Discord Notifications {showDiscord ? "▼" : "▶"}
             </button>
-
-            {showDiscordSettings && (
-              <div className="mt-4 space-y-4 animate-fade-in">
-                <div>
-                  <label className="block text-xs text-text-muted mb-1">Discord Webhook URL</label>
-                  <input
-                    value={form.discordWebhook}
-                    onChange={(e) => setForm({ ...form, discordWebhook: e.target.value })}
-                    className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent font-mono"
-                    placeholder="https://discord.com/api/webhooks/..."
-                  />
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={form.discordNotifyStart}
-                      onChange={(e) => setForm({ ...form, discordNotifyStart: e.target.checked })}
-                      className="rounded"
-                    />
-                    <span>Start</span>
-                  </label>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={form.discordNotifyStop}
-                      onChange={(e) => setForm({ ...form, discordNotifyStop: e.target.checked })}
-                      className="rounded"
-                    />
-                    <span>Stop</span>
-                  </label>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={form.discordNotifyRestart}
-                      onChange={(e) => setForm({ ...form, discordNotifyRestart: e.target.checked })}
-                      className="rounded"
-                    />
-                    <span>Restart</span>
-                  </label>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={form.discordNotifyCrash}
-                      onChange={(e) => setForm({ ...form, discordNotifyCrash: e.target.checked })}
-                      className="rounded"
-                    />
-                    <span>Crash</span>
-                  </label>
+            {showDiscord && (
+              <div className="mt-3 space-y-3">
+                <input value={form.discordWebhook} onChange={(e) => setForm({ ...form, discordWebhook: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm font-mono" placeholder="https://discord.com/api/webhooks/..." />
+                <div className="flex flex-wrap gap-3 text-sm">
+                  {(["Start", "Stop", "Restart", "Crash"] as const).map((label) => {
+                    const key = `discordNotify${label}` as keyof typeof form;
+                    return (
+                      <label key={label} className="flex items-center gap-1">
+                        <input type="checkbox" checked={form[key] as boolean} onChange={(e) => setForm({ ...form, [key]: e.target.checked })} className="rounded" />
+                        {label}
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
             )}
           </div>
 
           {error && <p className="text-danger text-sm">{error}</p>}
-          <button
-            type="submit"
-            disabled={loading}
-            className="px-6 py-2 bg-success hover:opacity-90 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
-          >
+          <button type="submit" disabled={loading} className="px-6 py-2 bg-success hover:opacity-90 disabled:opacity-50 text-white rounded-lg text-sm font-medium">
             {loading ? "Creating..." : "Create Server"}
           </button>
         </form>
       )}
 
-      {/* Server list */}
-      {servers.length === 0 ? (
+      {!loaded && (
+        <div className="text-center py-8">
+          <div className="inline-block w-8 h-8 border-4 border-accent border-t-transparent rounded-full animate-spin" />
+        </div>
+      )}
+
+      {loaded && servers.length === 0 && !showCreate && (
         <div className="bg-bg-card border border-border rounded-xl p-12 text-center">
           <span className="text-4xl mb-3 block">🎮</span>
           <h3 className="text-lg font-semibold mb-1">No servers yet</h3>
           <p className="text-text-secondary text-sm">Create your first game server to get started</p>
         </div>
-      ) : (
+      )}
+
+      {servers.length > 0 && (
         <div className="grid gap-4">
           {servers.map((server) => (
             <div key={server.id} className="bg-bg-card border border-border rounded-xl p-5 hover:border-accent/30 transition-colors">
@@ -427,57 +314,28 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                   <div>
                     <h3 className="font-semibold flex items-center gap-2">
                       {server.name}
-                      {server.discordWebhook && (
-                        <span className="text-xs bg-[#5865F2]/20 text-[#5865F2] px-1.5 py-0.5 rounded" title="Discord">
-                          🔔
-                        </span>
-                      )}
+                      {server.discordWebhook && <span className="text-xs bg-[#5865F2]/20 text-[#5865F2] px-1.5 py-0.5 rounded">🔔</span>}
                     </h3>
                     <p className="text-sm text-text-secondary">{server.gameName}</p>
                     <div className="flex gap-3 mt-1 text-xs text-text-muted">
                       {server.nodeName && <span>🖥️ {server.nodeName}</span>}
-                      {server.ipv4 && <span>IPv4: {server.ipv4}:{server.port}</span>}
-                      {server.ipv6 && <span>IPv6: [{server.ipv6}]:{server.port}</span>}
+                      {server.ipv4 && <span>{server.ipv4}:{server.port}</span>}
+                      {server.ipv6 && <span>[{server.ipv6}]:{server.port}</span>}
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-3 flex-wrap">
-                  <span
-                    className={`px-3 py-1 rounded-full text-xs font-medium ${
-                      server.status === "running"
-                        ? "bg-success/15 text-success"
-                        : server.status === "installing"
-                        ? "bg-warning/15 text-warning"
-                        : "bg-bg-secondary text-text-muted"
-                    }`}
-                  >
-                    {server.status}
-                  </span>
-                  <button
-                    onClick={() => toggleStatus(server.id, server.status)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                      server.status === "running"
-                        ? "bg-danger/15 text-danger hover:bg-danger/25"
-                        : "bg-success/15 text-success hover:bg-success/25"
-                    }`}
-                  >
-                    {server.status === "running" ? "Stop" : "Start"}
-                  </button>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                    server.status === "running" ? "bg-success/15 text-success" : "bg-bg-secondary text-text-muted"
+                  }`}>{server.status}</span>
+                  <button onClick={() => toggleStatus(server.id, server.status)} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
+                    server.status === "running" ? "bg-danger/15 text-danger" : "bg-success/15 text-success"
+                  }`}>{server.status === "running" ? "Stop" : "Start"}</button>
                   {server.discordWebhook && (
-                    <button
-                      onClick={() => testWebhook(server.discordWebhook!, server.name)}
-                      className="px-3 py-1.5 bg-[#5865F2]/15 text-[#5865F2] hover:bg-[#5865F2]/25 rounded-lg text-xs font-medium transition-colors"
-                    >
-                      Test 🔔
-                    </button>
+                    <button onClick={() => testWebhook(server.discordWebhook!, server.name)} className="px-3 py-1.5 bg-[#5865F2]/15 text-[#5865F2] rounded-lg text-xs font-medium">Test 🔔</button>
                   )}
                   {user.role === "admin" && (
-                    <button
-                      onClick={() => deleteServer(server.id)}
-                      className="px-3 py-1.5 bg-danger/10 hover:bg-danger/20 text-danger rounded-lg text-xs font-medium transition-colors"
-                    >
-                      Delete
-                    </button>
+                    <button onClick={() => deleteServer(server.id)} className="px-3 py-1.5 bg-danger/10 text-danger rounded-lg text-xs font-medium">Delete</button>
                   )}
                 </div>
               </div>

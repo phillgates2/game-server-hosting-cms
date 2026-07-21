@@ -4,13 +4,11 @@ import { nodes, gameServers, nodeMetrics } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { eq, desc, sql } from "drizzle-orm";
 
-// GET /api/nodes - List all nodes
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    // Get nodes with server counts
     const nodeList = await db
       .select({
         id: nodes.id,
@@ -35,51 +33,38 @@ export async function GET(req: NextRequest) {
       .from(nodes)
       .orderBy(desc(nodes.isDefault), desc(nodes.isLocal), nodes.name);
 
-    // Get server counts per node
-    const serverCounts = await db
-      .select({
-        nodeId: gameServers.nodeId,
-        count: sql<number>`count(*)::int`,
-        running: sql<number>`count(*) filter (where ${gameServers.status} = 'running')::int`,
-      })
-      .from(gameServers)
-      .groupBy(gameServers.nodeId);
-
-    const countMap = new Map(serverCounts.map((s) => [s.nodeId, { total: s.count, running: s.running }]));
-
-    // Get latest metrics per node
-    const latestMetrics = await db
-      .selectDistinctOn([nodeMetrics.nodeId], {
-        nodeId: nodeMetrics.nodeId,
-        cpuPercent: nodeMetrics.cpuPercent,
-        cpuLoad1: nodeMetrics.cpuLoad1,
-        ramUsedMb: nodeMetrics.ramUsedMb,
-        ramTotalMb: nodeMetrics.ramTotalMb,
-        diskUsedMb: nodeMetrics.diskUsedMb,
-        diskTotalMb: nodeMetrics.diskTotalMb,
-        ipv6Enabled: nodeMetrics.ipv6Enabled,
-        recordedAt: nodeMetrics.recordedAt,
-      })
-      .from(nodeMetrics)
-      .orderBy(nodeMetrics.nodeId, desc(nodeMetrics.recordedAt));
-
-    const metricsMap = new Map(latestMetrics.map((m) => [m.nodeId, m]));
+    // Get server counts
+    const counts: Record<number, { total: number; running: number }> = {};
+    try {
+      const sc = await db
+        .select({
+          nodeId: gameServers.nodeId,
+          count: sql<number>`count(*)::int`,
+          running: sql<number>`count(*) filter (where ${gameServers.status} = 'running')::int`,
+        })
+        .from(gameServers)
+        .groupBy(gameServers.nodeId);
+      for (const s of sc) {
+        if (s.nodeId) counts[s.nodeId] = { total: s.count, running: s.running };
+      }
+    } catch {
+      // Table might not have data yet
+    }
 
     const nodesWithData = nodeList.map((node) => ({
       ...node,
-      serverCount: countMap.get(node.id)?.total || 0,
-      runningServers: countMap.get(node.id)?.running || 0,
-      metrics: metricsMap.get(node.id) || null,
+      serverCount: counts[node.id]?.total || 0,
+      runningServers: counts[node.id]?.running || 0,
+      metrics: null,
     }));
 
     return NextResponse.json({ nodes: nodesWithData });
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+  } catch (e) {
+    console.error("GET /api/nodes error:", e);
+    return NextResponse.json({ nodes: [] });
   }
 }
 
-// POST /api/nodes - Create a new node
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth || auth.role !== "admin") {
@@ -89,33 +74,16 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
-      name,
-      description,
-      hostname,
-      ipv4,
-      ipv6,
-      sshPort,
-      sshUser,
-      sshKeyPath,
-      sshPassword,
-      apiUrl,
-      apiKey,
-      maxServers,
-      maxRamMb,
-      maxDiskMb,
-      gameServerPath,
-      steamcmdPath,
-      isLocal,
-      isDefault,
-      location,
-      provider,
+      name, description, hostname, ipv4, ipv6, sshPort, sshUser,
+      sshKeyPath, sshPassword, apiUrl, apiKey, maxServers, maxRamMb,
+      maxDiskMb, gameServerPath, steamcmdPath, isLocal, isDefault,
+      location, provider,
     } = body;
 
     if (!name || !hostname) {
       return NextResponse.json({ error: "Name and hostname are required" }, { status: 400 });
     }
 
-    // If setting as default, unset other defaults
     if (isDefault) {
       await db.update(nodes).set({ isDefault: false });
     }
@@ -124,7 +92,7 @@ export async function POST(req: NextRequest) {
       .insert(nodes)
       .values({
         name,
-        description,
+        description: description || null,
         hostname,
         ipv4: ipv4 || null,
         ipv6: ipv6 || null,
