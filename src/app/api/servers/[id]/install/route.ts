@@ -3,13 +3,28 @@ import { db } from "@/db";
 import { gameDefinitions, gameServers, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { eq } from "drizzle-orm";
-import { mkdtemp, writeFile, chmod, rm } from "fs/promises";
+import { mkdtemp, writeFile, chmod, rm, access } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { constants } from "fs";
 
 const execFileAsync = promisify(execFile);
+
+async function findBash(): Promise<string> {
+  const candidates = ["/bin/bash", "/usr/bin/bash", "/usr/local/bin/bash"];
+  for (const p of candidates) {
+    try {
+      await access(p, constants.X_OK);
+      return p;
+    } catch {
+      // try next
+    }
+  }
+  // Last resort: use env to find it
+  return "/usr/bin/env";
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -139,7 +154,9 @@ export async function POST(
     const script = replaceTemplateVariables(server.installScript, variables);
 
     // Wrap in a header + the template script
-    const fullScript = `#!/bin/bash
+    const bashPath = await findBash();
+
+    const fullScript = `#!/usr/bin/env bash
 set -e
 
 echo "=== GameServer Manager Install ==="
@@ -167,7 +184,8 @@ echo "=== Installation Complete ==="
       await writeFile(scriptPath, fullScript, "utf8");
       await chmod(scriptPath, 0o700);
 
-      const { stdout, stderr } = await execFileAsync("/bin/bash", [scriptPath], {
+      const args = bashPath === "/usr/bin/env" ? ["bash", scriptPath] : [scriptPath];
+      const { stdout, stderr } = await execFileAsync(bashPath, args, {
         timeout: 1000 * 60 * 45,
         maxBuffer: 1024 * 1024 * 10,
         cwd: server.installPath,

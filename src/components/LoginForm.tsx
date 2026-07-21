@@ -53,9 +53,11 @@ export default function LoginForm({ onLogin }: Props) {
     <div className="min-h-screen flex items-center justify-center p-4">
       <div className="w-full max-w-md animate-fade-in">
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold mb-2">🎮</h1>
-          <h2 className="text-2xl font-bold text-text-primary">GameServer Manager</h2>
-          <p className="text-text-secondary text-sm mt-1">Game Server Hosting Panel</p>
+          <div className="inline-block">
+            <h1 className="text-4xl font-bold mb-2">🎮</h1>
+            <h2 className="text-2xl font-bold text-text-primary">GameServer Manager</h2>
+          </div>
+          <p className="text-text-secondary text-sm mt-1">Sign in to manage your servers</p>
         </div>
 
         <div className="bg-bg-card border border-border rounded-2xl overflow-hidden shadow-2xl">

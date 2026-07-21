@@ -43,7 +43,17 @@ export async function POST(req: NextRequest) {
         email VARCHAR(255) NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
         role VARCHAR(20) NOT NULL DEFAULT 'user',
+        status VARCHAR(20) NOT NULL DEFAULT 'active',
         avatar_url TEXT,
+        bio TEXT,
+        location VARCHAR(128),
+        website VARCHAR(256),
+        two_factor_enabled BOOLEAN DEFAULT FALSE,
+        two_factor_secret TEXT,
+        max_servers INTEGER DEFAULT 5,
+        last_login_at TIMESTAMP,
+        last_login_ip VARCHAR(45),
+        login_count INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT NOW() NOT NULL,
         updated_at TIMESTAMP DEFAULT NOW() NOT NULL
       );
@@ -242,6 +252,23 @@ export async function POST(req: NextRequest) {
         details JSONB,
         ip_address VARCHAR(45),
         created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+
+      -- CMS Pages / Blog / Changelogs
+      CREATE TABLE IF NOT EXISTS cms_pages (
+        id SERIAL PRIMARY KEY,
+        slug VARCHAR(256) NOT NULL UNIQUE,
+        title VARCHAR(256) NOT NULL,
+        body TEXT NOT NULL,
+        type VARCHAR(20) NOT NULL DEFAULT 'blog',
+        excerpt TEXT,
+        cover_image TEXT,
+        published BOOLEAN DEFAULT FALSE,
+        pinned BOOLEAN DEFAULT FALSE,
+        author_id INTEGER REFERENCES users(id),
+        tags JSONB,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW() NOT NULL
       );
     `);
     await logStep("schema", "done", "Database tables created with multi-node support");

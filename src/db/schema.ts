@@ -16,8 +16,18 @@ export const users = pgTable("users", {
   username: varchar("username", { length: 64 }).notNull().unique(),
   email: varchar("email", { length: 255 }).notNull().unique(),
   passwordHash: text("password_hash").notNull(),
-  role: varchar("role", { length: 20 }).notNull().default("user"),
+  role: varchar("role", { length: 20 }).notNull().default("user"), // admin, moderator, user
+  status: varchar("status", { length: 20 }).notNull().default("active"), // active, suspended, banned
   avatarUrl: text("avatar_url"),
+  bio: text("bio"),
+  location: varchar("location", { length: 128 }),
+  website: varchar("website", { length: 256 }),
+  twoFactorEnabled: boolean("two_factor_enabled").default(false),
+  twoFactorSecret: text("two_factor_secret"),
+  maxServers: integer("max_servers").default(5),
+  lastLoginAt: timestamp("last_login_at"),
+  lastLoginIp: varchar("last_login_ip", { length: 45 }),
+  loginCount: integer("login_count").default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -230,9 +240,26 @@ export const auditLog = pgTable("audit_log", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").references(() => users.id),
   action: varchar("action", { length: 64 }).notNull(),
-  entityType: varchar("entity_type", { length: 32 }), // server, node, user, game
+  entityType: varchar("entity_type", { length: 32 }),
   entityId: integer("entity_id"),
   details: jsonb("details"),
   ipAddress: varchar("ip_address", { length: 45 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ── CMS: Pages / Blog Posts / Changelogs ──────────────────────
+export const cmsPages = pgTable("cms_pages", {
+  id: serial("id").primaryKey(),
+  slug: varchar("slug", { length: 256 }).notNull().unique(),
+  title: varchar("title", { length: 256 }).notNull(),
+  body: text("body").notNull(),
+  type: varchar("type", { length: 20 }).notNull().default("blog"), // blog, changelog, page
+  excerpt: text("excerpt"),
+  coverImage: text("cover_image"),
+  published: boolean("published").default(false),
+  pinned: boolean("pinned").default(false),
+  authorId: integer("author_id").references(() => users.id),
+  tags: jsonb("tags"), // string[]
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

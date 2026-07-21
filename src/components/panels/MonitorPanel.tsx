@@ -85,10 +85,34 @@ export default function MonitorPanel({ user }: { user: AuthUser }) {
     try {
       const res = await fetch("/api/monitor/clear-buffers", { method: "POST" });
       const d = await res.json();
-      setClearMsg(d.message);
+
+      const lines: string[] = [];
+
+      if (d.actions?.length) {
+        lines.push("Actions performed:");
+        d.actions.forEach((a: string) => lines.push(`  ✅ ${a}`));
+      }
+      if (d.errors?.length) {
+        lines.push("Errors:");
+        d.errors.forEach((e: string) => lines.push(`  ❌ ${e}`));
+      }
+      if (d.before && d.after) {
+        lines.push("");
+        lines.push(`Before → After:`);
+        lines.push(`  Buffers: ${d.before.buffersMb} MB → ${d.after.buffersMb} MB (freed ${d.freedBuffersMb} MB)`);
+        lines.push(`  Cached:  ${d.before.cachedMb} MB → ${d.after.cachedMb} MB (freed ${d.freedCachedMb} MB)`);
+        lines.push(`  Available: ${d.before.availableMb} MB → ${d.after.availableMb} MB (+${d.freedMb} MB)`);
+      }
+
+      if (lines.length > 0) {
+        setClearMsg(lines.join("\n"));
+      } else {
+        setClearMsg(d.message || "Done");
+      }
+
       setTimeout(() => fetchData(), 1000);
     } catch {
-      setClearMsg("Failed to clear buffers");
+      setClearMsg("Failed to clear buffers — network error");
     } finally {
       setClearing(false);
     }
@@ -202,7 +226,7 @@ export default function MonitorPanel({ user }: { user: AuthUser }) {
             )}
 
             {clearMsg && (
-              <div className="bg-bg-secondary rounded-lg p-3 text-xs text-text-secondary">
+              <div className="bg-bg-secondary rounded-lg p-3 text-xs text-text-secondary font-mono whitespace-pre-wrap">
                 {clearMsg}
               </div>
             )}

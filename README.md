@@ -8,8 +8,11 @@ A modern, open-source TCAdmin alternative built with **Next.js 16**, **PostgreSQ
 
 ## ✨ Features
 
+- **🌐 Public CMS Site** — Blog, changelogs, and feature showcase for visitors — no login needed
+- **🔧 Admin Panel** — Full dashboard after login at the same URL — no port, no subfolder
+- **✍️ Blog & Changelogs** — Built-in CMS to publish blog posts and changelogs on the public site
 - **🖥️ Multi-Node Support** — Manage game servers across multiple physical/virtual machines
-- **🎮 Game Server Management** — Create, start, stop, and delete game server instances
+- **🎮 Game Server Management** — Create, start, stop, install files, and delete game servers
 - **📦 30+ Game Templates** — Pre-configured install scripts (install only what you need)
 - **📊 Server Monitoring** — Real-time CPU, RAM, disk, and network monitoring with live charts
 - **🧹 RAM Buffer Management** — Automatic buffer/cache threshold detection and one-click clearing
@@ -347,8 +350,8 @@ pm2 monit               # Real-time monitoring dashboard
 
 ### Step 10: Run the Web Installer
 
-1. Open your browser: `http://YOUR_SERVER_IP:3000`
-2. The installation wizard will appear
+1. Open your browser: `http://YOUR_SERVER_IP` (or `:3000` if using port 3000)
+2. The installation wizard appears automatically since the panel is not yet set up
 3. Enter:
    - **Panel Name:** Your panel's display name
    - **Admin Username:** Your admin username
@@ -356,38 +359,42 @@ pm2 monit               # Real-time monitoring dashboard
    - **Admin Password:** A strong password
 4. Click **"Install Now"**
 5. Wait for installation to complete
-6. Click **"Go to Login"** and sign in
+6. Click **"Go to Login"** and sign in with your admin credentials
+
+> Everything runs at the root URL — no `/panel` or other path needed.
+> 
+> | State | What you see |
+> |-------|-------------|
+> | Not installed | Installer wizard |
+> | Installed, not logged in | Public site with blog, changelogs, Login button |
+> | Logged in | Full admin dashboard |
 
 ---
 
 ### Step 11: Initial Panel Setup
 
-After logging in:
+After logging in, you'll see the admin dashboard. Then:
 
 1. **Add a Node (Required):**
    - Go to **Nodes** in the sidebar
    - Click **"+ Add Local Node"**
-   - This auto-detects your server's resources
 
 2. **Install Game Templates:**
-   - Go to **Games** in the sidebar
-   - Click the **"Templates"** tab
-   - Click on a game (e.g., Minecraft)
-   - Click **"Install Game"**
+   - Go to **Games** → **Templates** tab
+   - Click on a game → Click **"Install Game"**
 
-3. **Create Your First Server:**
-   - Go to **Servers** in the sidebar
-   - Click **"+ New Server"**
-   - Select your node and game
-   - Configure settings and click **"Create Server"**
+3. **Create a Server:**
+   - Go to **Servers** → **"+ New Server"**
+   - Select node and game → **"Create Server"**
 
-4. **Install the Game Server Files:**
-   - In the **Servers** list, click **"Install Files"** on the server you created
-   - The panel runs the selected game template's install script on the selected node
-   - Local nodes run installs directly from the panel process
-   - Remote nodes require a node-agent API URL before installs can be executed remotely
+4. **Install Game Server Files:**
+   - On the server, click **"Install Files"**
 
-> ⚠️ Make sure the panel user can write to the node's game server path, usually `/opt/gameservers`:
+5. **Create Blog/Changelog Posts:**
+   - Go to **CMS** in the sidebar
+   - Create blog posts and changelogs — they appear on the public site for logged-out visitors
+
+> ⚠️ Make sure the panel user can write to the game server path:
 > ```bash
 > sudo mkdir -p /opt/gameservers
 > sudo chown -R $USER:$USER /opt/gameservers

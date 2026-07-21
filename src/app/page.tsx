@@ -5,8 +5,9 @@ import ErrorBoundary from "@/components/ErrorBoundary";
 import InstallWizard from "@/components/InstallWizard";
 import LoginForm from "@/components/LoginForm";
 import Dashboard from "@/components/Dashboard";
+import PublicSite from "@/components/PublicSite";
 
-type AppState = "loading" | "install" | "login" | "dashboard";
+type AppState = "loading" | "install" | "public" | "login" | "dashboard";
 
 interface AuthUser {
   id: number;
@@ -17,26 +18,15 @@ interface AuthUser {
 export default function Home() {
   const [state, setState] = useState<AppState>("loading");
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [errorMsg, setErrorMsg] = useState("");
 
   const checkStatus = useCallback(async () => {
     try {
-      setState("loading");
-      setErrorMsg("");
-
-      // Check if installed
       const installRes = await fetch("/api/install");
-      if (!installRes.ok) {
-        throw new Error(`Install check failed: ${installRes.status}`);
-      }
+      if (!installRes.ok) { setState("install"); return; }
       const installData = await installRes.json();
+      if (!installData.installed) { setState("install"); return; }
 
-      if (!installData.installed) {
-        setState("install");
-        return;
-      }
-
-      // Check if logged in by verifying cookie
+      // Installed — check if user is logged in
       const meRes = await fetch("/api/auth/me");
       if (meRes.ok) {
         const meData = await meRes.json();
@@ -47,78 +37,34 @@ export default function Home() {
         }
       }
 
-      setState("login");
-    } catch (e: unknown) {
-      console.error("checkStatus error:", e);
-      setErrorMsg(e instanceof Error ? e.message : "Failed to connect to server");
+      // Not logged in — show public site
+      setState("public");
+    } catch {
       setState("install");
     }
   }, []);
 
-  useEffect(() => {
-    checkStatus();
-  }, [checkStatus]);
+  useEffect(() => { checkStatus(); }, [checkStatus]);
 
   async function handleLogin(u: AuthUser) {
-    // After login, verify the cookie was actually set by calling /api/auth/me
     try {
       const meRes = await fetch("/api/auth/me");
       if (meRes.ok) {
         const meData = await meRes.json();
-        if (meData.user) {
-          // Cookie works — use the verified user data
-          setUser(meData.user);
-          setState("dashboard");
-          return;
-        }
+        if (meData.user) { setUser(meData.user); setState("dashboard"); return; }
       }
-    } catch {
-      // Fall through
-    }
-
-    // Fallback — cookie might not have been verified, but login response was ok
-    // This can happen if there's a timing issue
+    } catch { /* fall through */ }
     setUser(u);
     setState("dashboard");
   }
 
   function handleLogout() {
+    fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     setUser(null);
-    setState("login");
+    setState("public");
   }
 
   if (state === "loading") {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block w-12 h-12 border-4 border-accent border-t-transparent rounded-full animate-spin mb-4" />
-          <p className="text-text-secondary">Loading GameServer Manager...</p>
-          {errorMsg && (
-            <p className="text-danger text-xs mt-2">{errorMsg}</p>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  if (state === "install") {
-    return (
-      <ErrorBoundary name="InstallWizard">
-        <InstallWizard onComplete={() => checkStatus()} />
-      </ErrorBoundary>
-    );
-  }
-
-  if (state === "login") {
-    return (
-      <ErrorBoundary name="LoginForm">
-        <LoginForm onLogin={handleLogin} />
-      </ErrorBoundary>
-    );
-  }
-
-  if (!user) {
-    setState("login");
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="inline-block w-12 h-12 border-4 border-accent border-t-transparent rounded-full animate-spin" />
@@ -126,9 +72,21 @@ export default function Home() {
     );
   }
 
+  if (state === "install") {
+    return <ErrorBoundary name="Install"><InstallWizard onComplete={() => checkStatus()} /></ErrorBoundary>;
+  }
+
+  if (state === "login") {
+    return <ErrorBoundary name="Login"><LoginForm onLogin={handleLogin} /></ErrorBoundary>;
+  }
+
+  if (state === "dashboard" && user) {
+    return <ErrorBoundary name="Dashboard"><Dashboard user={user} onLogout={handleLogout} /></ErrorBoundary>;
+  }
+
   return (
-    <ErrorBoundary name="Dashboard">
-      <Dashboard user={user} onLogout={handleLogout} />
+    <ErrorBoundary name="PublicSite">
+      <PublicSite onLoginClick={() => setState("login")} />
     </ErrorBoundary>
   );
 }

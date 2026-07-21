@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { verifyPassword, createToken, getCookieOptions } from "@/lib/auth";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,10 +16,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
     }
 
+    // Check if user is suspended or banned
+    if (user.status === "suspended") {
+      return NextResponse.json({ error: "Account suspended. Contact an administrator." }, { status: 403 });
+    }
+    if (user.status === "banned") {
+      return NextResponse.json({ error: "Account banned." }, { status: 403 });
+    }
+
     const valid = await verifyPassword(password, user.passwordHash);
     if (!valid) {
       return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
     }
+
+    // Track login
+    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
+    await db
+      .update(users)
+      .set({
+        lastLoginAt: new Date(),
+        lastLoginIp: ip,
+        loginCount: sql`COALESCE(login_count, 0) + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, user.id));
 
     const token = createToken({ userId: user.id, role: user.role });
 
