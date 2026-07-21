@@ -7,6 +7,7 @@ import ForumPanel from "./panels/ForumPanel";
 import DatabasePanel from "./panels/DatabasePanel";
 import GamesPanel from "./panels/GamesPanel";
 import OverviewPanel from "./panels/OverviewPanel";
+import NodesPanel from "./panels/NodesPanel";
 
 interface AuthUser {
   id: number;
@@ -19,12 +20,13 @@ interface Props {
   onLogout: () => void;
 }
 
-type Tab = "overview" | "servers" | "games" | "monitor" | "forum" | "database";
+type Tab = "overview" | "servers" | "nodes" | "games" | "monitor" | "forum" | "database";
 
 const NAV_ITEMS: { key: Tab; label: string; icon: string; adminOnly?: boolean }[] = [
   { key: "overview", label: "Overview", icon: "📊" },
-  { key: "servers", label: "Servers", icon: "🖥️" },
-  { key: "games", label: "Games", icon: "🎮" },
+  { key: "servers", label: "Servers", icon: "🎮" },
+  { key: "nodes", label: "Nodes", icon: "🖥️", adminOnly: true },
+  { key: "games", label: "Games", icon: "📦" },
   { key: "monitor", label: "Monitor", icon: "📈" },
   { key: "forum", label: "Forum", icon: "💬" },
   { key: "database", label: "Database", icon: "🗄️", adminOnly: true },
@@ -57,7 +59,7 @@ export default function Dashboard({ user, onLogout }: Props) {
           {sidebarOpen && (
             <div className="overflow-hidden">
               <h1 className="text-sm font-bold text-text-primary whitespace-nowrap">GameServer Manager</h1>
-              <p className="text-[10px] text-text-muted">v1.0.0</p>
+              <p className="text-[10px] text-text-muted">v1.0.0 • Multi-Node</p>
             </div>
           )}
         </div>
@@ -117,6 +119,7 @@ export default function Dashboard({ user, onLogout }: Props) {
         <div className="p-6">
           {tab === "overview" && <OverviewPanel user={user} />}
           {tab === "servers" && <ServersPanel user={user} />}
+          {tab === "nodes" && <NodesPanel user={user} />}
           {tab === "games" && <GamesPanel />}
           {tab === "monitor" && <MonitorPanel user={user} />}
           {tab === "forum" && <ForumPanel user={user} />}

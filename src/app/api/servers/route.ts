@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { gameServers, gameDefinitions } from "@/db/schema";
+import { gameServers, gameDefinitions, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { notifyServerCreated } from "@/lib/discord";
 import { eq } from "drizzle-orm";
@@ -16,16 +16,21 @@ export async function GET(req: NextRequest) {
       ipv4: gameServers.ipv4,
       ipv6: gameServers.ipv6,
       port: gameServers.port,
+      queryPort: gameServers.queryPort,
       status: gameServers.status,
       autoRestart: gameServers.autoRestart,
       discordWebhook: gameServers.discordWebhook,
+      nodeId: gameServers.nodeId,
       createdAt: gameServers.createdAt,
       gameName: gameDefinitions.name,
       gameSlug: gameDefinitions.slug,
       gameIcon: gameDefinitions.iconEmoji,
+      nodeName: nodes.name,
+      nodeHostname: nodes.hostname,
     })
     .from(gameServers)
     .leftJoin(gameDefinitions, eq(gameServers.gameId, gameDefinitions.id))
+    .leftJoin(nodes, eq(gameServers.nodeId, nodes.id))
     .$dynamic();
 
   if (auth.role !== "admin") {
@@ -42,7 +47,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { name, gameId, port, ipv4, ipv6, installPath, discordWebhook } = body;
+    const { name, gameId, nodeId, port, ipv4, ipv6, installPath, discordWebhook } = body;
 
     if (!name || !gameId || !port || !installPath) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -58,18 +63,32 @@ export async function POST(req: NextRequest) {
       .where(eq(gameDefinitions.id, Number(gameId)))
       .limit(1);
 
+    // Get node info
+    let nodeInfo = null;
+    if (nodeId) {
+      const [node] = await db
+        .select({ name: nodes.name, ipv4: nodes.ipv4 })
+        .from(nodes)
+        .where(eq(nodes.id, Number(nodeId)))
+        .limit(1);
+      nodeInfo = node;
+    }
+
     const [server] = await db
       .insert(gameServers)
       .values({
         name,
         gameId: Number(gameId),
+        nodeId: nodeId ? Number(nodeId) : null,
         port: Number(port),
-        ipv4: ipv4 || "0.0.0.0",
+        queryPort: body.queryPort ? Number(body.queryPort) : Number(port) + 1,
+        ipv4: ipv4 || nodeInfo?.ipv4 || "0.0.0.0",
         ipv6: ipv6 || null,
         installPath,
         userId: auth.userId,
         status: "stopped",
         config: body.config || {},
+        variables: body.variables || {},
         discordWebhook: discordWebhook || null,
         discordNotifyStart: body.discordNotifyStart ?? true,
         discordNotifyStop: body.discordNotifyStop ?? true,
@@ -85,7 +104,7 @@ export async function POST(req: NextRequest) {
         name,
         game.name,
         game.iconEmoji || "🎮",
-        ipv4 || "0.0.0.0",
+        ipv4 || nodeInfo?.ipv4 || "0.0.0.0",
         ipv6,
         Number(port)
       );

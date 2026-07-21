@@ -38,15 +38,20 @@ export default function InstallWizard({ onComplete }: Props) {
       } else {
         setLogs((l) => [
           ...l,
-          "✅ Database schema created",
+          "✅ Database schema created with multi-node support",
           "✅ Admin user created",
+          "✅ Multi-node system ready",
           "✅ 30+ Game templates ready (install from Games panel)",
           "✅ Discord webhook support enabled",
           "✅ Forum categories created",
           "✅ Settings saved",
           "",
           "🎉 Installation complete!",
-          "📦 No games installed by default — go to Games → Templates to add games",
+          "",
+          "📌 Next steps:",
+          "  1. Add a node from Nodes panel (or add this server as local node)",
+          "  2. Install game templates from Games → Templates",
+          "  3. Create your first game server!",
         ]);
         setDone(true);
       }
@@ -96,7 +101,8 @@ export default function InstallWizard({ onComplete }: Props) {
                 <ul className="list-none space-y-2">
                   <li>🗄️ PostgreSQL database schema & tables</li>
                   <li>👤 Admin account creation</li>
-                  <li>🎮 <strong>30+ Game Templates</strong> — Minecraft, CS2, Rust, ARK, Valheim, Palworld, Terraria, and more (install as needed)</li>
+                  <li>🖥️ <strong>Multi-Node Support</strong> — Manage game servers across multiple machines</li>
+                  <li>🎮 <strong>30+ Game Templates</strong> — Minecraft, CS2, Rust, ARK, Valheim, Palworld, Terraria, and more</li>
                   <li>🔔 Discord webhook notifications for server events</li>
                   <li>💬 Forum with categories</li>
                   <li>📊 Server monitoring with RAM buffer management</li>

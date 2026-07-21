@@ -16,6 +16,15 @@ interface GameDef {
   iconEmoji: string | null;
 }
 
+interface Node {
+  id: number;
+  name: string;
+  hostname: string;
+  status: string;
+  isDefault: boolean | null;
+  gameServerPath: string | null;
+}
+
 interface Server {
   id: number;
   name: string;
@@ -26,6 +35,8 @@ interface Server {
   gameName: string | null;
   gameSlug: string | null;
   gameIcon: string | null;
+  nodeName: string | null;
+  nodeId: number | null;
   autoRestart: boolean | null;
   discordWebhook: string | null;
   createdAt: string;
@@ -34,10 +45,12 @@ interface Server {
 export default function ServersPanel({ user }: { user: AuthUser }) {
   const [servers, setServers] = useState<Server[]>([]);
   const [games, setGames] = useState<GameDef[]>([]);
+  const [nodes, setNodes] = useState<Node[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({
     name: "",
     gameId: "",
+    nodeId: "",
     port: "",
     ipv4: "0.0.0.0",
     ipv6: "",
@@ -58,24 +71,62 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
     setServers(data.servers || []);
   }, []);
 
+  const loadGames = useCallback(async () => {
+    const res = await fetch("/api/games");
+    const data = await res.json();
+    setGames(data.games || []);
+  }, []);
+
+  const loadNodes = useCallback(async () => {
+    const res = await fetch("/api/nodes");
+    const data = await res.json();
+    const onlineNodes = (data.nodes || []).filter((n: Node) => n.status === "online");
+    setNodes(onlineNodes);
+    
+    // Set default node
+    const defaultNode = onlineNodes.find((n: Node) => n.isDefault);
+    if (defaultNode && !form.nodeId) {
+      setForm((f) => ({
+        ...f,
+        nodeId: String(defaultNode.id),
+        installPath: defaultNode.gameServerPath || "/opt/gameservers",
+      }));
+    }
+  }, [form.nodeId]);
+
   useEffect(() => {
     loadServers();
-    fetch("/api/games")
-      .then((r) => r.json())
-      .then((d) => setGames(d.games || []));
-  }, [loadServers]);
+    loadGames();
+    loadNodes();
+  }, [loadServers, loadGames, loadNodes]);
 
   function onGameChange(gameId: string) {
-    setForm({ ...form, gameId });
     const game = games.find((g) => g.id === Number(gameId));
+    const selectedNode = nodes.find((n) => n.id === Number(form.nodeId));
+    const basePath = selectedNode?.gameServerPath || "/opt/gameservers";
+    
     if (game) {
       setForm((f) => ({
         ...f,
         gameId,
         port: game.defaultPort.toString(),
-        installPath: `/opt/gameservers/${game.slug}`,
+        installPath: `${basePath}/${game.slug}`,
       }));
+    } else {
+      setForm((f) => ({ ...f, gameId }));
     }
+  }
+
+  function onNodeChange(nodeId: string) {
+    const node = nodes.find((n) => n.id === Number(nodeId));
+    const game = games.find((g) => g.id === Number(form.gameId));
+    const basePath = node?.gameServerPath || "/opt/gameservers";
+    
+    setForm((f) => ({
+      ...f,
+      nodeId,
+      installPath: game ? `${basePath}/${game.slug}` : basePath,
+    }));
   }
 
   async function createServer(e: React.FormEvent) {
@@ -87,7 +138,10 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
       const res = await fetch("/api/servers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          nodeId: form.nodeId ? Number(form.nodeId) : null,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -97,6 +151,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
         setForm({
           name: "",
           gameId: "",
+          nodeId: nodes.find((n) => n.isDefault)?.id.toString() || "",
           port: "",
           ipv4: "0.0.0.0",
           ipv6: "",
@@ -168,8 +223,8 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
     <div className="animate-fade-in space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold">Game Servers</h2>
-          <p className="text-text-secondary text-sm">Manage your game server instances with Discord notifications</p>
+          <h2 className="text-2xl font-bold">🎮 Game Servers</h2>
+          <p className="text-text-secondary text-sm">Manage game servers across all nodes</p>
         </div>
         <button
           onClick={() => setShowCreate(!showCreate)}
@@ -179,13 +234,27 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
         </button>
       </div>
 
+      {/* Warning if no nodes */}
+      {nodes.length === 0 && (
+        <div className="bg-warning/15 border border-warning/30 rounded-xl p-4 text-warning text-sm">
+          ⚠️ No online nodes available. Add a node from the Nodes panel first.
+        </div>
+      )}
+
+      {/* Warning if no games */}
+      {games.length === 0 && (
+        <div className="bg-warning/15 border border-warning/30 rounded-xl p-4 text-warning text-sm">
+          ⚠️ No games installed. Install game templates from the Games panel first.
+        </div>
+      )}
+
       {/* Create form */}
-      {showCreate && (
+      {showCreate && nodes.length > 0 && games.length > 0 && (
         <form onSubmit={createServer} className="bg-bg-card border border-border rounded-xl p-6 space-y-4">
           <h3 className="font-semibold">Create New Server</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs text-text-muted mb-1">Server Name</label>
+              <label className="block text-xs text-text-muted mb-1">Server Name *</label>
               <input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -195,7 +264,23 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
               />
             </div>
             <div>
-              <label className="block text-xs text-text-muted mb-1">Game</label>
+              <label className="block text-xs text-text-muted mb-1">Node *</label>
+              <select
+                value={form.nodeId}
+                onChange={(e) => onNodeChange(e.target.value)}
+                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                required
+              >
+                <option value="">Select a node</option>
+                {nodes.map((n) => (
+                  <option key={n.id} value={n.id}>
+                    {n.name} ({n.hostname}) {n.isDefault ? "★" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Game *</label>
               <select
                 value={form.gameId}
                 onChange={(e) => onGameChange(e.target.value)}
@@ -211,7 +296,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
               </select>
             </div>
             <div>
-              <label className="block text-xs text-text-muted mb-1">Port</label>
+              <label className="block text-xs text-text-muted mb-1">Port *</label>
               <input
                 type="number"
                 value={form.port}
@@ -239,7 +324,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
               />
             </div>
             <div>
-              <label className="block text-xs text-text-muted mb-1">IPv6 Address (optional)</label>
+              <label className="block text-xs text-text-muted mb-1">IPv6 Address</label>
               <input
                 value={form.ipv6}
                 onChange={(e) => setForm({ ...form, ipv6: e.target.value })}
@@ -271,18 +356,14 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                     className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent font-mono"
                     placeholder="https://discord.com/api/webhooks/..."
                   />
-                  <p className="text-[10px] text-text-muted mt-1">
-                    Get this from Discord: Server Settings → Integrations → Webhooks → New Webhook → Copy Webhook URL
-                  </p>
                 </div>
-
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <label className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
                       checked={form.discordNotifyStart}
                       onChange={(e) => setForm({ ...form, discordNotifyStart: e.target.checked })}
-                      className="rounded border-border bg-bg-secondary"
+                      className="rounded"
                     />
                     <span>Start</span>
                   </label>
@@ -291,7 +372,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                       type="checkbox"
                       checked={form.discordNotifyStop}
                       onChange={(e) => setForm({ ...form, discordNotifyStop: e.target.checked })}
-                      className="rounded border-border bg-bg-secondary"
+                      className="rounded"
                     />
                     <span>Stop</span>
                   </label>
@@ -300,7 +381,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                       type="checkbox"
                       checked={form.discordNotifyRestart}
                       onChange={(e) => setForm({ ...form, discordNotifyRestart: e.target.checked })}
-                      className="rounded border-border bg-bg-secondary"
+                      className="rounded"
                     />
                     <span>Restart</span>
                   </label>
@@ -309,7 +390,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                       type="checkbox"
                       checked={form.discordNotifyCrash}
                       onChange={(e) => setForm({ ...form, discordNotifyCrash: e.target.checked })}
-                      className="rounded border-border bg-bg-secondary"
+                      className="rounded"
                     />
                     <span>Crash</span>
                   </label>
@@ -332,7 +413,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
       {/* Server list */}
       {servers.length === 0 ? (
         <div className="bg-bg-card border border-border rounded-xl p-12 text-center">
-          <span className="text-4xl mb-3 block">🖥️</span>
+          <span className="text-4xl mb-3 block">🎮</span>
           <h3 className="text-lg font-semibold mb-1">No servers yet</h3>
           <p className="text-text-secondary text-sm">Create your first game server to get started</p>
         </div>
@@ -347,13 +428,14 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                     <h3 className="font-semibold flex items-center gap-2">
                       {server.name}
                       {server.discordWebhook && (
-                        <span className="text-xs bg-[#5865F2]/20 text-[#5865F2] px-1.5 py-0.5 rounded" title="Discord notifications enabled">
+                        <span className="text-xs bg-[#5865F2]/20 text-[#5865F2] px-1.5 py-0.5 rounded" title="Discord">
                           🔔
                         </span>
                       )}
                     </h3>
                     <p className="text-sm text-text-secondary">{server.gameName}</p>
                     <div className="flex gap-3 mt-1 text-xs text-text-muted">
+                      {server.nodeName && <span>🖥️ {server.nodeName}</span>}
                       {server.ipv4 && <span>IPv4: {server.ipv4}:{server.port}</span>}
                       {server.ipv6 && <span>IPv6: [{server.ipv6}]:{server.port}</span>}
                     </div>
@@ -385,7 +467,6 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                     <button
                       onClick={() => testWebhook(server.discordWebhook!, server.name)}
                       className="px-3 py-1.5 bg-[#5865F2]/15 text-[#5865F2] hover:bg-[#5865F2]/25 rounded-lg text-xs font-medium transition-colors"
-                      title="Test Discord webhook"
                     >
                       Test 🔔
                     </button>

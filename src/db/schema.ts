@@ -7,7 +7,6 @@ import {
   boolean,
   timestamp,
   jsonb,
-  bigint,
   real,
 } from "drizzle-orm/pg-core";
 
@@ -23,7 +22,64 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-// ── Game definitions (seeds) ───────────────────────────────────
+// ── Nodes (Multi-Server Support) ──────────────────────────────
+export const nodes = pgTable("nodes", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 128 }).notNull(),
+  description: text("description"),
+  // Connection details
+  hostname: varchar("hostname", { length: 255 }).notNull(),
+  ipv4: varchar("ipv4", { length: 45 }),
+  ipv6: varchar("ipv6", { length: 45 }),
+  sshPort: integer("ssh_port").default(22),
+  sshUser: varchar("ssh_user", { length: 64 }),
+  sshKeyPath: text("ssh_key_path"),
+  sshPassword: text("ssh_password"), // encrypted
+  // API connection (alternative to SSH)
+  apiUrl: text("api_url"),
+  apiKey: text("api_key"),
+  // Node capabilities
+  maxServers: integer("max_servers").default(10),
+  maxRamMb: integer("max_ram_mb").default(16384),
+  maxDiskMb: integer("max_disk_mb").default(100000),
+  // Paths
+  gameServerPath: text("game_server_path").default("/opt/gameservers"),
+  steamcmdPath: text("steamcmd_path").default("/opt/steamcmd"),
+  // Status
+  status: varchar("status", { length: 20 }).notNull().default("offline"),
+  isLocal: boolean("is_local").default(false),
+  isDefault: boolean("is_default").default(false),
+  lastHeartbeat: timestamp("last_heartbeat"),
+  // Location/metadata
+  location: varchar("location", { length: 128 }),
+  provider: varchar("provider", { length: 64 }),
+  tags: jsonb("tags"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ── Node Metrics (for monitoring) ─────────────────────────────
+export const nodeMetrics = pgTable("node_metrics", {
+  id: serial("id").primaryKey(),
+  nodeId: integer("node_id").references(() => nodes.id).notNull(),
+  cpuPercent: real("cpu_percent"),
+  cpuLoad1: real("cpu_load_1"),
+  cpuLoad5: real("cpu_load_5"),
+  cpuLoad15: real("cpu_load_15"),
+  ramUsedMb: real("ram_used_mb"),
+  ramTotalMb: real("ram_total_mb"),
+  ramBufferMb: real("ram_buffer_mb"),
+  ramCachedMb: real("ram_cached_mb"),
+  diskUsedMb: real("disk_used_mb"),
+  diskTotalMb: real("disk_total_mb"),
+  networkRxMb: real("network_rx_mb"),
+  networkTxMb: real("network_tx_mb"),
+  serverCount: integer("server_count"),
+  ipv6Enabled: boolean("ipv6_enabled"),
+  recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+});
+
+// ── Game definitions (templates installed by admin) ───────────
 export const gameDefinitions = pgTable("game_definitions", {
   id: serial("id").primaryKey(),
   slug: varchar("slug", { length: 64 }).notNull().unique(),
@@ -45,6 +101,7 @@ export const gameDefinitions = pgTable("game_definitions", {
 export const gameServers = pgTable("game_servers", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").references(() => users.id),
+  nodeId: integer("node_id").references(() => nodes.id), // Which node this server runs on
   gameId: integer("game_id")
     .references(() => gameDefinitions.id)
     .notNull(),
@@ -52,16 +109,27 @@ export const gameServers = pgTable("game_servers", {
   ipv4: varchar("ipv4", { length: 45 }),
   ipv6: varchar("ipv6", { length: 45 }),
   port: integer("port").notNull(),
+  queryPort: integer("query_port"),
+  rconPort: integer("rcon_port"),
   installPath: text("install_path").notNull(),
   status: varchar("status", { length: 20 }).notNull().default("stopped"),
   pid: integer("pid"),
   config: jsonb("config"),
+  variables: jsonb("variables"), // Filled template variables
   autoRestart: boolean("auto_restart").default(true),
+  autoStart: boolean("auto_start").default(false), // Start on node boot
+  // Resource limits
+  maxRamMb: integer("max_ram_mb"),
+  maxCpuPercent: integer("max_cpu_percent"),
+  // Discord integration
   discordWebhook: text("discord_webhook"),
   discordNotifyStart: boolean("discord_notify_start").default(true),
   discordNotifyStop: boolean("discord_notify_stop").default(true),
   discordNotifyRestart: boolean("discord_notify_restart").default(true),
   discordNotifyCrash: boolean("discord_notify_crash").default(true),
+  // Timestamps
+  lastStarted: timestamp("last_started"),
+  lastStopped: timestamp("last_stopped"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -80,6 +148,7 @@ export const serverMetrics = pgTable("server_metrics", {
   networkInKb: real("network_in_kb"),
   networkOutKb: real("network_out_kb"),
   playerCount: integer("player_count"),
+  maxPlayers: integer("max_players"),
   recordedAt: timestamp("recorded_at").defaultNow().notNull(),
 });
 
@@ -140,4 +209,30 @@ export const settings = pgTable("settings", {
   value: text("value"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ── Scheduled Tasks ───────────────────────────────────────────
+export const scheduledTasks = pgTable("scheduled_tasks", {
+  id: serial("id").primaryKey(),
+  serverId: integer("server_id").references(() => gameServers.id),
+  nodeId: integer("node_id").references(() => nodes.id),
+  taskType: varchar("task_type", { length: 32 }).notNull(), // restart, backup, update, command
+  cronExpression: varchar("cron_expression", { length: 64 }),
+  command: text("command"),
+  enabled: boolean("enabled").default(true),
+  lastRun: timestamp("last_run"),
+  nextRun: timestamp("next_run"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ── Audit Log ─────────────────────────────────────────────────
+export const auditLog = pgTable("audit_log", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id),
+  action: varchar("action", { length: 64 }).notNull(),
+  entityType: varchar("entity_type", { length: 32 }), // server, node, user, game
+  entityId: integer("entity_id"),
+  details: jsonb("details"),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });

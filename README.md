@@ -210,6 +210,73 @@ pm2 startup
 
 ---
 
+## 🖥️ Multi-Node Server Management
+
+GameServer Manager supports managing game servers across multiple physical or virtual machines (nodes).
+
+### Node Types
+
+| Type | Description |
+|------|-------------|
+| **Local Node** | This server running the panel (auto-detected) |
+| **Remote Node** | External server connected via SSH or API |
+
+### Adding Nodes
+
+#### Add Local Node (This Server)
+1. Go to **Nodes** panel
+2. Click **"+ Add Local Node"**
+3. The panel automatically detects:
+   - Hostname, IPv4, IPv6
+   - Total RAM and disk space
+   - Sets as default node
+
+#### Add Remote Node
+1. Go to **Nodes** panel
+2. Click **"+ Add Remote Node"**
+3. Fill in:
+   - **Name** — Display name (e.g., "US East Server")
+   - **Hostname** — FQDN or IP address
+   - **SSH Port** — Usually 22
+   - **SSH User** — root or dedicated user
+   - **SSH Key Path** — Path to private key on panel server
+   - **Max Servers** — Limit for this node
+   - **Max RAM** — Total RAM available
+   - **Game Server Path** — Where servers are installed
+   - **Location** — Physical location (e.g., "New York, USA")
+   - **Provider** — Hosting provider (e.g., "Hetzner", "OVH")
+
+### Node Heartbeat API
+
+Remote nodes can send health metrics to the panel:
+
+```bash
+# Example heartbeat from node
+curl -X POST https://panel.example.com/api/nodes/1/heartbeat \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-node-api-key" \
+  -d '{
+    "cpuPercent": 45,
+    "cpuLoad1": 1.5,
+    "ramUsedMb": 8192,
+    "ramTotalMb": 16384,
+    "diskUsedMb": 50000,
+    "diskTotalMb": 100000,
+    "serverCount": 5,
+    "ipv6Enabled": true
+  }'
+```
+
+### Node Selection
+
+When creating a game server:
+1. Select the target **Node** from dropdown
+2. Only online nodes are shown
+3. Install path auto-updates based on node's game server path
+4. Server inherits node's IPv4 address by default
+
+---
+
 ## 🔔 Discord Webhook Notifications
 
 GameServer Manager supports Discord webhooks for real-time server notifications.
