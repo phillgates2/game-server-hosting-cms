@@ -897,18 +897,35 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-echo "Downloading ET:Legacy..."
-curl -L -o etlegacy.tar.gz "https://www.etlegacy.com/download/file/550"
-tar xzf etlegacy.tar.gz --strip-components=1
-rm -f etlegacy.tar.gz
+echo "Downloading ET:Legacy x86_64 installer..."
+curl -L -o etlegacy-installer.sh "https://www.etlegacy.com/download/file/706"
 
+echo "Running ET:Legacy installer..."
+chmod +x etlegacy-installer.sh
+# Run self-extracting installer in non-interactive mode
+./etlegacy-installer.sh --noexec --target etlegacy-extract || true
+
+if [ -d "etlegacy-extract" ]; then
+  cp -r etlegacy-extract/* . 2>/dev/null || true
+  rm -rf etlegacy-extract
+fi
+rm -f etlegacy-installer.sh
+
+# Download base game assets (pak0.pk3)
 mkdir -p etmain
 if [ ! -f etmain/pak0.pk3 ]; then
-  echo "Downloading Wolfenstein ET base assets..."
-  curl -L -o et-linux.x86_64.run "https://filebase.trackbase.net/et/full/et260b.x86_64_full.zip"
-  unzip -o et-linux.x86_64.run "etmain/pak0.pk3" -d . || true
-  rm -f et-linux.x86_64.run
+  echo "Downloading Wolfenstein ET base assets from ET:Legacy mirror..."
+  curl -L -o etmain/pak0.pk3 "https://mirror.etlegacy.com/etmain/pak0.pk3"
 fi
+if [ ! -f etmain/pak1.pk3 ]; then
+  curl -L -o etmain/pak1.pk3 "https://mirror.etlegacy.com/etmain/pak1.pk3"
+fi
+if [ ! -f etmain/pak2.pk3 ]; then
+  curl -L -o etmain/pak2.pk3 "https://mirror.etlegacy.com/etmain/pak2.pk3"
+fi
+
+# Make server binary executable
+chmod +x etlded.x86_64 2>/dev/null || chmod +x etlded 2>/dev/null || true
 
 echo "ET:Legacy installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./etlded +set dedicated 2 +set net_port {{PORT}} +set fs_game etmain +set sv_hostname "{{SERVER_NAME}}" +set sv_maxclients {{MAX_PLAYERS}} +set g_gametype {{GAMETYPE}} +exec server.cfg`,
@@ -937,12 +954,39 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
+echo "Fetching latest OpenRA release info..."
 RELEASE=$(curl -s https://api.github.com/repos/OpenRA/OpenRA/releases/latest | grep tag_name | cut -d '"' -f4)
-echo "Downloading OpenRA $RELEASE..."
-curl -L -o OpenRA.AppImage "https://github.com/OpenRA/OpenRA/releases/download/$RELEASE/OpenRA-$RELEASE-x86_64.AppImage"
+echo "Latest release: $RELEASE"
+
+echo "Downloading OpenRA $RELEASE AppImage..."
+curl -L -o OpenRA.AppImage "https://github.com/OpenRA/OpenRA/releases/download/$RELEASE/OpenRA-$RELEASE-x86_64.AppImage" || {
+  echo "AppImage download failed, trying .tar.gz..."
+  curl -L -o openra.tar.gz "https://github.com/OpenRA/OpenRA/releases/download/$RELEASE/OpenRA-$RELEASE-linux-x64.tar.gz"
+  tar xzf openra.tar.gz
+  rm -f openra.tar.gz
+  echo "OpenRA installed successfully"
+  exit 0
+}
+
 chmod +x OpenRA.AppImage
-./OpenRA.AppImage --appimage-extract
-mv squashfs-root openra-extracted
+
+echo "Extracting AppImage..."
+./OpenRA.AppImage --appimage-extract 2>/dev/null || {
+  echo "AppImage extract failed (may need FUSE). Trying alternative method..."
+  # Manual extract without FUSE
+  offset=$(grep -aobm1 'hsqs' OpenRA.AppImage | head -1 | cut -d: -f1)
+  if [ -n "$offset" ]; then
+    apt-get install -y -qq squashfs-tools 2>/dev/null || true
+    dd if=OpenRA.AppImage bs=1 skip=$offset of=openra.squashfs 2>/dev/null
+    unsquashfs -d openra-extracted openra.squashfs 2>/dev/null
+    rm -f openra.squashfs
+  fi
+}
+
+if [ -d "squashfs-root" ]; then
+  mv squashfs-root openra-extracted
+fi
+rm -f OpenRA.AppImage
 
 echo "OpenRA installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}}/openra-extracted && mono OpenRA.Server.exe Game.Mod={{GAME_MOD}} Server.Name="{{SERVER_NAME}}" Server.ListenPort={{PORT}}`,

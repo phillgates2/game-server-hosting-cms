@@ -1,47 +1,86 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { gameServers, gameDefinitions, nodes } from "@/db/schema";
+import { gameDefinitions, gameServers, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { eq } from "drizzle-orm";
-import { exec } from "child_process";
-import { promisify } from "util";
-import { existsSync, mkdirSync } from "fs";
+import { mkdtemp, writeFile, chmod, rm } from "fs/promises";
+import { tmpdir } from "os";
 import { join } from "path";
+import { execFile } from "child_process";
+import { promisify } from "util";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return {};
+}
+
+function replaceTemplateVariables(input: string, variables: Record<string, unknown>) {
+  return input.replace(/\{\{([A-Z0-9_]+)\}\}/g, (_match, key: string) => {
+    const value = variables[key];
+    return value === undefined || value === null ? "" : String(value);
+  });
+}
+
+function buildVariables(server: {
+  name: string;
+  installPath: string;
+  port: number;
+  queryPort: number | null;
+  rconPort: number | null;
+  variables: unknown;
+  config: unknown;
+}) {
+  const storedVariables = asRecord(server.variables);
+  const config = asRecord(server.config);
+
+  return {
+    ...config,
+    ...storedVariables,
+    SERVER_NAME: storedVariables.SERVER_NAME ?? server.name,
+    INSTALL_PATH: storedVariables.INSTALL_PATH ?? server.installPath,
+    PORT: storedVariables.PORT ?? server.port,
+    QUERY_PORT: storedVariables.QUERY_PORT ?? server.queryPort ?? server.port + 1,
+    RCON_PORT: storedVariables.RCON_PORT ?? server.rconPort ?? server.port + 2,
+    MAX_PLAYERS: storedVariables.MAX_PLAYERS ?? config.MAX_PLAYERS ?? 32,
+    MAX_RAM: storedVariables.MAX_RAM ?? config.MAX_RAM ?? 4,
+  };
+}
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || auth.role !== "admin") {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
 
   try {
-    // Get server with game info and node info
     const [server] = await db
       .select({
         id: gameServers.id,
+        userId: gameServers.userId,
         name: gameServers.name,
         installPath: gameServers.installPath,
-        status: gameServers.status,
+        port: gameServers.port,
+        queryPort: gameServers.queryPort,
+        rconPort: gameServers.rconPort,
+        variables: gameServers.variables,
+        config: gameServers.config,
         nodeId: gameServers.nodeId,
         gameName: gameDefinitions.name,
-        gameSlug: gameDefinitions.slug,
         installScript: gameDefinitions.installScript,
-        defaultPort: gameDefinitions.defaultPort,
-        config: gameDefinitions.defaultConfig,
         nodeName: nodes.name,
         nodeIsLocal: nodes.isLocal,
-        nodeHostname: nodes.hostname,
-        nodeSshUser: nodes.sshUser,
-        nodeSshPort: nodes.sshPort,
-        nodeSshKeyPath: nodes.sshKeyPath,
-        nodeGameServerPath: nodes.gameServerPath,
+        nodeApiUrl: nodes.apiUrl,
+        nodeApiKey: nodes.apiKey,
       })
       .from(gameServers)
       .leftJoin(gameDefinitions, eq(gameServers.gameId, gameDefinitions.id))
@@ -53,106 +92,124 @@ export async function POST(
       return NextResponse.json({ error: "Server not found" }, { status: 404 });
     }
 
-    if (!server.installScript) {
-      return NextResponse.json({ error: "No install script available for this game" }, { status: 400 });
+    if (auth.role !== "admin" && server.userId !== auth.userId) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Update status to installing
+    if (!server.installScript) {
+      return NextResponse.json({ error: "This game has no install script" }, { status: 400 });
+    }
+
     await db
       .update(gameServers)
       .set({ status: "installing", updatedAt: new Date() })
-      .where(eq(gameServers.id, Number(id)));
+      .where(eq(gameServers.id, server.id));
 
-    // Create install script temp file
-    const scriptPath = `/tmp/gsm-install-${server.gameSlug}-${Date.now()}.sh`;
-    const installDir = server.installPath;
+    // Remote node support via node agent API.
+    // Local execution is handled by this panel. Remote SSH execution is intentionally not
+    // performed directly here until a hardened node-agent is configured.
+    if (!server.nodeIsLocal) {
+      if (server.nodeApiUrl) {
+        const res = await fetch(`${server.nodeApiUrl.replace(/\/$/, "")}/install`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(server.nodeApiKey ? { "X-API-Key": server.nodeApiKey } : {}),
+          },
+          body: JSON.stringify({ serverId: server.id }),
+        });
 
-    // Process the install script - it uses {{INSTALL_PATH}} as the first arg
-    // The template scripts expect INSTALL_DIR="$1" as the first parameter
-    const script = `#!/bin/bash
+        if (!res.ok) {
+          const text = await res.text();
+          await db.update(gameServers).set({ status: "install_failed", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
+          return NextResponse.json({ error: `Remote node install failed: ${text}` }, { status: 502 });
+        }
+
+        return NextResponse.json({ ok: true, message: "Remote node installation started" });
+      }
+
+      await db.update(gameServers).set({ status: "install_failed", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
+      return NextResponse.json(
+        { error: "Remote node installation requires a node agent API URL. Use a local node for direct installs." },
+        { status: 400 }
+      );
+    }
+
+    const variables = buildVariables(server);
+    const script = replaceTemplateVariables(server.installScript, variables);
+
+    // Wrap in a header + the template script
+    const fullScript = `#!/bin/bash
 set -e
-exec > >(tee -a /tmp/gsm-install-${server.gameSlug}-${Date.now()}.log) 2>&1
 
 echo "=== GameServer Manager Install ==="
-echo "Game: ${server.gameName}"
+echo "Game: ${server.gameName || "Unknown"}"
 echo "Server: ${server.name}"
-echo "Path: ${installDir}"
-echo "Node: ${server.nodeName || 'Local'}"
+echo "Path: ${server.installPath}"
+echo "Node: ${server.nodeName || "Local"}"
 echo ""
 
-${server.installScript}
+# Create install directory
+mkdir -p "${server.installPath}"
+
+# --- Begin game install script ---
+${script}
+# --- End game install script ---
+
+echo ""
+echo "=== Installation Complete ==="
 `;
 
-    const fs = await import("fs");
-    fs.writeFileSync(scriptPath, script, "utf8");
-    fs.chmodSync(scriptPath, 0o755);
-
-    // Run the install script
-    let output = "";
-    let success = false;
+    const tempDir = await mkdtemp(join(tmpdir(), "gsm-install-"));
+    const scriptPath = join(tempDir, "install.sh");
 
     try {
-      // Ensure install directory exists
-      mkdirSync(installDir, { recursive: true });
+      await writeFile(scriptPath, fullScript, "utf8");
+      await chmod(scriptPath, 0o700);
 
-      // Run the install script, passing the install directory as argument
-      const result = await execAsync(`bash ${scriptPath} "${installDir}"`, {
-        timeout: 300000, // 5 minute timeout
-        maxBuffer: 10 * 1024 * 1024, // 10MB output
+      const { stdout, stderr } = await execFileAsync("/bin/bash", [scriptPath], {
+        timeout: 1000 * 60 * 45,
+        maxBuffer: 1024 * 1024 * 10,
+        cwd: server.installPath,
+        env: {
+          ...process.env,
+          HOME: process.env.HOME || "/root",
+          PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin",
+          ...Object.fromEntries(Object.entries(variables).map(([k, v]) => [k, String(v ?? "")])),
+        },
       });
-      output = result.stdout + result.stderr;
-      success = true;
 
-      // Update server status to stopped (ready to start)
       await db
         .update(gameServers)
-        .set({
-          status: "stopped",
-          config: server.config || {},
-          updatedAt: new Date(),
-        })
-        .where(eq(gameServers.id, Number(id)));
+        .set({ status: "stopped", updatedAt: new Date() })
+        .where(eq(gameServers.id, server.id));
+
+      return NextResponse.json({
+        ok: true,
+        message: `${server.gameName || "Game"} files installed for ${server.name}`,
+        output: stdout.slice(-8000),
+        errorOutput: stderr.slice(-8000),
+      });
     } catch (e: unknown) {
-      const error = e as { stdout?: string; stderr?: string; message?: string };
-      output = (error.stdout || "") + "\n" + (error.stderr || "") + "\n" + (error.message || "");
-      success = false;
-
-      // Update server status to error
       await db
         .update(gameServers)
-        .set({ status: "error", updatedAt: new Date() })
-        .where(eq(gameServers.id, Number(id)));
-    }
+        .set({ status: "install_failed", updatedAt: new Date() })
+        .where(eq(gameServers.id, server.id));
 
-    // Clean up temp script
-    try {
-      fs.unlinkSync(scriptPath);
-    } catch {
-      // ignore
+      const err = e as { message?: string; stdout?: string; stderr?: string };
+      return NextResponse.json(
+        {
+          error: err.message || "Install failed",
+          output: err.stdout?.slice(-8000) || "",
+          errorOutput: err.stderr?.slice(-8000) || "",
+        },
+        { status: 500 }
+      );
+    } finally {
+      await rm(tempDir, { recursive: true, force: true }).catch(() => {});
     }
-
-    return NextResponse.json({
-      ok: true,
-      success,
-      message: success
-        ? `${server.gameName} server files installed successfully at ${installDir}`
-        : `Installation completed with issues. Check the logs.`,
-      output: output.slice(0, 5000), // Limit output size
-      path: installDir,
-    });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Unknown error";
-
-    // Reset status on error
-    try {
-      await db
-        .update(gameServers)
-        .set({ status: "error", updatedAt: new Date() })
-        .where(eq(gameServers.id, Number(id)));
-    } catch {
-      // ignore
-    }
-
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

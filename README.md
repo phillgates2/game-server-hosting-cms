@@ -381,6 +381,18 @@ After logging in:
    - Select your node and game
    - Configure settings and click **"Create Server"**
 
+4. **Install the Game Server Files:**
+   - In the **Servers** list, click **"Install Files"** on the server you created
+   - The panel runs the selected game template's install script on the selected node
+   - Local nodes run installs directly from the panel process
+   - Remote nodes require a node-agent API URL before installs can be executed remotely
+
+> ⚠️ Make sure the panel user can write to the node's game server path, usually `/opt/gameservers`:
+> ```bash
+> sudo mkdir -p /opt/gameservers
+> sudo chown -R $USER:$USER /opt/gameservers
+> ```
+
 ---
 
 ## 🔧 Caddy Reverse Proxy (Recommended for Production)
@@ -657,6 +669,26 @@ sudo systemctl start postgresql
 sudo -u postgres psql -c "ALTER USER gsmadmin WITH PASSWORD 'new_password';"
 # Update .env file with new password
 ```
+
+### Game File Install Issues
+
+**"Remote node installation requires a node agent API URL":**
+
+The current panel can directly install files only on a **Local Node**. For remote nodes, configure a node-agent API URL or add the machine as the local node where the panel is running.
+
+**Permission denied writing to `/opt/gameservers`:**
+```bash
+sudo mkdir -p /opt/gameservers
+sudo chown -R $USER:$USER /opt/gameservers
+chmod 755 /opt/gameservers
+```
+
+**Steam game install fails:**
+- Confirm SteamCMD works first:
+```bash
+steamcmd +quit
+```
+- If SteamCMD is broken, non-Steam templates like Minecraft/Paper/Terraria can still install.
 
 ### Panel Not Loading
 
