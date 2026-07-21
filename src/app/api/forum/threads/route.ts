@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { forumThreads, forumPosts, users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
@@ -19,6 +19,8 @@ export async function GET(req: NextRequest) {
         updatedAt: forumThreads.updatedAt,
         authorName: users.username,
         authorId: users.id,
+        authorRole: users.role,
+        replyCount: sql<number>`(select count(*) from forum_posts where thread_id = ${forumThreads.id})::int - 1`,
       })
       .from(forumThreads)
       .leftJoin(users, eq(forumThreads.userId, users.id))
@@ -48,22 +50,13 @@ export async function POST(req: NextRequest) {
 
     const [thread] = await db
       .insert(forumThreads)
-      .values({
-        categoryId: Number(categoryId),
-        userId: auth.userId,
-        title,
-      })
+      .values({ categoryId: Number(categoryId), userId: auth.userId, title })
       .returning();
 
-    await db.insert(forumPosts).values({
-      threadId: thread.id,
-      userId: auth.userId,
-      body,
-    });
+    await db.insert(forumPosts).values({ threadId: thread.id, userId: auth.userId, body });
 
     return NextResponse.json({ thread }, { status: 201 });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
   }
 }
