@@ -10,6 +10,7 @@ A modern, open-source TCAdmin alternative built with **Next.js 16**, **PostgreSQ
 
 - **🌐 Public CMS Site** — Blog, changelogs, and feature showcase for visitors — no login needed
 - **🔧 Admin Panel** — Full dashboard after login at the same URL — no port, no subfolder
+- **🖥️ RCON Console** — Full remote console for game servers (Source RCON, UDP RCON, WebRCON)
 - **✍️ Blog & Changelogs** — Built-in CMS to publish blog posts and changelogs on the public site
 - **🖥️ Multi-Node Support** — Manage game servers across multiple physical/virtual machines
 - **🎮 Game Server Management** — Create, start, stop, install files, and delete game servers
@@ -558,6 +559,56 @@ curl -X POST https://panel.example.com/api/nodes/1/heartbeat \
 
 ---
 
+## 🖥️ RCON Console
+
+Full remote console for game servers, built into the panel with no external dependencies.
+
+### Supported Protocols
+
+| Protocol | Transport | Games |
+|----------|-----------|-------|
+| **Source RCON** | TCP | CS2, TF2, GMod, L4D2, Minecraft, ARK, Valheim, 7DTD, Palworld, Terraria, Insurgency, Squad, and 30+ more |
+| **UDP RCON** | UDP | Wolfenstein ET, Quake Live, Xonotic, OpenRA |
+| **WebRCON** | HTTP | Rust |
+
+The protocol is auto-detected based on the game template. No configuration needed.
+
+### Using RCON
+
+1. Go to **RCON Console** in the sidebar
+2. Select a **running** server from the dropdown
+3. Enter the **RCON password** (or leave blank to use the server's saved `RCON_PASSWORD` variable)
+4. Type commands and press Enter
+
+### Features
+
+- **Terminal UI** — Dark terminal theme with colored output
+- **Command history** — Arrow Up/Down to cycle through previous commands
+- **Quick command buttons** — Game-specific presets (e.g., `status`, `list`, `save`)
+- **Multi-packet response** — Handles large responses that span multiple packets
+- **Auto-protocol detection** — Selects Source/UDP/WebRCON based on game
+- **Response timing** — Shows duration in ms for each command
+
+### Setting Up RCON on Game Servers
+
+When creating a server, set the `RCON_PASSWORD` variable. Each game template supports this:
+
+- **Source games (CS2, TF2, GMod):** Set `rcon_password` in `server.cfg`
+- **Minecraft:** Set `enable-rcon=true` and `rcon.password=...` in `server.properties`
+- **Rust:** Set via `+rcon.password` startup parameter
+- **Valheim/ARK/7DTD:** Set via admin password variables
+
+### API
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `GET /api/servers/[id]/rcon` | GET | Get RCON connection info |
+| `POST /api/servers/[id]/rcon` | POST | Send command, get response |
+
+Requires `servers.console` permission.
+
+---
+
 ## 🌐 IPv6 Configuration
 
 ### Enable IPv6 on Your Server
@@ -766,31 +817,53 @@ gsm-panel/
 ├── src/
 │   ├── app/
 │   │   ├── api/
-│   │   │   ├── auth/          # Authentication
-│   │   │   ├── database/      # DB viewer/editor
-│   │   │   ├── forum/         # Forum system
-│   │   │   ├── games/         # Game definitions
+│   │   │   ├── auth/          # Login, register, logout, profile, permissions
+│   │   │   ├── cms/           # Blog posts & changelogs
+│   │   │   ├── database/      # DB viewer/editor/query
+│   │   │   ├── discord/       # Webhook testing
+│   │   │   ├── forum/         # Categories, threads, posts
+│   │   │   ├── games/         # Installed game definitions
+│   │   │   ├── health/        # Health check
 │   │   │   ├── install/       # Web installer
-│   │   │   ├── monitor/       # System monitoring
+│   │   │   ├── monitor/       # System monitoring & buffer clear
 │   │   │   ├── nodes/         # Multi-node management
-│   │   │   ├── servers/       # Game server CRUD
-│   │   │   └── templates/     # Game templates
+│   │   │   ├── roles/         # Role CRUD & permissions
+│   │   │   ├── servers/       # Server CRUD, install, RCON
+│   │   │   ├── templates/     # Game template library
+│   │   │   └── users/         # User management (admin)
 │   │   ├── globals.css
 │   │   ├── layout.tsx
-│   │   └── page.tsx
+│   │   └── page.tsx           # Root: installer → public site → panel
 │   ├── components/
-│   │   ├── panels/            # Dashboard panels
-│   │   ├── Dashboard.tsx
-│   │   ├── InstallWizard.tsx
-│   │   └── LoginForm.tsx
+│   │   ├── panels/
+│   │   │   ├── CmsPanel.tsx       # Blog/changelog editor
+│   │   │   ├── DatabasePanel.tsx  # PostgreSQL manager
+│   │   │   ├── ForumPanel.tsx     # Forum with user profiles
+│   │   │   ├── GamesPanel.tsx     # Game templates & install
+│   │   │   ├── MonitorPanel.tsx   # System monitoring
+│   │   │   ├── NodesPanel.tsx     # Multi-node management
+│   │   │   ├── OverviewPanel.tsx  # Dashboard overview
+│   │   │   ├── ProfilePanel.tsx   # User profile & settings
+│   │   │   ├── RconPanel.tsx      # RCON terminal console
+│   │   │   ├── RolesPanel.tsx     # Role & permission editor
+│   │   │   ├── ServersPanel.tsx   # Server management
+│   │   │   └── UsersPanel.tsx     # User admin panel
+│   │   ├── Dashboard.tsx          # Sidebar + panel router
+│   │   ├── ErrorBoundary.tsx      # React error boundary
+│   │   ├── InstallWizard.tsx      # 3-step installer
+│   │   ├── LoginForm.tsx          # Login/register forms
+│   │   └── PublicSite.tsx         # Public CMS frontend
 │   ├── db/
-│   │   ├── index.ts           # Database connection
-│   │   ├── schema.ts          # Drizzle ORM schema
-│   │   └── seeds.ts           # Game templates
+│   │   ├── index.ts           # Database connection (pg pool)
+│   │   ├── schema.ts          # Drizzle ORM schema (all tables)
+│   │   └── seeds.ts           # Game template library
 │   └── lib/
-│       ├── auth.ts            # JWT utilities
-│       └── discord.ts         # Webhook utilities
-├── .env                       # Environment config
+│       ├── auth.ts            # JWT, bcrypt, cookie helpers
+│       ├── discord.ts         # Webhook sender & queue
+│       ├── permissions.ts     # Permission definitions & checker
+│       └── rcon.ts            # Source/UDP/WebRCON protocols
+├── .env
+├── CHANGELOG.md
 ├── package.json
 └── README.md
 ```
@@ -802,9 +875,12 @@ gsm-panel/
 - Change `JWT_SECRET` in production (auto-generated during setup)
 - Use strong PostgreSQL passwords
 - Enable SSL/TLS via Caddy reverse proxy
-- Database manager is admin-only
-- Buffer clearing requires admin role
-- First registered user gets admin role
+- All admin features are permission-gated (40+ granular permissions)
+- RCON passwords are stored in server variables, never exposed to non-owners
+- Database manager requires `database.view` permission
+- Buffer clearing requires `monitor.clear_cache` permission
+- First registered user auto-gets the Administrator role
+- Suspended/banned users cannot log in
 
 ---
 
