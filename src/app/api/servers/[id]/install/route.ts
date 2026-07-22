@@ -11,13 +11,11 @@ import { spawn, type ChildProcess } from "child_process";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Find a working shell binary
-async function findShell(): Promise<string> {
+// Find a working bash binary (NOT sh — game scripts use bash-isms like &>)
+async function findBash(): Promise<string> {
   const candidates = [
     "/usr/bin/bash",
     "/bin/bash",
-    "/usr/bin/sh",
-    "/bin/sh",
     "/usr/local/bin/bash",
   ];
   for (const p of candidates) {
@@ -28,7 +26,16 @@ async function findShell(): Promise<string> {
       // next
     }
   }
-  return "sh"; // bare name — let the OS find it via PATH
+  // Fallback: try sh paths, but scripts may have issues
+  for (const p of ["/usr/bin/sh", "/bin/sh"]) {
+    try {
+      await access(p, constants.X_OK);
+      return p;
+    } catch {
+      // next
+    }
+  }
+  return "bash"; // bare name — let the OS find it via PATH
 }
 
 // Run a script file and collect output
@@ -223,7 +230,7 @@ export async function POST(
     const variables = buildVariables({ ...server, installPath: effectiveInstallPath });
     const script = replaceTemplateVariables(server.installScript, variables);
 
-    const fullScript = `#!/usr/bin/env sh
+    const fullScript = `#!/usr/bin/env bash
 set -e
 
 echo "=== GameServer Manager Install ==="
@@ -247,8 +254,8 @@ echo ""
 echo "=== Installation Complete ==="
 `;
 
-    // Find a shell that exists on this system
-    const shellPath = await findShell();
+    // Find bash on this system (game scripts use bash syntax)
+    const shellPath = await findBash();
 
     // Verify the shell actually exists before proceeding
     try {
