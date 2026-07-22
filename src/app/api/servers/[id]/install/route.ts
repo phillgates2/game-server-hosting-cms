@@ -255,9 +255,14 @@ echo "=== Installation Complete ==="
     } catch (mkdirErr: unknown) {
       const msg = mkdirErr instanceof Error ? mkdirErr.message : "Unknown";
       return NextResponse.json({
-        error: `Cannot create install directory "${server.installPath}": ${msg}. Run: sudo mkdir -p ${server.installPath} && sudo chown -R $USER:$USER ${server.installPath}`,
+        error: `Cannot create install directory "${server.installPath}": ${msg}`,
         output: "",
-        errorOutput: "",
+        errorOutput:
+          `This usually means the node path is not writable by the panel user.\n\n` +
+          `Recommended fix:\n` +
+          `  sudo mkdir -p ${server.installPath}\n` +
+          `  sudo chown -R $USER:$USER ${server.installPath}\n\n` +
+          `For future local nodes, use a writable path like ~/gameservers instead of /opt/gameservers.`,
       }, { status: 500 });
     }
 

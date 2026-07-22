@@ -405,6 +405,8 @@ After logging in, you'll see the admin dashboard. Then:
 1. **Add a Node (Required):**
    - Go to **Nodes** in the sidebar
    - Click **"+ Add Local Node"**
+   - If the panel runs as a normal user, the local node now defaults to `~/gameservers`
+   - If the panel runs as root, it defaults to `/opt/gameservers`
 
 2. **Install Game Templates:**
    - Go to **Games** → **Templates** tab
@@ -421,7 +423,14 @@ After logging in, you'll see the admin dashboard. Then:
    - Go to **CMS** in the sidebar
    - Create blog posts and changelogs — they appear on the public site for logged-out visitors
 
-> ⚠️ Make sure the panel user can write to the game server path:
+> ⚠️ Make sure the panel user can write to the game server path.
+> 
+> If running as a normal user, prefer:
+> ```bash
+> mkdir -p ~/gameservers
+> ```
+> 
+> If using `/opt/gameservers`, fix ownership first:
 > ```bash
 > sudo mkdir -p /opt/gameservers
 > sudo chown -R $USER:$USER /opt/gameservers
@@ -760,12 +769,23 @@ sudo -u postgres psql -c "ALTER USER gsmadmin WITH PASSWORD 'new_password';"
 
 The current panel can directly install files only on a **Local Node**. For remote nodes, configure a node-agent API URL or add the machine as the local node where the panel is running.
 
-**Permission denied writing to `/opt/gameservers`:**
+**Permission denied writing to the game server path:**
+
+Preferred non-root local-node path:
+```bash
+mkdir -p ~/gameservers
+```
+
+If your node is already configured to use `/opt/gameservers`:
 ```bash
 sudo mkdir -p /opt/gameservers
 sudo chown -R $USER:$USER /opt/gameservers
 chmod 755 /opt/gameservers
 ```
+
+If you already created a local node with `/opt/gameservers`, either:
+- fix permissions as above, or
+- update the node path in the database/database manager to your home directory path, e.g. `/home/admin/gameservers`
 
 **Steam game install fails:**
 - Confirm SteamCMD works first:

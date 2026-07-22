@@ -3,10 +3,11 @@ import { db } from "@/db";
 import { nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { eq } from "drizzle-orm";
-import { readFile } from "fs/promises";
+import { readFile, mkdir, access, constants } from "fs/promises";
 import { exec } from "child_process";
 import { promisify } from "util";
-import { hostname } from "os";
+import { hostname, homedir } from "os";
+import { join } from "path";
 
 const execAsync = promisify(exec);
 
@@ -31,6 +32,14 @@ export async function POST(req: NextRequest) {
     let totalRam = 16384;
     let totalDisk = 100000;
 
+    // Choose a sensible writable default install path.
+    // If the panel runs as root, keep /opt/gameservers.
+    // Otherwise prefer ~/gameservers so installs work out of the box.
+    const homePath = homedir();
+    const isRootUser = process.getuid?.() === 0;
+    const preferredGameServerPath = isRootUser
+      ? "/opt/gameservers"
+      : join(homePath || "/home", "gameservers");
     try {
       // Get primary IPv4
       const { stdout: ipOut } = await execAsync("hostname -I | awk '{print $1}'");
@@ -64,6 +73,21 @@ export async function POST(req: NextRequest) {
       // Use defaults
     }
 
+    // Ensure the local game server path exists and is writable if possible.
+    let finalGameServerPath = preferredGameServerPath;
+    try {
+      await mkdir(preferredGameServerPath, { recursive: true });
+      await access(preferredGameServerPath, constants.W_OK);
+    } catch {
+      // Fall back to /tmp if home/opt path is not writable for some reason.
+      finalGameServerPath = "/tmp/gameservers";
+      try {
+        await mkdir(finalGameServerPath, { recursive: true });
+      } catch {
+        // ignore; the install route will return a clear error later if needed
+      }
+    }
+
     const [node] = await db
       .insert(nodes)
       .values({
@@ -79,10 +103,10 @@ export async function POST(req: NextRequest) {
         status: "online",
         maxRamMb: totalRam,
         maxDiskMb: totalDisk,
-        gameServerPath: "/opt/gameservers",
+        gameServerPath: finalGameServerPath,
         steamcmdPath: "/opt/steamcmd",
         location: "Local",
-        provider: "Self-hosted",
+        provider: isRootUser ? "Self-hosted (root)" : "Self-hosted (user)",
         lastHeartbeat: new Date(),
       })
       .returning();
