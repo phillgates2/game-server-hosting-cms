@@ -221,8 +221,11 @@ echo "Path: ${server.installPath}"
 echo "Node: ${(server.nodeName || "Local").replace(/"/g, '\\"')}"
 echo ""
 
-# Create install directory
+# Create and enter install directory
 mkdir -p "${server.installPath}"
+cd "${server.installPath}"
+echo "Working directory: $(pwd)"
+echo ""
 
 # --- Begin game install script ---
 ${script}
@@ -232,15 +235,31 @@ echo ""
 echo "=== Installation Complete ==="
 `;
 
-    // Ensure install path exists
-    try {
-      await mkdir(server.installPath, { recursive: true });
-    } catch {
-      // may already exist
-    }
-
     // Find a shell that exists on this system
     const shellPath = await findShell();
+
+    // Verify the shell actually exists before proceeding
+    try {
+      await access(shellPath, constants.X_OK);
+    } catch {
+      return NextResponse.json({
+        error: `Shell not found at any standard path. Checked: /usr/bin/bash, /bin/bash, /usr/bin/sh, /bin/sh. Please install bash.`,
+        output: "",
+        errorOutput: `Tried shell: ${shellPath}`,
+      }, { status: 500 });
+    }
+
+    // Create install directory — if this fails, report it clearly
+    try {
+      await mkdir(server.installPath, { recursive: true });
+    } catch (mkdirErr: unknown) {
+      const msg = mkdirErr instanceof Error ? mkdirErr.message : "Unknown";
+      return NextResponse.json({
+        error: `Cannot create install directory "${server.installPath}": ${msg}. Run: sudo mkdir -p ${server.installPath} && sudo chown -R $USER:$USER ${server.installPath}`,
+        output: "",
+        errorOutput: "",
+      }, { status: 500 });
+    }
 
     const tempDir = await mkdtemp(join(tmpdir(), "gsm-install-"));
     const scriptPath = join(tempDir, "install.sh");
@@ -258,8 +277,10 @@ echo "=== Installation Complete ==="
         env[k] = String(v ?? "");
       }
 
+      // Use tempDir as cwd since we know it exists.
+      // The script itself cd's into the install path.
       const { stdout, stderr } = await runScript(shellPath, scriptPath, {
-        cwd: server.installPath,
+        cwd: tempDir,
         env,
         timeout: 1000 * 60 * 45, // 45 min
       });
