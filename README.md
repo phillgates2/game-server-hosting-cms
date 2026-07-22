@@ -10,10 +10,11 @@ A modern, open-source TCAdmin alternative built with **Next.js 16**, **PostgreSQ
 
 - **🌐 Public CMS Site** — Blog, changelogs, and feature showcase for visitors — no login needed
 - **🔧 Admin Panel** — Full dashboard after login at the same URL — no port, no subfolder
+- **📂 File Manager** — Full web-based server file browser/uploader/editor (SFTP-like in the browser)
 - **🖥️ RCON Console** — Full remote console for game servers (Source RCON, UDP RCON, WebRCON)
 - **✍️ Blog & Changelogs** — Built-in CMS to publish blog posts and changelogs on the public site
 - **🖥️ Multi-Node Support** — Manage game servers across multiple physical/virtual machines
-- **🎮 Game Server Management** — Create, start, stop, install files, and delete game servers
+- **🎮 Game Server Management** — Create, start, stop, install files, edit files, and delete game servers
 - **📦 30+ Game Templates** — Pre-configured install scripts (install only what you need)
 - **🔑 Advanced Permissions** — Custom roles with 40+ granular permissions, color/icon/priority
 - **👥 User Management** — Profiles, login tracking, suspend/ban, per-user server limits
@@ -33,7 +34,7 @@ A modern, open-source TCAdmin alternative built with **Next.js 16**, **PostgreSQ
 
 | Category | Permissions |
 |----------|------------|
-| **Game Servers** | View, create, edit, delete, start/stop, install files, console |
+| **Game Servers** | View, create, edit, delete, start/stop, install files, browse/edit files, console |
 | **Nodes** | View, create, edit, delete |
 | **Game Templates** | View, browse templates, install, uninstall |
 | **Users** | View list, edit profiles, delete, change roles, suspend/ban |
@@ -419,7 +420,12 @@ After logging in, you'll see the admin dashboard. Then:
 4. **Install Game Server Files:**
    - On the server, click **"Install Files"**
 
-5. **Create Blog/Changelog Posts:**
+5. **Manage Server Files:**
+   - Open **File Manager** in the sidebar
+   - Select a server
+   - Upload or edit configs, maps, plugins, worlds, mods, and archives
+
+6. **Create Blog/Changelog Posts:**
    - Go to **CMS** in the sidebar
    - Create blog posts and changelogs — they appear on the public site for logged-out visitors
 
@@ -565,6 +571,58 @@ curl -X POST https://panel.example.com/api/nodes/1/heartbeat \
 | ⏹️ Server Stopped | Amber | Server has been stopped |
 | 🔄 Server Restarted | Purple | Server is restarting |
 | 💥 Server Crashed | Red | Server crashed unexpectedly |
+
+---
+
+## 📂 File Manager
+
+A full web-based file manager is built into the panel, giving you an SFTP-like experience directly in the browser.
+
+### Features
+
+- **Directory browsing** — Navigate the server install directory with breadcrumbs
+- **Create files/folders** — Make new config files and directories
+- **Upload files** — Upload plugins, maps, configs, worlds, mods, and archives
+- **Download files** — Download any file directly from the browser
+- **Rename / Delete** — Manage files and folders inline
+- **Text editor** — Edit common text/config files in-browser with dark monospace editor
+- **Ctrl+S save** — Quick keyboard save shortcut when editing
+- **Binary-safe** — Large/binary files are download-only and not opened as text
+- **Server sandboxing** — All file operations are restricted to the selected server’s install path
+
+### Supported File Operations
+
+| Operation | Description |
+|-----------|-------------|
+| Browse | List folders and files in the server directory |
+| Read | Open text files up to 2MB |
+| Save | Save edited text/config files |
+| Upload | Upload new files via browser |
+| Download | Download files as attachments |
+| Create File | Create a blank file |
+| Create Folder | Create directories recursively |
+| Rename | Rename files/folders inline |
+| Delete | Delete files/folders recursively |
+
+### API
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `GET /api/servers/[id]/files` | GET | List directories or read/download files |
+| `POST /api/servers/[id]/files` | POST | Create, save, rename, delete |
+| `POST /api/servers/[id]/files/upload` | POST | Upload multipart file |
+
+Requires `servers.files` permission.
+
+### Local Node Path Notes
+
+For non-root panel installs, local nodes now prefer a writable path like:
+
+```bash
+/home/youruser/gameservers
+```
+
+instead of `/opt/gameservers`. Existing local servers created with `/opt/gameservers/...` are automatically migrated to a writable home-directory path during **Install Files** if the panel is not running as root.
 
 ---
 
@@ -769,6 +827,19 @@ sudo -u postgres psql -c "ALTER USER gsmadmin WITH PASSWORD 'new_password';"
 
 The current panel can directly install files only on a **Local Node**. For remote nodes, configure a node-agent API URL or add the machine as the local node where the panel is running.
 
+### File Manager Issues
+
+**Permission denied writing to files or folders:**
+- Make sure the local node path is writable by the panel user.
+- For non-root installs, prefer `~/gameservers`.
+- Existing `/opt/gameservers/...` local servers are auto-migrated during Install Files.
+
+**Cannot browse outside the server directory:**
+- This is intentional. The file manager is sandboxed to the selected server’s install path for security.
+
+**Large file will not open in editor:**
+- Files over 2MB and binary files are download-only.
+
 **Permission denied writing to the game server path:**
 
 Preferred non-root local-node path:
@@ -848,7 +919,7 @@ gsm-panel/
 │   │   │   ├── monitor/       # System monitoring & buffer clear
 │   │   │   ├── nodes/         # Multi-node management
 │   │   │   ├── roles/         # Role CRUD & permissions
-│   │   │   ├── servers/       # Server CRUD, install, RCON
+│   │   │   ├── servers/       # Server CRUD, install, files, RCON
 │   │   │   ├── templates/     # Game template library
 │   │   │   └── users/         # User management (admin)
 │   │   ├── globals.css
@@ -858,6 +929,7 @@ gsm-panel/
 │   │   ├── panels/
 │   │   │   ├── CmsPanel.tsx       # Blog/changelog editor
 │   │   │   ├── DatabasePanel.tsx  # PostgreSQL manager
+│   │   │   ├── FilesPanel.tsx     # Web-based server file manager
 │   │   │   ├── ForumPanel.tsx     # Forum with user profiles
 │   │   │   ├── GamesPanel.tsx     # Game templates & install
 │   │   │   ├── MonitorPanel.tsx   # System monitoring

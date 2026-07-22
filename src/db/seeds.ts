@@ -897,19 +897,35 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-echo "Downloading ET:Legacy x86_64 installer..."
-curl -L -o etlegacy-installer.sh "https://www.etlegacy.com/download/file/706"
+# Detect architecture
+ARCH=$(uname -m)
+echo "Detected architecture: $ARCH"
 
-echo "Running ET:Legacy installer..."
-chmod +x etlegacy-installer.sh
-# Run self-extracting installer in non-interactive mode
-./etlegacy-installer.sh --noexec --target etlegacy-extract || true
-
-if [ -d "etlegacy-extract" ]; then
-  cp -r etlegacy-extract/* . 2>/dev/null || true
-  rm -rf etlegacy-extract
+# Download ET:Legacy archive (not the .sh installer — archives work on all systems)
+if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+  echo "Downloading ET:Legacy AArch64 archive..."
+  curl -L -o etlegacy.tar.gz "https://www.etlegacy.com/download/file/711"
+elif [ "$ARCH" = "x86_64" ]; then
+  echo "Downloading ET:Legacy x86_64 archive..."
+  curl -L -o etlegacy.tar.gz "https://www.etlegacy.com/download/file/707"
+else
+  echo "Downloading ET:Legacy i386 archive..."
+  curl -L -o etlegacy.tar.gz "https://www.etlegacy.com/download/file/705"
 fi
-rm -f etlegacy-installer.sh
+
+echo "Extracting..."
+tar xzf etlegacy.tar.gz --strip-components=1 2>/dev/null || tar xzf etlegacy.tar.gz 2>/dev/null || {
+  echo "tar.gz extraction failed, trying as zip..."
+  unzip -o etlegacy.tar.gz 2>/dev/null || true
+  # Move files from subdirectory if extracted into one
+  for d in etlegacy-*/; do
+    if [ -d "$d" ]; then
+      cp -r "$d"* . 2>/dev/null || true
+      rm -rf "$d"
+    fi
+  done
+}
+rm -f etlegacy.tar.gz
 
 # Download base game assets (pak0.pk3)
 mkdir -p etmain
@@ -925,7 +941,8 @@ if [ ! -f etmain/pak2.pk3 ]; then
 fi
 
 # Make server binary executable
-chmod +x etlded.x86_64 2>/dev/null || chmod +x etlded 2>/dev/null || true
+chmod +x etlded* 2>/dev/null || true
+ls -la etlded* 2>/dev/null || echo "Warning: etlded binary not found — check the extracted files"
 
 echo "ET:Legacy installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./etlded +set dedicated 2 +set net_port {{PORT}} +set fs_game etmain +set sv_hostname "{{SERVER_NAME}}" +set sv_maxclients {{MAX_PLAYERS}} +set g_gametype {{GAMETYPE}} +exec server.cfg`,

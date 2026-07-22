@@ -4,6 +4,36 @@ All notable changes to GameServer Manager are documented in this file.
 
 ---
 
+## [1.6.0] — 2026-07-21
+
+### Added
+- **📂 Web-Based File Manager** — Full browser-based server file management (SFTP-like experience without a separate client)
+  - Browse server directories with breadcrumbs
+  - Create files and folders
+  - Upload files via browser (`multipart/form-data`)
+  - Download files as attachments
+  - Rename and delete files/folders inline
+  - Built-in text editor for common config/script/log files
+  - `Ctrl+S` save shortcut in the editor
+  - Binary/large-file safety — files over 2MB are download-only
+  - File-type icons for configs, scripts, archives, images, binaries, etc.
+  - `GET /api/servers/[id]/files` — List/read/download files
+  - `POST /api/servers/[id]/files` — Save/create/rename/delete
+  - `POST /api/servers/[id]/files/upload` — Upload files
+  - Requires `servers.files` permission
+
+### Changed
+- **Local-node game server path behavior**
+  - New local nodes default to `~/gameservers` for non-root panel installs
+  - Root installs still default to `/opt/gameservers`
+  - Existing local servers using `/opt/gameservers/...` are auto-migrated to a writable home-directory path during **Install Files** if the panel is not running as root
+
+### Fixed
+- Clearer install-path permission errors with actionable remediation commands
+- Local server creation now rewrites non-root `/opt/gameservers/...` paths to writable home-directory paths automatically
+
+---
+
 ## [1.5.0] — 2026-07-21
 
 ### Added
