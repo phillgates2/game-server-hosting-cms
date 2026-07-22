@@ -17,6 +17,7 @@ export const PERMISSION_CATEGORIES = {
       "servers.start_stop":   "Start and stop servers",
       "servers.install":      "Install game files",
       "servers.console":      "Access server console",
+      "servers.files":        "Browse and edit server files",
     },
   },
   nodes: {
@@ -132,7 +133,7 @@ export const DEFAULT_ROLES = [
     priority: 50,
     permissions: {
       "servers.view": true, "servers.create": true, "servers.edit": true,
-      "servers.start_stop": true, "servers.install": true,
+      "servers.start_stop": true, "servers.install": true, "servers.files": true,
       "nodes.view": true,
       "games.view": true, "games.templates": true,
       "users.view": true, "users.suspend": true,

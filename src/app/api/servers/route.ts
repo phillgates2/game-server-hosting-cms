@@ -3,6 +3,8 @@ import { db } from "@/db";
 import { gameServers, gameDefinitions, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { eq } from "drizzle-orm";
+import { homedir } from "os";
+import { basename, join } from "path";
 
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
@@ -57,6 +59,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
+    let finalInstallPath = installPath;
+
+    // If this is a local node and the panel is not running as root, avoid /opt by default.
+    if (nodeId) {
+      const [node] = await db
+        .select({ isLocal: nodes.isLocal, gameServerPath: nodes.gameServerPath })
+        .from(nodes)
+        .where(eq(nodes.id, Number(nodeId)))
+        .limit(1);
+
+      const isRootUser = process.getuid?.() === 0;
+      if (node?.isLocal && !isRootUser && finalInstallPath.startsWith("/opt/gameservers")) {
+        finalInstallPath = join(homedir() || "/home", "gameservers", basename(finalInstallPath));
+      }
+    }
+
     const [server] = await db
       .insert(gameServers)
       .values({
@@ -67,9 +85,9 @@ export async function POST(req: NextRequest) {
         queryPort: body.queryPort ? Number(body.queryPort) : Number(port) + 1,
         ipv4: ipv4 || "0.0.0.0",
         ipv6: ipv6 || null,
-        installPath,
+        installPath: finalInstallPath,
         userId: auth.userId,
-        status: "stopped",
+        status: "stopped", 
         config: body.config || {},
         variables: body.variables || {},
         discordWebhook: discordWebhook || null,

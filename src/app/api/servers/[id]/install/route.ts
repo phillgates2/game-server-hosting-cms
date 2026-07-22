@@ -4,8 +4,8 @@ import { gameDefinitions, gameServers, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { eq } from "drizzle-orm";
 import { mkdtemp, writeFile, chmod, rm, mkdir, access, constants } from "fs/promises";
-import { tmpdir } from "os";
-import { join } from "path";
+import { tmpdir, homedir } from "os";
+import { basename, join } from "path";
 import { spawn, type ChildProcess } from "child_process";
 
 export const runtime = "nodejs";
@@ -207,8 +207,20 @@ export async function POST(
       );
     }
 
+    // Resolve install path, auto-falling back for existing local nodes created with /opt/gameservers.
+    let effectiveInstallPath = server.installPath;
+    const isRootUser = process.getuid?.() === 0;
+    if (server.nodeIsLocal && !isRootUser && effectiveInstallPath.startsWith("/opt/gameservers")) {
+      effectiveInstallPath = join(homedir() || "/home", "gameservers", basename(effectiveInstallPath));
+      // Persist the migrated path so future installs/starts use the writable location.
+      await db
+        .update(gameServers)
+        .set({ installPath: effectiveInstallPath, updatedAt: new Date() })
+        .where(eq(gameServers.id, server.id));
+    }
+
     // Build variables and script
-    const variables = buildVariables(server);
+    const variables = buildVariables({ ...server, installPath: effectiveInstallPath });
     const script = replaceTemplateVariables(server.installScript, variables);
 
     const fullScript = `#!/usr/bin/env sh
@@ -217,13 +229,13 @@ set -e
 echo "=== GameServer Manager Install ==="
 echo "Game: ${(server.gameName || "Unknown").replace(/"/g, '\\"')}"
 echo "Server: ${server.name.replace(/"/g, '\\"')}"
-echo "Path: ${server.installPath}"
+echo "Path: ${effectiveInstallPath}"
 echo "Node: ${(server.nodeName || "Local").replace(/"/g, '\\"')}"
 echo ""
 
 # Create and enter install directory
-mkdir -p "${server.installPath}"
-cd "${server.installPath}"
+mkdir -p "${effectiveInstallPath}"
+cd "${effectiveInstallPath}"
 echo "Working directory: $(pwd)"
 echo ""
 
@@ -251,18 +263,19 @@ echo "=== Installation Complete ==="
 
     // Create install directory — if this fails, report it clearly
     try {
-      await mkdir(server.installPath, { recursive: true });
+      await mkdir(effectiveInstallPath, { recursive: true });
     } catch (mkdirErr: unknown) {
       const msg = mkdirErr instanceof Error ? mkdirErr.message : "Unknown";
       return NextResponse.json({
-        error: `Cannot create install directory "${server.installPath}": ${msg}`,
+        error: `Cannot create install directory "${effectiveInstallPath}": ${msg}`,
         output: "",
         errorOutput:
           `This usually means the node path is not writable by the panel user.\n\n` +
           `Recommended fix:\n` +
-          `  sudo mkdir -p ${server.installPath}\n` +
-          `  sudo chown -R $USER:$USER ${server.installPath}\n\n` +
-          `For future local nodes, use a writable path like ~/gameservers instead of /opt/gameservers.`,
+          `  mkdir -p ${effectiveInstallPath}\n\n` +
+          `Or, if you still want to use /opt:\n` +
+          `  sudo mkdir -p /opt/gameservers\n` +
+          `  sudo chown -R $USER:$USER /opt/gameservers\n`,
       }, { status: 500 });
     }
 

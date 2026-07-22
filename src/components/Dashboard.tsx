@@ -14,6 +14,7 @@ import UsersPanel from "./panels/UsersPanel";
 import ProfilePanel from "./panels/ProfilePanel";
 import RolesPanel from "./panels/RolesPanel";
 import RconPanel from "./panels/RconPanel";
+import FilesPanel from "./panels/FilesPanel";
 
 interface AuthUser {
   id: number;
@@ -29,7 +30,7 @@ interface Props {
   onLogout: () => void;
 }
 
-type Tab = "overview" | "servers" | "rcon" | "nodes" | "games" | "monitor" | "forum" | "cms" | "users" | "roles" | "profile" | "database";
+type Tab = "overview" | "servers" | "files" | "rcon" | "nodes" | "games" | "monitor" | "forum" | "cms" | "users" | "roles" | "profile" | "database";
 
 interface NavItem {
   key: Tab;
@@ -42,6 +43,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { key: "overview", label: "Overview", icon: "📊", section: "main" },
   { key: "servers", label: "Servers", icon: "🎮", permission: "servers.view", section: "main" },
+  { key: "files", label: "File Manager", icon: "📂", permission: "servers.files", section: "main" },
   { key: "rcon", label: "RCON Console", icon: "🖥️", permission: "servers.console", section: "main" },
   { key: "nodes", label: "Nodes", icon: "🌐", permission: "nodes.view", section: "main" },
   { key: "games", label: "Games", icon: "📦", permission: "games.view", section: "main" },
@@ -99,6 +101,7 @@ export default function Dashboard({ user, onLogout }: Props) {
     switch (tab) {
       case "overview": return <OverviewPanel user={user} />;
       case "servers": return <ServersPanel user={user} />;
+      case "files": return <FilesPanel user={user} />;
       case "rcon": return <RconPanel user={user} />;
       case "nodes": return <NodesPanel user={user} />;
       case "games": return <GamesPanel />;
