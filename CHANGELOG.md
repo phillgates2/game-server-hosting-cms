@@ -4,6 +4,49 @@ All notable changes to GameServer Manager are documented in this file.
 
 ---
 
+## [1.8.0] — 2026-07-21
+
+### Added
+- **🎮 Custom Game Templates** — Create your own game definitions from scratch
+  - Full form: name, slug, engine, icon, port, install script, start/stop commands, config JSON
+  - Template variable placeholders: `{{INSTALL_PATH}}`, `{{PORT}}`, `{{SERVER_NAME}}`, etc.
+  - `POST /api/games/[id]` — Create custom game definition
+- **✏️ Installed Game Editing** — Edit any installed game template in the panel
+  - Change name, engine, port, icon, IPv6 support
+  - Edit install script, start command, stop command in dark code editor
+  - Edit default config as JSON
+  - `PATCH /api/games/[id]` — Update installed game definition
+  - `GET /api/games/[id]` — Get full game definition
+- **Games Panel Tabs** — Three tabs: Installed (edit/uninstall), Templates (browse/install), Custom Game (create new)
+
+---
+
+## [1.7.0] — 2026-07-21
+
+### Added
+- **▶️ Real Process Start/Stop** — Game server processes are now actually launched and managed
+  - `POST /api/servers/[id]/process` — Start, stop, restart, status actions
+  - Spawns `gsm-start.sh` as a detached background process
+  - Records PID, tracks alive status, sends SIGTERM/SIGKILL on stop
+  - Logs stdout/stderr to `gsm-server.log` in the server directory
+  - Immediate crash detection (waits 1.5s after spawn)
+  - Discord webhook notifications on start/stop/restart
+- **Generated Server Files** — Install Files now creates runnable scripts
+  - `gsm-start.sh` — Executable start script with resolved variables
+  - `gsm-stop.sh` — Stop script (if game template defines one)
+  - `gsm-server.env` — All variables as KEY="value" pairs
+  - `gsm-server.log` — Runtime output log (appended on each start)
+  - `GSM-README.txt` — Quick reference of generated files
+  - Config files from template created if missing
+- **Install always uses latest template** — No longer reads stale DB copies; pulls live code template by slug
+
+### Changed
+- Start/Stop buttons now call `/api/servers/[id]/process` (real process) instead of PATCH status
+- Server cards show ⏹ Stop + 🔄 Restart when running, ▶ Start when stopped
+- SteamCMD auto-install wrapper falls back to `~/bin/` for non-root users
+
+---
+
 ## [1.6.0] — 2026-07-21
 
 ### Added

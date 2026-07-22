@@ -14,8 +14,9 @@ A modern, open-source TCAdmin alternative built with **Next.js 16**, **PostgreSQ
 - **🖥️ RCON Console** — Full remote console for game servers (Source RCON, UDP RCON, WebRCON)
 - **✍️ Blog & Changelogs** — Built-in CMS to publish blog posts and changelogs on the public site
 - **🖥️ Multi-Node Support** — Manage game servers across multiple physical/virtual machines
-- **🎮 Game Server Management** — Create, start, stop, install files, edit files, and delete game servers
-- **📦 30+ Game Templates** — Pre-configured install scripts (install only what you need)
+- **🎮 Game Server Management** — Create, start, stop, restart, install files, edit files, RCON, and delete
+- **📦 30+ Game Templates** — Pre-configured install scripts, editable, plus create custom templates
+- **▶️ Real Process Control** — Actually launches game server processes with PID tracking and crash detection
 - **🔑 Advanced Permissions** — Custom roles with 40+ granular permissions, color/icon/priority
 - **👥 User Management** — Profiles, login tracking, suspend/ban, per-user server limits
 - **📊 Server Monitoring** — Real-time CPU, RAM, disk, and network monitoring with live charts
@@ -51,6 +52,30 @@ Three system roles are created during install:
 - **👤 User** — Basic server and forum access
 
 Create unlimited custom roles from the Roles panel with any combination of permissions.
+
+### Custom Game Templates
+
+Create your own game server definitions from the **Games → + Custom Game** tab:
+
+1. Enter game name, slug, engine, port, and icon
+2. Write an **install script** (bash) using `{{INSTALL_PATH}}`, `{{PORT}}`, `{{SERVER_NAME}}` placeholders
+3. Write a **start command** using the same variables
+4. Optionally add a stop command and default config JSON
+5. Click **Create Custom Game**
+
+You can also **edit any installed game** — change scripts, commands, ports, config, or icon at any time.
+
+### Process Control
+
+Start/Stop/Restart buttons launch and manage real OS processes:
+
+| Action | What it does |
+|--------|-------------|
+| **▶ Start** | Runs `gsm-start.sh` as a detached background process, records PID |
+| **⏹ Stop** | Sends SIGTERM → waits 5s → SIGKILL, clears PID |
+| **🔄 Restart** | Stop + wait + Start |
+
+Server output is logged to `gsm-server.log`. If the process crashes immediately after start, the panel detects it and shows an error.
 
 ### Supported Games (30+ Templates)
 
