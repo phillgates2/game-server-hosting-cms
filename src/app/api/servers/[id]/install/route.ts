@@ -3,16 +3,85 @@ import { db } from "@/db";
 import { gameDefinitions, gameServers, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { eq } from "drizzle-orm";
-import { mkdtemp, writeFile, chmod, rm, mkdir } from "fs/promises";
+import { mkdtemp, writeFile, chmod, rm, mkdir, access, constants } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
-import { exec } from "child_process";
-import { promisify } from "util";
-
-const execAsync = promisify(exec);
+import { spawn, type ChildProcess } from "child_process";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+// Find a working shell binary
+async function findShell(): Promise<string> {
+  const candidates = [
+    "/usr/bin/bash",
+    "/bin/bash",
+    "/usr/bin/sh",
+    "/bin/sh",
+    "/usr/local/bin/bash",
+  ];
+  for (const p of candidates) {
+    try {
+      await access(p, constants.X_OK);
+      return p;
+    } catch {
+      // next
+    }
+  }
+  return "sh"; // bare name — let the OS find it via PATH
+}
+
+// Run a script file and collect output
+function runScript(
+  shellPath: string,
+  scriptPath: string,
+  options: { cwd: string; env: Record<string, string>; timeout: number }
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+    let finished = false;
+
+    const child: ChildProcess = spawn(shellPath, [scriptPath], {
+      cwd: options.cwd,
+      env: options.env as NodeJS.ProcessEnv,
+    });
+
+    const timer = setTimeout(() => {
+      if (!finished) {
+        finished = true;
+        child.kill("SIGKILL");
+        reject(new Error(`Install timed out after ${options.timeout / 1000}s`));
+      }
+    }, options.timeout);
+
+    child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+
+    child.on("error", (err: Error) => {
+      if (!finished) {
+        finished = true;
+        clearTimeout(timer);
+        reject(err);
+      }
+    });
+
+    child.on("close", (code: number | null) => {
+      if (!finished) {
+        finished = true;
+        clearTimeout(timer);
+        if (code === 0) {
+          resolve({ stdout, stderr });
+        } else {
+          const err = new Error(`Script exited with code ${code}`);
+          (err as unknown as Record<string, unknown>).stdout = stdout;
+          (err as unknown as Record<string, unknown>).stderr = stderr;
+          reject(err);
+        }
+      }
+    });
+  });
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (value && typeof value === "object" && !Array.isArray(value)) {
@@ -142,14 +211,14 @@ export async function POST(
     const variables = buildVariables(server);
     const script = replaceTemplateVariables(server.installScript, variables);
 
-    const fullScript = `#!/usr/bin/env bash
+    const fullScript = `#!/usr/bin/env sh
 set -e
 
 echo "=== GameServer Manager Install ==="
-echo "Game: ${server.gameName || "Unknown"}"
-echo "Server: ${server.name}"
+echo "Game: ${(server.gameName || "Unknown").replace(/"/g, '\\"')}"
+echo "Server: ${server.name.replace(/"/g, '\\"')}"
 echo "Path: ${server.installPath}"
-echo "Node: ${server.nodeName || "Local"}"
+echo "Node: ${(server.nodeName || "Local").replace(/"/g, '\\"')}"
 echo ""
 
 # Create install directory
@@ -170,6 +239,9 @@ echo "=== Installation Complete ==="
       // may already exist
     }
 
+    // Find a shell that exists on this system
+    const shellPath = await findShell();
+
     const tempDir = await mkdtemp(join(tmpdir(), "gsm-install-"));
     const scriptPath = join(tempDir, "install.sh");
 
@@ -177,27 +249,20 @@ echo "=== Installation Complete ==="
       await writeFile(scriptPath, fullScript, "utf8");
       await chmod(scriptPath, 0o755);
 
-      // Build env string for the shell
-      const envVars = Object.entries(variables)
-        .map(([k, v]) => `${k}=${JSON.stringify(String(v ?? ""))}`)
-        .join(" ");
+      const env: Record<string, string> = {
+        ...(process.env as Record<string, string>),
+        HOME: process.env.HOME || "/root",
+        PATH: process.env.PATH || "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      };
+      for (const [k, v] of Object.entries(variables)) {
+        env[k] = String(v ?? "");
+      }
 
-      // Use exec() which runs through the system shell (/bin/sh)
-      // This is guaranteed to work on all Linux systems
-      const { stdout, stderr } = await execAsync(
-        `${envVars} sh "${scriptPath}"`,
-        {
-          timeout: 1000 * 60 * 45, // 45 minutes
-          maxBuffer: 1024 * 1024 * 10, // 10 MB
-          cwd: server.installPath,
-          env: {
-            ...process.env,
-            HOME: process.env.HOME || "/root",
-            PATH: process.env.PATH || "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-            ...Object.fromEntries(Object.entries(variables).map(([k, v]) => [k, String(v ?? "")])),
-          },
-        }
-      );
+      const { stdout, stderr } = await runScript(shellPath, scriptPath, {
+        cwd: server.installPath,
+        env,
+        timeout: 1000 * 60 * 45, // 45 min
+      });
 
       await db
         .update(gameServers)
