@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, pool } from "@/db";
-import { installLog, settings, users, forumCategories } from "@/db/schema";
+import { installLog, settings, users, forumCategories, roles } from "@/db/schema";
 import { hashPassword } from "@/lib/auth";
 import { gameTemplates } from "@/db/seeds";
+import { DEFAULT_ROLES } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
 
 export async function GET() {
@@ -36,6 +37,21 @@ export async function POST(req: NextRequest) {
     await logStep("schema", "running", "Creating database tables with multi-node support...");
 
     await pool.query(`
+      -- Roles & Permissions
+      CREATE TABLE IF NOT EXISTS roles (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(64) NOT NULL UNIQUE,
+        display_name VARCHAR(128) NOT NULL,
+        color VARCHAR(7) DEFAULT '#3b82f6',
+        icon VARCHAR(8) DEFAULT '👤',
+        is_system BOOLEAN DEFAULT FALSE,
+        is_default BOOLEAN DEFAULT FALSE,
+        priority INTEGER DEFAULT 0,
+        permissions JSONB NOT NULL DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+
       -- Users
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -43,6 +59,7 @@ export async function POST(req: NextRequest) {
         email VARCHAR(255) NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
         role VARCHAR(20) NOT NULL DEFAULT 'user',
+        role_id INTEGER REFERENCES roles(id),
         status VARCHAR(20) NOT NULL DEFAULT 'active',
         avatar_url TEXT,
         bio TEXT,
@@ -271,9 +288,32 @@ export async function POST(req: NextRequest) {
         updated_at TIMESTAMP DEFAULT NOW() NOT NULL
       );
     `);
-    await logStep("schema", "done", "Database tables created with multi-node support");
+    await logStep("schema", "done", "Database tables created with role-based permissions");
 
-    // Step 2: Create admin user
+    // Step 2: Seed default roles
+    await logStep("roles", "running", "Creating roles...");
+    let adminRoleId: number | null = null;
+    for (const roleDef of DEFAULT_ROLES) {
+      const existing = await db.select().from(roles).where(eq(roles.name, roleDef.name)).limit(1);
+      if (existing.length === 0) {
+        const [created] = await db.insert(roles).values({
+          name: roleDef.name,
+          displayName: roleDef.displayName,
+          color: roleDef.color,
+          icon: roleDef.icon,
+          isSystem: roleDef.isSystem,
+          isDefault: roleDef.isDefault,
+          priority: roleDef.priority,
+          permissions: roleDef.permissions,
+        }).returning();
+        if (roleDef.name === "admin") adminRoleId = created.id;
+      } else {
+        if (roleDef.name === "admin") adminRoleId = existing[0].id;
+      }
+    }
+    await logStep("roles", "done", `${DEFAULT_ROLES.length} roles created (admin, moderator, user)`);
+
+    // Step 3: Create admin user
     await logStep("admin_user", "running", "Creating admin user...");
     const passwordHash = await hashPassword(adminPassword);
 
@@ -284,11 +324,12 @@ export async function POST(req: NextRequest) {
         email: adminEmail,
         passwordHash,
         role: "admin",
+        roleId: adminRoleId,
       });
     }
     await logStep("admin_user", "done", `Admin user '${adminUsername}' created`);
 
-    // Step 3: Note about game templates (NOT auto-seeded)
+    // Step 4: Note about game templates (NOT auto-seeded)
     await logStep("game_templates", "done", `${gameTemplates.length} game templates available. Install from Games panel.`);
 
     // Step 4: Create forum categories

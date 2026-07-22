@@ -14,15 +14,41 @@ A modern, open-source TCAdmin alternative built with **Next.js 16**, **PostgreSQ
 - **🖥️ Multi-Node Support** — Manage game servers across multiple physical/virtual machines
 - **🎮 Game Server Management** — Create, start, stop, install files, and delete game servers
 - **📦 30+ Game Templates** — Pre-configured install scripts (install only what you need)
+- **🔑 Advanced Permissions** — Custom roles with 40+ granular permissions, color/icon/priority
+- **👥 User Management** — Profiles, login tracking, suspend/ban, per-user server limits
 - **📊 Server Monitoring** — Real-time CPU, RAM, disk, and network monitoring with live charts
 - **🧹 RAM Buffer Management** — Automatic buffer/cache threshold detection and one-click clearing
-- **💬 Forum System** — Full forum with categories, threads, and posts
+- **💬 Forum System** — Full forum with user profiles, moderation, quoting, role badges
 - **🗄️ Database Manager** — Built-in PostgreSQL viewer/editor (like phpMyAdmin) with SQL query editor
 - **🔔 Discord Webhooks** — Real-time server event notifications
 - **🌐 IPv6 Support** — Full IPv6 support for game servers and network monitoring
-- **🔐 Authentication** — JWT-based auth with bcrypt password hashing, role-based access control
+- **🔐 Authentication** — JWT-based auth with bcrypt password hashing
 - **🎨 Modern Dark Theme** — Beautiful dark UI with smooth animations
 - **🚀 Web Installer** — Step-by-step web-based installation wizard
+
+### Permission System
+
+40+ granular permissions across 10 categories, fully customizable per role:
+
+| Category | Permissions |
+|----------|------------|
+| **Game Servers** | View, create, edit, delete, start/stop, install files, console |
+| **Nodes** | View, create, edit, delete |
+| **Game Templates** | View, browse templates, install, uninstall |
+| **Users** | View list, edit profiles, delete, change roles, suspend/ban |
+| **Roles** | View, create, edit permissions, delete |
+| **Forum** | View, post, edit own/any, delete own/any, pin, lock |
+| **CMS** | View, create, edit, delete, publish/unpublish |
+| **Monitoring** | View stats, clear RAM buffers |
+| **Database** | View tables, edit rows, execute SQL |
+| **Panel** | Settings, Discord webhooks |
+
+Three system roles are created during install:
+- **🛡️ Administrator** — All permissions
+- **⚔️ Moderator** — Server management + forum moderation + CMS
+- **👤 User** — Basic server and forum access
+
+Create unlimited custom roles from the Roles panel with any combination of permissions.
 
 ### Supported Games (30+ Templates)
 

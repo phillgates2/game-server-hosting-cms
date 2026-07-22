@@ -13,6 +13,9 @@ interface AuthUser {
   id: number;
   username: string;
   role: string;
+  roleName?: string;
+  roleColor?: string;
+  roleIcon?: string;
 }
 
 export default function Home() {

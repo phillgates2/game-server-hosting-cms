@@ -2,11 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { verifyPassword, createToken, getCookieOptions } from "@/lib/auth";
+import { getUserPermissions } from "@/lib/permissions";
 import { eq, sql } from "drizzle-orm";
 
 export async function POST(req: NextRequest) {
   try {
-    const { username, password } = await req.json();
+    const body = await req.json();
+    const username = (body.username || "").trim();
+    const password = body.password || "";
+
     if (!username || !password) {
       return NextResponse.json({ error: "Username and password required" }, { status: 400 });
     }
@@ -16,7 +20,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
     }
 
-    // Check if user is suspended or banned
     if (user.status === "suspended") {
       return NextResponse.json({ error: "Account suspended. Contact an administrator." }, { status: 403 });
     }
@@ -30,7 +33,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Track login
-    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
+    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+      || req.headers.get("x-real-ip")
+      || "unknown";
+
     await db
       .update(users)
       .set({
@@ -42,10 +48,12 @@ export async function POST(req: NextRequest) {
       .where(eq(users.id, user.id));
 
     const token = createToken({ userId: user.id, role: user.role });
+    const permissions = await getUserPermissions(user.id);
 
     const res = NextResponse.json({
       ok: true,
       user: { id: user.id, username: user.username, role: user.role },
+      permissions,
     });
     res.cookies.set("gsm_token", token, getCookieOptions(req.headers));
     return res;

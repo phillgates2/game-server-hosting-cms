@@ -10,13 +10,29 @@ import {
   real,
 } from "drizzle-orm/pg-core";
 
+// ── Roles & Permissions ───────────────────────────────────────
+export const roles = pgTable("roles", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 64 }).notNull().unique(),
+  displayName: varchar("display_name", { length: 128 }).notNull(),
+  color: varchar("color", { length: 7 }).default("#3b82f6"), // hex
+  icon: varchar("icon", { length: 8 }).default("👤"),
+  isSystem: boolean("is_system").default(false), // can't delete system roles
+  isDefault: boolean("is_default").default(false), // auto-assigned to new users
+  priority: integer("priority").default(0), // higher = more important in display
+  permissions: jsonb("permissions").notNull().default("{}"), // Record<string, boolean>
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // ── Users ──────────────────────────────────────────────────────
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   username: varchar("username", { length: 64 }).notNull().unique(),
   email: varchar("email", { length: 255 }).notNull().unique(),
   passwordHash: text("password_hash").notNull(),
-  role: varchar("role", { length: 20 }).notNull().default("user"), // admin, moderator, user
+  role: varchar("role", { length: 20 }).notNull().default("user"), // legacy field for JWT
+  roleId: integer("role_id").references(() => roles.id),
   status: varchar("status", { length: 20 }).notNull().default("active"), // active, suspended, banned
   avatarUrl: text("avatar_url"),
   bio: text("bio"),
