@@ -3,28 +3,13 @@ import { db } from "@/db";
 import { gameDefinitions, gameServers, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { eq } from "drizzle-orm";
-import { mkdtemp, writeFile, chmod, rm, access } from "fs/promises";
+import { mkdtemp, writeFile, chmod, rm, mkdir } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
-import { execFile } from "child_process";
+import { exec } from "child_process";
 import { promisify } from "util";
-import { constants } from "fs";
 
-const execFileAsync = promisify(execFile);
-
-async function findBash(): Promise<string> {
-  const candidates = ["/bin/bash", "/usr/bin/bash", "/usr/local/bin/bash"];
-  for (const p of candidates) {
-    try {
-      await access(p, constants.X_OK);
-      return p;
-    } catch {
-      // try next
-    }
-  }
-  // Last resort: use env to find it
-  return "/usr/bin/env";
-}
+const execAsync = promisify(exec);
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -120,27 +105,30 @@ export async function POST(
       .set({ status: "installing", updatedAt: new Date() })
       .where(eq(gameServers.id, server.id));
 
-    // Remote node support via node agent API.
-    // Local execution is handled by this panel. Remote SSH execution is intentionally not
-    // performed directly here until a hardened node-agent is configured.
+    // Remote node
     if (!server.nodeIsLocal) {
       if (server.nodeApiUrl) {
-        const res = await fetch(`${server.nodeApiUrl.replace(/\/$/, "")}/install`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(server.nodeApiKey ? { "X-API-Key": server.nodeApiKey } : {}),
-          },
-          body: JSON.stringify({ serverId: server.id }),
-        });
+        try {
+          const res = await fetch(`${server.nodeApiUrl.replace(/\/$/, "")}/install`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(server.nodeApiKey ? { "X-API-Key": server.nodeApiKey } : {}),
+            },
+            body: JSON.stringify({ serverId: server.id }),
+          });
 
-        if (!res.ok) {
-          const text = await res.text();
+          if (!res.ok) {
+            const text = await res.text();
+            await db.update(gameServers).set({ status: "install_failed", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
+            return NextResponse.json({ error: `Remote node install failed: ${text}` }, { status: 502 });
+          }
+
+          return NextResponse.json({ ok: true, message: "Remote node installation started" });
+        } catch (e: unknown) {
           await db.update(gameServers).set({ status: "install_failed", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
-          return NextResponse.json({ error: `Remote node install failed: ${text}` }, { status: 502 });
+          return NextResponse.json({ error: `Remote node error: ${e instanceof Error ? e.message : "Unknown"}` }, { status: 502 });
         }
-
-        return NextResponse.json({ ok: true, message: "Remote node installation started" });
       }
 
       await db.update(gameServers).set({ status: "install_failed", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
@@ -150,11 +138,9 @@ export async function POST(
       );
     }
 
+    // Build variables and script
     const variables = buildVariables(server);
     const script = replaceTemplateVariables(server.installScript, variables);
-
-    // Wrap in a header + the template script
-    const bashPath = await findBash();
 
     const fullScript = `#!/usr/bin/env bash
 set -e
@@ -177,25 +163,41 @@ echo ""
 echo "=== Installation Complete ==="
 `;
 
+    // Ensure install path exists
+    try {
+      await mkdir(server.installPath, { recursive: true });
+    } catch {
+      // may already exist
+    }
+
     const tempDir = await mkdtemp(join(tmpdir(), "gsm-install-"));
     const scriptPath = join(tempDir, "install.sh");
 
     try {
       await writeFile(scriptPath, fullScript, "utf8");
-      await chmod(scriptPath, 0o700);
+      await chmod(scriptPath, 0o755);
 
-      const args = bashPath === "/usr/bin/env" ? ["bash", scriptPath] : [scriptPath];
-      const { stdout, stderr } = await execFileAsync(bashPath, args, {
-        timeout: 1000 * 60 * 45,
-        maxBuffer: 1024 * 1024 * 10,
-        cwd: server.installPath,
-        env: {
-          ...process.env,
-          HOME: process.env.HOME || "/root",
-          PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin",
-          ...Object.fromEntries(Object.entries(variables).map(([k, v]) => [k, String(v ?? "")])),
-        },
-      });
+      // Build env string for the shell
+      const envVars = Object.entries(variables)
+        .map(([k, v]) => `${k}=${JSON.stringify(String(v ?? ""))}`)
+        .join(" ");
+
+      // Use exec() which runs through the system shell (/bin/sh)
+      // This is guaranteed to work on all Linux systems
+      const { stdout, stderr } = await execAsync(
+        `${envVars} sh "${scriptPath}"`,
+        {
+          timeout: 1000 * 60 * 45, // 45 minutes
+          maxBuffer: 1024 * 1024 * 10, // 10 MB
+          cwd: server.installPath,
+          env: {
+            ...process.env,
+            HOME: process.env.HOME || "/root",
+            PATH: process.env.PATH || "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            ...Object.fromEntries(Object.entries(variables).map(([k, v]) => [k, String(v ?? "")])),
+          },
+        }
+      );
 
       await db
         .update(gameServers)
