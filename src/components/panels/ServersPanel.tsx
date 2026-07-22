@@ -156,17 +156,27 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
     }
   }
 
-  async function toggleStatus(id: number, current: string) {
-    const next = current === "running" ? "stopped" : "running";
+  async function controlProcess(id: number, action: "start" | "stop" | "restart") {
+    setMessage(null);
     try {
-      await fetch(`/api/servers/${id}`, {
-        method: "PATCH",
+      const res = await fetch(`/api/servers/${id}/process`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: next }),
+        body: JSON.stringify({ action }),
       });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ type: "error", text: data.error || `Failed to ${action}` });
+      } else {
+        if (action === "start" && !data.alive) {
+          setMessage({ type: "error", text: `Server process started but crashed immediately. Check ${data.logPath || "gsm-server.log"} for details.` });
+        } else {
+          setMessage({ type: "success", text: `Server ${action === "start" ? "started" : action === "stop" ? "stopped" : "restarted"} (PID: ${data.pid || "N/A"})` });
+        }
+      }
       loadData();
     } catch (e) {
-      console.error("Toggle error:", e);
+      setMessage({ type: "error", text: e instanceof Error ? e.message : `Failed to ${action}` });
     }
   }
 
@@ -397,9 +407,14 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                   >
                     {installingId === server.id || server.status === "installing" ? "Installing..." : "Install Files"}
                   </button>
-                  <button onClick={() => toggleStatus(server.id, server.status)} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
-                    server.status === "running" ? "bg-danger/15 text-danger" : "bg-success/15 text-success"
-                  }`}>{server.status === "running" ? "Stop" : "Start"}</button>
+                  {server.status === "running" ? (
+                    <>
+                      <button onClick={() => controlProcess(server.id, "stop")} className="px-3 py-1.5 bg-danger/15 text-danger rounded-lg text-xs font-medium">⏹ Stop</button>
+                      <button onClick={() => controlProcess(server.id, "restart")} className="px-3 py-1.5 bg-warning/15 text-warning rounded-lg text-xs font-medium">🔄 Restart</button>
+                    </>
+                  ) : (
+                    <button onClick={() => controlProcess(server.id, "start")} className="px-3 py-1.5 bg-success/15 text-success rounded-lg text-xs font-medium">▶ Start</button>
+                  )}
                   {server.discordWebhook && (
                     <button onClick={() => testWebhook(server.discordWebhook!, server.name)} className="px-3 py-1.5 bg-[#5865F2]/15 text-[#5865F2] rounded-lg text-xs font-medium">Test 🔔</button>
                   )}

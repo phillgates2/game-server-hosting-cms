@@ -3,10 +3,11 @@ import { db } from "@/db";
 import { gameDefinitions, gameServers, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { eq } from "drizzle-orm";
-import { mkdtemp, writeFile, chmod, rm, mkdir, access, constants } from "fs/promises";
+import { mkdtemp, writeFile, chmod, rm, mkdir, access, constants, stat } from "fs/promises";
 import { tmpdir, homedir } from "os";
-import { basename, join } from "path";
+import { basename, dirname, join } from "path";
 import { spawn, type ChildProcess } from "child_process";
+import { getTemplateBySlug } from "@/db/seeds";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -129,6 +130,105 @@ function buildVariables(server: {
   };
 }
 
+async function exists(path: string) {
+  try {
+    await access(path, constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function renderConfigFile(filePath: string, config: Record<string, unknown>) {
+  const lower = filePath.toLowerCase();
+  if (lower.endsWith(".json")) {
+    return `${JSON.stringify(config, null, 2)}\n`;
+  }
+  if (lower.endsWith(".xml")) {
+    const items = Object.entries(config)
+      .map(([k, v]) => `  <setting key="${k}">${String(v)}</setting>`)
+      .join("\n");
+    return `<settings>\n${items}\n</settings>\n`;
+  }
+  if (lower.endsWith(".yml") || lower.endsWith(".yaml")) {
+    return `${Object.entries(config).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join("\n")}\n`;
+  }
+  if (lower.endsWith(".cfg") || lower.endsWith(".conf") || lower.endsWith(".ini") || lower.endsWith(".properties") || lower.endsWith(".dat")) {
+    return `${Object.entries(config).map(([k, v]) => `${k}=${String(v)}`).join("\n")}\n`;
+  }
+  return `${Object.entries(config).map(([k, v]) => `${k}=${String(v)}`).join("\n")}\n`;
+}
+
+async function materializeServerFiles(options: {
+  installPath: string;
+  gameName: string;
+  startCommand?: string | null;
+  stopCommand?: string | null;
+  configFiles?: Record<string, string> | null;
+  defaultConfig?: Record<string, unknown> | null;
+  variables: Record<string, unknown>;
+}) {
+  const generated: string[] = [];
+
+  // Environment file
+  const envPath = join(options.installPath, "gsm-server.env");
+  const envBody = Object.entries(options.variables)
+    .map(([k, v]) => `${k}=${JSON.stringify(String(v ?? ""))}`)
+    .join("\n") + "\n";
+  await writeFile(envPath, envBody, "utf8");
+  generated.push("gsm-server.env");
+
+  // Start script
+  if (options.startCommand) {
+    const startPath = join(options.installPath, "gsm-start.sh");
+    const startBody = `#!/usr/bin/env bash\nset -e\ncd ${JSON.stringify(options.installPath)}\n${replaceTemplateVariables(options.startCommand, options.variables)}\n`;
+    await writeFile(startPath, startBody, "utf8");
+    await chmod(startPath, 0o755);
+    generated.push("gsm-start.sh");
+  }
+
+  // Stop script
+  if (options.stopCommand) {
+    const stopPath = join(options.installPath, "gsm-stop.sh");
+    const stopBody = `#!/usr/bin/env bash\nset -e\ncd ${JSON.stringify(options.installPath)}\n${replaceTemplateVariables(options.stopCommand, options.variables)}\n`;
+    await writeFile(stopPath, stopBody, "utf8");
+    await chmod(stopPath, 0o755);
+    generated.push("gsm-stop.sh");
+  }
+
+  // Config files (create if missing)
+  const configFiles = options.configFiles || {};
+  const defaultConfig = options.defaultConfig || {};
+  for (const configPath of Object.keys(configFiles)) {
+    const absolute = join(options.installPath, configPath);
+    await mkdir(dirname(absolute), { recursive: true });
+    if (!(await exists(absolute))) {
+      const body = renderConfigFile(configPath, defaultConfig);
+      await writeFile(absolute, body, "utf8");
+      generated.push(configPath);
+    }
+  }
+
+  // Human-readable readme/start guide in server dir
+  const readmePath = join(options.installPath, "GSM-README.txt");
+  const readmeBody = [
+    `GameServer Manager generated files for ${options.gameName}`,
+    "",
+    "Generated files:",
+    ...generated.map((g) => `- ${g}`),
+    "",
+    "Typical usage:",
+    options.startCommand ? "- Start: ./gsm-start.sh" : "- Start command not defined",
+    options.stopCommand ? "- Stop:  ./gsm-stop.sh" : "- Stop command not defined",
+    "",
+    "Variables are stored in gsm-server.env",
+  ].join("\n") + "\n";
+  await writeFile(readmePath, readmeBody, "utf8");
+  generated.push("GSM-README.txt");
+
+  return generated;
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -152,7 +252,12 @@ export async function POST(
         config: gameServers.config,
         nodeId: gameServers.nodeId,
         gameName: gameDefinitions.name,
+        gameSlug: gameDefinitions.slug,
         installScript: gameDefinitions.installScript,
+        startCommand: gameDefinitions.startCommand,
+        stopCommand: gameDefinitions.stopCommand,
+        configFiles: gameDefinitions.configFiles,
+        defaultConfig: gameDefinitions.defaultConfig,
         nodeName: nodes.name,
         nodeIsLocal: nodes.isLocal,
         nodeApiUrl: nodes.apiUrl,
@@ -172,7 +277,14 @@ export async function POST(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    if (!server.installScript) {
+    const latestTemplate = server.gameSlug ? getTemplateBySlug(server.gameSlug) : undefined;
+    const installScriptSource = latestTemplate?.installScript || server.installScript;
+    const startCommandSource = latestTemplate?.startCommand || server.startCommand;
+    const stopCommandSource = latestTemplate?.stopCommand || server.stopCommand;
+    const configFilesSource = (latestTemplate?.configFiles || asRecord(server.configFiles)) as Record<string, string>;
+    const defaultConfigSource = (latestTemplate?.defaultConfig || asRecord(server.defaultConfig)) as Record<string, unknown>;
+
+    if (!installScriptSource) {
       return NextResponse.json({ error: "This game has no install script" }, { status: 400 });
     }
 
@@ -228,7 +340,7 @@ export async function POST(
 
     // Build variables and script
     const variables = buildVariables({ ...server, installPath: effectiveInstallPath });
-    const script = replaceTemplateVariables(server.installScript, variables);
+    const script = replaceTemplateVariables(installScriptSource, variables);
 
     const fullScript = `#!/usr/bin/env bash
 set -e
@@ -310,6 +422,16 @@ echo "=== Installation Complete ==="
         timeout: 1000 * 60 * 45, // 45 min
       });
 
+      const generatedFiles = await materializeServerFiles({
+        installPath: effectiveInstallPath,
+        gameName: server.gameName || "Game",
+        startCommand: startCommandSource,
+        stopCommand: stopCommandSource,
+        configFiles: configFilesSource,
+        defaultConfig: defaultConfigSource,
+        variables,
+      });
+
       await db
         .update(gameServers)
         .set({ status: "stopped", updatedAt: new Date() })
@@ -318,7 +440,7 @@ echo "=== Installation Complete ==="
       return NextResponse.json({
         ok: true,
         message: `${server.gameName || "Game"} files installed for ${server.name}`,
-        output: stdout.slice(-8000),
+        output: `${stdout}\n\nGenerated files:\n${generatedFiles.map((f) => `- ${f}`).join("\n")}`.slice(-8000),
         errorOutput: stderr.slice(-8000),
       });
     } catch (e: unknown) {
