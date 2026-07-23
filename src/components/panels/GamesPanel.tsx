@@ -19,10 +19,17 @@ interface TemplateDetail {
   category: string; description: string; estimatedSize: string;
   installScript: string; startCommand: string; stopCommand: string | null;
   configFiles: Record<string, string>; defaultConfig: Record<string, string>;
-  variables: Array<{ name: string; key: string; description: string; defaultValue: string; required: boolean; type: string }>;
+  variables: Array<{
+    name: string; description: string;
+    env_variable: string; default_value: string;
+    user_viewable: boolean; user_editable: boolean;
+    rules: string; field_type: string;
+    // legacy compat
+    key?: string; defaultValue?: string; required?: boolean; type?: string;
+  }>;
 }
 
-type Tab = "installed" | "templates" | "create";
+type Tab = "installed" | "templates" | "create" | "import";
 
 const EMPTY_FORM = {
   name: "", slug: "", engine: "", defaultPort: "", steamAppId: "", iconEmoji: "🎮",
@@ -43,6 +50,8 @@ export default function GamesPanel() {
   const [createForm, setCreateForm] = useState(EMPTY_FORM);
   const [installing, setInstalling] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [importData, setImportData] = useState("");
+  const [importFormat, setImportFormat] = useState("auto");
 
   const loadInstalledGames = useCallback(async () => {
     const res = await fetch("/api/games"); const data = await res.json();
@@ -201,6 +210,10 @@ export default function GamesPanel() {
             className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === "create" ? "bg-accent text-white" : "bg-bg-secondary text-text-muted"}`}>
             + Custom
           </button>
+          <button onClick={() => { setTab("import"); setEditing(null); setCreating(false); }}
+            className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === "import" ? "bg-accent text-white" : "bg-bg-secondary text-text-muted"}`}>
+            📥 Import
+          </button>
         </div>
       </div>
 
@@ -305,19 +318,76 @@ export default function GamesPanel() {
                   <div className="bg-bg-secondary rounded-lg p-3"><p className="text-[10px] text-text-muted uppercase">IPv6</p><p className="text-sm font-medium">{selectedTemplate.supportsIpv6 ? "Yes" : "No"}</p></div>
                 </div>
                 <div><h4 className="text-xs text-text-muted uppercase tracking-wider mb-2">Variables ({selectedTemplate.variables.length})</h4>
-                  <div className="grid gap-2">{selectedTemplate.variables.map((v) => (
-                    <div key={v.key} className="bg-bg-secondary rounded-lg p-3 flex items-center justify-between">
-                      <div><code className="text-accent text-xs font-mono">{`{{${v.key}}}`}</code><p className="text-sm">{v.name}</p><p className="text-xs text-text-muted">{v.description}</p></div>
-                      <div className="text-right text-xs"><span className={`px-2 py-0.5 rounded ${v.required ? "bg-warning/15 text-warning" : "bg-bg-tertiary text-text-muted"}`}>{v.required ? "Required" : "Optional"}</span>
-                        {v.defaultValue && <p className="text-text-muted mt-1">Default: {v.defaultValue}</p>}</div>
+                  <div className="grid gap-2">{selectedTemplate.variables.map((v) => {
+                    const envVar = v.env_variable || (v as Record<string, unknown>).key as string || "";
+                    const defVal = v.default_value || (v as Record<string, unknown>).defaultValue as string || "";
+                    const isRequired = v.rules?.includes("required") ?? (v as Record<string, unknown>).required as boolean ?? false;
+                    return (
+                    <div key={envVar} className="bg-bg-secondary rounded-lg p-3 flex items-center justify-between">
+                      <div>
+                        <code className="text-accent text-xs font-mono">{`{{${envVar}}}`}</code>
+                        <p className="text-sm">{v.name}</p>
+                        <p className="text-xs text-text-muted">{v.description}</p>
+                      </div>
+                      <div className="text-right text-xs space-y-1">
+                        <span className={`px-2 py-0.5 rounded ${isRequired ? "bg-warning/15 text-warning" : "bg-bg-tertiary text-text-muted"}`}>{isRequired ? "Required" : "Optional"}</span>
+                        {defVal && <p className="text-text-muted">Default: {defVal}</p>}
+                        {v.rules && <p className="text-text-muted font-mono text-[10px]">{v.rules}</p>}
+                        {v.field_type && <p className="text-text-muted text-[10px]">Type: {v.field_type}</p>}
+                        <div className="flex gap-1 justify-end">
+                          {v.user_viewable && <span className="text-[10px] bg-accent/10 text-accent px-1 rounded">viewable</span>}
+                          {v.user_editable && <span className="text-[10px] bg-success/10 text-success px-1 rounded">editable</span>}
+                        </div>
+                      </div>
                     </div>
-                  ))}</div>
+                    );
+                  })}</div>
                 </div>
                 <div><h4 className="text-xs text-text-muted uppercase tracking-wider mb-2">Start Command</h4><pre className="bg-bg-primary border border-border rounded-lg p-3 text-xs font-mono overflow-x-auto text-success">{selectedTemplate.startCommand}</pre></div>
                 <div><h4 className="text-xs text-text-muted uppercase tracking-wider mb-2">Install Script</h4><pre className="bg-bg-primary border border-border rounded-lg p-3 text-xs font-mono overflow-x-auto max-h-48 overflow-y-auto text-text-secondary">{selectedTemplate.installScript}</pre></div>
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ═══ IMPORT ═══ */}
+      {tab === "import" && (
+        <div className="bg-bg-card border border-border rounded-xl p-6 space-y-4">
+          <h3 className="font-semibold">📥 Import Game Template</h3>
+          <p className="text-text-secondary text-sm">
+            Paste a <strong>Pterodactyl egg JSON</strong> or an <strong>AMP template JSON</strong> to import it as a game definition.
+          </p>
+          <div>
+            <label className="block text-xs text-text-muted mb-1">Format</label>
+            <select value={importFormat} onChange={(e) => setImportFormat(e.target.value)} className="px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm">
+              <option value="auto">Auto-detect</option>
+              <option value="pterodactyl">Pterodactyl Egg (JSON)</option>
+              <option value="amp">AMP Template (JSON)</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-text-muted mb-1">Paste JSON</label>
+            <textarea value={importData} onChange={(e) => setImportData(e.target.value)} rows={14}
+              className="w-full px-3 py-2 bg-[#0d1117] border border-border rounded-lg text-xs font-mono text-text-primary resize-y" placeholder="Paste full egg or template JSON..." spellCheck={false} />
+          </div>
+          <button onClick={async () => {
+            setMessage(null);
+            try {
+              let parsed; try { parsed = JSON.parse(importData); } catch { setMessage({ type: "error", text: "Invalid JSON" }); return; }
+              const res = await fetch("/api/games/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ format: importFormat === "auto" ? undefined : importFormat, data: parsed }) });
+              const data = await res.json();
+              if (!res.ok) setMessage({ type: "error", text: data.error });
+              else { setMessage({ type: "success", text: data.message }); setImportData(""); loadInstalledGames(); setTab("installed"); }
+            } catch (e) { setMessage({ type: "error", text: e instanceof Error ? e.message : "Failed" }); }
+          }} disabled={!importData.trim()} className="px-6 py-2 bg-success hover:opacity-90 disabled:opacity-50 text-white rounded-lg text-sm font-medium">
+            Import Template
+          </button>
+          <div className="bg-bg-secondary rounded-lg p-4 text-xs text-text-muted space-y-1">
+            <p className="font-medium text-text-secondary">Sources:</p>
+            <p>🥚 Pterodactyl eggs: <a href="https://github.com/pelican-eggs/eggs" target="_blank" className="text-accent hover:underline">github.com/pelican-eggs/eggs</a></p>
+            <p>⚡ AMP templates: <a href="https://github.com/CubeCoders/AMPTemplates" target="_blank" className="text-accent hover:underline">github.com/CubeCoders/AMPTemplates</a></p>
+          </div>
         </div>
       )}
     </div>

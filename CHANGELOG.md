@@ -4,6 +4,45 @@ All notable changes to GameServer Manager are documented in this file.
 
 ---
 
+## [2.0.0] — 2026-07-21
+
+### Added
+- **📥 Pterodactyl Egg & AMP Template Import** — Paste JSON from external repositories directly into the panel
+  - Auto-detects format (Pterodactyl `PTDL_v2` or AMP `Meta.DisplayName` / `App.DisplayName`)
+  - Pterodactyl import parses: name, startup, install script, variables → default config, stop command
+  - AMP import parses: DisplayName, ExecutableLinux, CommandLineArgs, MaxUsers, ExitString, SupportsIPv6
+  - Import tab in Games panel with format selector and JSON paste area
+  - Links to source repos: `pelican-eggs/eggs` and `CubeCoders/AMPTemplates`
+  - `POST /api/games/import` — Import endpoint with format auto-detection
+- **Unified variable format** — Supports both Pterodactyl and AMP variable fields in one interface
+  - Core: `env_variable`, `default_value`, `user_viewable`, `user_editable`, `rules`, `field_type`
+  - AMP extensions: `category`, `subcategory`, `keywords`, `enum_values`, `min_value`, `max_value`, `param_field_name`
+  - `enum_values` enables select/dropdown fields (`{ "value": "label" }`)
+  - `min_value` / `max_value` for numeric range validation
+  - `param_field_name` for binding variables to config file keys
+- Games panel now has 4 tabs: **Installed**, **Templates**, **+ Custom**, **📥 Import**
+
+---
+
+## [1.9.0] — 2026-07-21
+
+### Added
+- **Pterodactyl/AMP-compatible variable format** — All 27 game templates now use the Pterodactyl egg variable structure
+  - `env_variable` — Environment variable name (e.g., `QUERY_PORT`)
+  - `default_value` — Default value for the variable
+  - `user_viewable` — Whether users can see this variable
+  - `user_editable` — Whether users can change it
+  - `rules` — Laravel-style validation: `required|integer|between:1,65535`, `nullable|string|max:256`, etc.
+  - `field_type` — Input type: `text`, `number`, `password`, `select`, `checkbox`
+- Variable detail view in template browser now shows rules, field type, viewable/editable badges
+- Compatible with Pterodactyl game-eggs repository format for variable definitions
+
+### Changed
+- All 58 variable definitions across 27 templates migrated from legacy `{ key, defaultValue, required, type }` to Pterodactyl-style `{ env_variable, default_value, user_viewable, user_editable, rules, field_type }`
+- `V()` helper function generates Pterodactyl-compatible variable objects from a compact shorthand
+
+---
+
 ## [1.8.0] — 2026-07-21
 
 ### Added

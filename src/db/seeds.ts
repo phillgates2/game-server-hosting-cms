@@ -21,30 +21,88 @@ export interface GameTemplate {
   variables: TemplateVariable[];
 }
 
+// Unified variable format compatible with both Pterodactyl eggs and AMP templates
 export interface TemplateVariable {
-  name: string;
-  key: string;
-  description: string;
-  defaultValue: string;
-  required: boolean;
-  type: "string" | "number" | "boolean" | "password";
+  // Core (required)
+  name: string;                    // Pterodactyl: name, AMP: DisplayName
+  description: string;             // Pterodactyl: description, AMP: Description
+  env_variable: string;            // Pterodactyl: env_variable, AMP: FieldName
+  default_value: string;           // Pterodactyl: default_value, AMP: DefaultValue
+  // Access control
+  user_viewable: boolean;          // Pterodactyl: user_viewable, AMP: !Hidden
+  user_editable: boolean;          // Pterodactyl: user_editable
+  // Validation
+  rules: string;                   // Pterodactyl: rules (Laravel-style: "required|integer|between:1,65535")
+  field_type: "text" | "number" | "password" | "select" | "checkbox" | "hidden";
+  // AMP-specific extensions
+  category?: string;               // AMP: Category (e.g., "Server Settings")
+  subcategory?: string;            // AMP: Subcategory
+  keywords?: string;               // AMP: Keywords (comma-separated for search)
+  enum_values?: Record<string, string>; // AMP: EnumValues (value → label for select dropdowns)
+  min_value?: number;              // AMP: MinValue
+  max_value?: number;              // AMP: MaxValue
+  // Config file binding (AMP-style)
+  param_field_name?: string;       // AMP: ParamFieldName (key in config file)
+}
+
+// Helper to define variables — supports both Pterodactyl and AMP styles
+function V(
+  name: string,
+  env_variable: string,
+  description: string,
+  default_value: string,
+  opts?: {
+    required?: boolean;
+    type?: "string" | "number" | "boolean" | "password" | "select";
+    viewable?: boolean;
+    editable?: boolean;
+    category?: string;
+    keywords?: string;
+    enum_values?: Record<string, string>;
+    min_value?: number;
+    max_value?: number;
+    param_field_name?: string;
+  }
+): TemplateVariable {
+  const t = opts?.type || "string";
+  const req = opts?.required !== false;
+  const minMax = opts?.min_value !== undefined && opts?.max_value !== undefined
+    ? `|between:${opts.min_value},${opts.max_value}` : "";
+  return {
+    name,
+    description,
+    env_variable,
+    default_value,
+    user_viewable: opts?.viewable !== false,
+    user_editable: opts?.editable !== false,
+    rules: req
+      ? t === "number" ? `required|integer${minMax || "|between:1,65535"}` : t === "boolean" ? "required|boolean" : `required|string|max:256`
+      : t === "number" ? `nullable|integer${minMax}` : t === "boolean" ? "nullable|boolean" : t === "password" ? "nullable|string" : "nullable|string|max:256",
+    field_type: t === "select" ? "select" : t === "number" ? "number" : t === "boolean" ? "checkbox" : t === "password" ? "password" : "text",
+    category: opts?.category,
+    keywords: opts?.keywords,
+    enum_values: opts?.enum_values,
+    min_value: opts?.min_value,
+    max_value: opts?.max_value,
+    param_field_name: opts?.param_field_name,
+  };
 }
 
 // Common variables used across many games
 const COMMON_VARS: TemplateVariable[] = [
-  { name: "Server Name", key: "SERVER_NAME", description: "Display name for your server", defaultValue: "My Server", required: true, type: "string" },
-  { name: "Port", key: "PORT", description: "Main server port", defaultValue: "", required: true, type: "number" },
-  { name: "Max Players", key: "MAX_PLAYERS", description: "Maximum concurrent players", defaultValue: "32", required: false, type: "number" },
-  { name: "Install Path", key: "INSTALL_PATH", description: "Server installation directory", defaultValue: "/opt/gameservers", required: true, type: "string" },
+  V("Server Name", "SERVER_NAME", "Display name for your server", "My Server"),
+  V("Port", "PORT", "Main server port", "", { type: "number" }),
+  V("Max Players", "MAX_PLAYERS", "Maximum concurrent players", "32", { required: false, type: "number" }),
+  V("Install Path", "INSTALL_PATH", "Server installation directory", "/opt/gameservers"),
 ];
 
 const STEAM_VARS: TemplateVariable[] = [
   ...COMMON_VARS,
-  { name: "Steam Query Port", key: "QUERY_PORT", description: "Steam query port (usually main port + 1)", defaultValue: "", required: false, type: "number" },
+  V("Steam Query Port", "QUERY_PORT", "Steam query port (usually main port + 1)", "", { required: false, type: "number" }),
 ];
 
 const RCON_VARS: TemplateVariable[] = [
-  { name: "RCON Password", key: "RCON_PASSWORD", description: "Remote console password", defaultValue: "", required: false, type: "password" },
+  V("RCON Password", "RCON_PASSWORD", "Remote console password", "", { required: false, type: "password" }),
 ];
 
 export const gameTemplates: GameTemplate[] = [
@@ -64,10 +122,10 @@ export const gameTemplates: GameTemplate[] = [
     estimatedSize: "~500 MB",
     variables: [
       ...COMMON_VARS,
-      { name: "Max RAM (GB)", key: "MAX_RAM", description: "Maximum memory allocation", defaultValue: "4", required: true, type: "number" },
-      { name: "Game Mode", key: "GAMEMODE", description: "survival, creative, adventure, spectator", defaultValue: "survival", required: false, type: "string" },
-      { name: "Difficulty", key: "DIFFICULTY", description: "peaceful, easy, normal, hard", defaultValue: "normal", required: false, type: "string" },
-      { name: "Online Mode", key: "ONLINE_MODE", description: "Require valid Minecraft accounts", defaultValue: "true", required: false, type: "boolean" },
+      V("Max RAM (GB)", "MAX_RAM", "Maximum memory allocation", "4", { type: "number" }),
+      V("Game Mode", "GAMEMODE", "survival, creative, adventure, spectator", "survival", { required: false }),
+      V("Difficulty", "DIFFICULTY", "peaceful, easy, normal, hard", "normal", { required: false }),
+      V("Online Mode", "ONLINE_MODE", "Require valid Minecraft accounts", "true", { required: false, type: "boolean" }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -113,8 +171,8 @@ echo "Minecraft Java server installed successfully"`,
     estimatedSize: "~600 MB",
     variables: [
       ...COMMON_VARS,
-      { name: "Max RAM (GB)", key: "MAX_RAM", description: "Maximum memory allocation", defaultValue: "4", required: true, type: "number" },
-      { name: "View Distance", key: "VIEW_DISTANCE", description: "Chunk render distance", defaultValue: "10", required: false, type: "number" },
+      V("Max RAM (GB)", "MAX_RAM", "Maximum memory allocation", "4", { type: "number" }),
+      V("View Distance", "VIEW_DISTANCE", "Chunk render distance", "10", { required: false, type: "number" }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -156,7 +214,7 @@ echo "Paper server installed successfully"`,
     estimatedSize: "~300 MB",
     variables: [
       ...COMMON_VARS,
-      { name: "Game Mode", key: "GAMEMODE", description: "survival, creative, adventure", defaultValue: "survival", required: false, type: "string" },
+      V("Game Mode", "GAMEMODE", "survival, creative, adventure", "survival", { required: false }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -199,10 +257,10 @@ echo "Minecraft Bedrock server installed successfully"`,
     variables: [
       ...STEAM_VARS,
       ...RCON_VARS,
-      { name: "GSLT Token", key: "GSLT_TOKEN", description: "Game Server Login Token from Steam", defaultValue: "", required: true, type: "string" },
-      { name: "Game Type", key: "GAME_TYPE", description: "0=Casual, 1=Competitive", defaultValue: "0", required: false, type: "number" },
-      { name: "Game Mode", key: "GAME_MODE", description: "0=Casual, 1=Competitive, 2=Wingman", defaultValue: "1", required: false, type: "number" },
-      { name: "Map", key: "MAP", description: "Starting map", defaultValue: "de_dust2", required: false, type: "string" },
+      V("GSLT Token", "GSLT_TOKEN", "Game Server Login Token from Steam", ""),
+      V("Game Type", "GAME_TYPE", "0=Casual, 1=Competitive", "0", { required: false, type: "number" }),
+      V("Game Mode", "GAME_MODE", "0=Casual, 1=Competitive, 2=Wingman", "1", { required: false, type: "number" }),
+      V("Map", "MAP", "Starting map", "de_dust2", { required: false }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -256,7 +314,7 @@ echo "CS2 server installed successfully"`,
     variables: [
       ...STEAM_VARS,
       ...RCON_VARS,
-      { name: "Map", key: "MAP", description: "Starting map", defaultValue: "cp_badlands", required: false, type: "string" },
+      V("Map", "MAP", "Starting map", "cp_badlands", { required: false }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -310,9 +368,9 @@ echo "TF2 server installed successfully"`,
     variables: [
       ...STEAM_VARS,
       ...RCON_VARS,
-      { name: "Game Mode", key: "GAMEMODE", description: "sandbox, terrortown, prophunt, etc.", defaultValue: "sandbox", required: false, type: "string" },
-      { name: "Map", key: "MAP", description: "Starting map", defaultValue: "gm_flatgrass", required: false, type: "string" },
-      { name: "Workshop Collection", key: "WORKSHOP_COLLECTION", description: "Steam Workshop collection ID", defaultValue: "", required: false, type: "string" },
+      V("Game Mode", "GAMEMODE", "sandbox, terrortown, prophunt, etc.", "sandbox", { required: false }),
+      V("Map", "MAP", "Starting map", "gm_flatgrass", { required: false }),
+      V("Workshop Collection", "WORKSHOP_COLLECTION", "Steam Workshop collection ID", "", { required: false }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -366,7 +424,7 @@ echo "Garry's Mod server installed successfully"`,
     variables: [
       ...STEAM_VARS,
       ...RCON_VARS,
-      { name: "Map", key: "MAP", description: "Starting campaign", defaultValue: "c1m1_hotel", required: false, type: "string" },
+      V("Map", "MAP", "Starting campaign", "c1m1_hotel", { required: false }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -423,9 +481,9 @@ echo "L4D2 server installed successfully"`,
     variables: [
       ...STEAM_VARS,
       ...RCON_VARS,
-      { name: "World Size", key: "WORLD_SIZE", description: "Map size (1000-6000)", defaultValue: "3000", required: false, type: "number" },
-      { name: "World Seed", key: "WORLD_SEED", description: "Map generation seed", defaultValue: "12345", required: false, type: "number" },
-      { name: "RCON Port", key: "RCON_PORT", description: "RCON port", defaultValue: "28016", required: false, type: "number" },
+      V("World Size", "WORLD_SIZE", "Map size (1000-6000)", "3000", { required: false, type: "number" }),
+      V("World Seed", "WORLD_SEED", "Map generation seed", "12345", { required: false, type: "number" }),
+      V("RCON Port", "RCON_PORT", "RCON port", "28016", { required: false, type: "number" }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -474,9 +532,9 @@ echo "Rust server installed successfully"`,
     estimatedSize: "~50 GB",
     variables: [
       ...STEAM_VARS,
-      { name: "Map", key: "MAP", description: "TheIsland, Ragnarok, Valguero, etc.", defaultValue: "TheIsland", required: false, type: "string" },
-      { name: "Admin Password", key: "ADMIN_PASSWORD", description: "Server admin password", defaultValue: "", required: true, type: "password" },
-      { name: "Server Password", key: "SERVER_PASSWORD", description: "Join password (optional)", defaultValue: "", required: false, type: "password" },
+      V("Map", "MAP", "TheIsland, Ragnarok, Valguero, etc.", "TheIsland", { required: false }),
+      V("Admin Password", "ADMIN_PASSWORD", "Server admin password", "", { type: "password" }),
+      V("Server Password", "SERVER_PASSWORD", "Join password (optional)", "", { required: false, type: "password" }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -525,9 +583,9 @@ echo "ARK server installed successfully"`,
     estimatedSize: "~1 GB",
     variables: [
       ...COMMON_VARS,
-      { name: "World Name", key: "WORLD_NAME", description: "Name of your world save", defaultValue: "Dedicated", required: true, type: "string" },
-      { name: "Password", key: "PASSWORD", description: "Server password (min 5 chars)", defaultValue: "", required: true, type: "password" },
-      { name: "Public", key: "PUBLIC", description: "List on server browser (1=yes, 0=no)", defaultValue: "1", required: false, type: "number" },
+      V("World Name", "WORLD_NAME", "Name of your world save", "Dedicated"),
+      V("Password", "PASSWORD", "Server password (min 5 chars)", "", { type: "password" }),
+      V("Public", "PUBLIC", "List on server browser (1=yes, 0=no)", "1", { required: false, type: "number" }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -576,8 +634,8 @@ echo "Valheim server installed successfully"`,
     estimatedSize: "~12 GB",
     variables: [
       ...STEAM_VARS,
-      { name: "Game Difficulty", key: "DIFFICULTY", description: "0-5 (Scavenger to Insane)", defaultValue: "2", required: false, type: "number" },
-      { name: "World Name", key: "WORLD_NAME", description: "World save name", defaultValue: "Navezgane", required: false, type: "string" },
+      V("Game Difficulty", "DIFFICULTY", "0-5 (Scavenger to Insane)", "2", { required: false, type: "number" }),
+      V("World Name", "WORLD_NAME", "World save name", "Navezgane", { required: false }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -631,8 +689,8 @@ echo "7DTD server installed successfully"`,
     estimatedSize: "~5 GB",
     variables: [
       ...STEAM_VARS,
-      { name: "Admin Password", key: "ADMIN_PASSWORD", description: "Admin password", defaultValue: "", required: true, type: "password" },
-      { name: "Server Password", key: "SERVER_PASSWORD", description: "Join password (optional)", defaultValue: "", required: false, type: "password" },
+      V("Admin Password", "ADMIN_PASSWORD", "Admin password", "", { type: "password" }),
+      V("Server Password", "SERVER_PASSWORD", "Join password (optional)", "", { required: false, type: "password" }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -685,7 +743,7 @@ echo "Palworld server installed successfully"`,
     estimatedSize: "~8 GB",
     variables: [
       ...STEAM_VARS,
-      { name: "Beacon Port", key: "BEACON_PORT", description: "Beacon port", defaultValue: "15000", required: false, type: "number" },
+      V("Beacon Port", "BEACON_PORT", "Beacon port", "15000", { required: false, type: "number" }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -734,9 +792,9 @@ echo "Satisfactory server installed successfully"`,
     estimatedSize: "~500 MB",
     variables: [
       ...COMMON_VARS,
-      { name: "World Name", key: "WORLD_NAME", description: "World file name", defaultValue: "world", required: true, type: "string" },
-      { name: "World Size", key: "WORLD_SIZE", description: "1=Small, 2=Medium, 3=Large", defaultValue: "3", required: false, type: "number" },
-      { name: "Difficulty", key: "DIFFICULTY", description: "0=Normal, 1=Expert, 2=Master, 3=Journey", defaultValue: "0", required: false, type: "number" },
+      V("World Name", "WORLD_NAME", "World file name", "world"),
+      V("World Size", "WORLD_SIZE", "1=Small, 2=Medium, 3=Large", "3", { required: false, type: "number" }),
+      V("Difficulty", "DIFFICULTY", "0=Normal, 1=Expert, 2=Master, 3=Journey", "0", { required: false, type: "number" }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -771,7 +829,7 @@ echo "Terraria/TShock server installed successfully"`,
     estimatedSize: "~8 GB",
     variables: [
       ...COMMON_VARS,
-      { name: "Password", key: "PASSWORD", description: "Server password", defaultValue: "", required: false, type: "password" },
+      V("Password", "PASSWORD", "Server password", "", { required: false, type: "password" }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -829,8 +887,8 @@ echo "Enshrouded server installed successfully"`,
     variables: [
       ...STEAM_VARS,
       ...RCON_VARS,
-      { name: "Map", key: "MAP", description: "Starting map", defaultValue: "Oilfield", required: false, type: "string" },
-      { name: "Scenario", key: "SCENARIO", description: "Game scenario", defaultValue: "Scenario_Refinery_Checkpoint_Security", required: false, type: "string" },
+      V("Map", "MAP", "Starting map", "Oilfield", { required: false }),
+      V("Scenario", "SCENARIO", "Game scenario", "Scenario_Refinery_Checkpoint_Security", { required: false }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -928,8 +986,8 @@ echo "Squad server installed successfully"`,
     estimatedSize: "~35 GB",
     variables: [
       ...STEAM_VARS,
-      { name: "Server Password", key: "SERVER_PASSWORD", description: "Join password", defaultValue: "", required: false, type: "password" },
-      { name: "Admin Password", key: "ADMIN_PASSWORD", description: "Admin password", defaultValue: "", required: true, type: "password" },
+      V("Server Password", "SERVER_PASSWORD", "Join password", "", { required: false, type: "password" }),
+      V("Admin Password", "ADMIN_PASSWORD", "Admin password", "", { type: "password" }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -987,7 +1045,7 @@ echo "Arma 3 server installed successfully"`,
     estimatedSize: "~500 MB",
     variables: [
       ...COMMON_VARS,
-      { name: "Game Type", key: "GAMETYPE", description: "2=Objective, 3=Stopwatch, 4=Campaign", defaultValue: "2", required: false, type: "number" },
+      V("Game Type", "GAMETYPE", "2=Objective, 3=Stopwatch, 4=Campaign", "2", { required: false, type: "number" }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -1061,7 +1119,7 @@ echo "ET:Legacy installed successfully"`,
     estimatedSize: "~200 MB",
     variables: [
       ...COMMON_VARS,
-      { name: "Game Mod", key: "GAME_MOD", description: "ra (Red Alert), cnc (C&C), d2k (Dune 2000)", defaultValue: "ra", required: false, type: "string" },
+      V("Game Mod", "GAME_MOD", "ra (Red Alert), cnc (C&C), d2k (Dune 2000)", "ra", { required: false }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -1123,7 +1181,7 @@ echo "OpenRA installed successfully"`,
     variables: [
       ...STEAM_VARS,
       ...RCON_VARS,
-      { name: "Game Type", key: "GAMETYPE", description: "0=FFA, 1=Duel, 3=TDM, 4=CA, 5=CTF", defaultValue: "0", required: false, type: "number" },
+      V("Game Type", "GAMETYPE", "0=FFA, 1=Duel, 3=TDM, 4=CA, 5=CTF", "0", { required: false, type: "number" }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -1209,8 +1267,8 @@ echo "Xonotic server installed successfully"`,
     estimatedSize: "~3 GB",
     variables: [
       ...STEAM_VARS,
-      { name: "Save Name", key: "SAVE_NAME", description: "Save file name", defaultValue: "world1", required: true, type: "string" },
-      { name: "Password", key: "PASSWORD", description: "Server password", defaultValue: "", required: false, type: "password" },
+      V("Save Name", "SAVE_NAME", "Save file name", "world1"),
+      V("Password", "PASSWORD", "Server password", "", { required: false, type: "password" }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -1259,8 +1317,8 @@ echo "V Rising server installed successfully"`,
     estimatedSize: "~2 GB",
     variables: [
       ...STEAM_VARS,
-      { name: "Admin Password", key: "ADMIN_PASSWORD", description: "Admin password", defaultValue: "", required: true, type: "password" },
-      { name: "Server Password", key: "SERVER_PASSWORD", description: "Join password", defaultValue: "", required: false, type: "password" },
+      V("Admin Password", "ADMIN_PASSWORD", "Admin password", "", { type: "password" }),
+      V("Server Password", "SERVER_PASSWORD", "Join password", "", { required: false, type: "password" }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -1309,8 +1367,8 @@ echo "Project Zomboid server installed successfully"`,
     estimatedSize: "~1.5 GB",
     variables: [
       ...COMMON_VARS,
-      { name: "World Name", key: "WORLD_NAME", description: "World save name", defaultValue: "world", required: true, type: "string" },
-      { name: "Public", key: "PUBLIC", description: "List publicly (true/false)", defaultValue: "false", required: false, type: "boolean" },
+      V("World Name", "WORLD_NAME", "World save name", "world"),
+      V("Public", "PUBLIC", "List publicly (true/false)", "false", { required: false, type: "boolean" }),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -1348,8 +1406,8 @@ echo "Factorio server installed successfully"`,
     estimatedSize: "~1 GB",
     variables: [
       ...COMMON_VARS,
-      { name: "Cluster Name", key: "CLUSTER_NAME", description: "Cluster folder name", defaultValue: "MyCluster", required: true, type: "string" },
-      { name: "Cluster Token", key: "CLUSTER_TOKEN", description: "Server token from Klei", defaultValue: "", required: true, type: "string" },
+      V("Cluster Name", "CLUSTER_NAME", "Cluster folder name", "MyCluster"),
+      V("Cluster Token", "CLUSTER_TOKEN", "Server token from Klei", ""),
     ],
     installScript: `#!/bin/bash
 set -e
@@ -1405,8 +1463,8 @@ echo "DST server installed successfully"`,
     estimatedSize: "~15 GB",
     variables: [
       ...STEAM_VARS,
-      { name: "Track", key: "TRACK", description: "Track name", defaultValue: "imola", required: true, type: "string" },
-      { name: "Admin Password", key: "ADMIN_PASSWORD", description: "Admin password", defaultValue: "", required: true, type: "password" },
+      V("Track", "TRACK", "Track name", "imola"),
+      V("Admin Password", "ADMIN_PASSWORD", "Admin password", "", { type: "password" }),
     ],
     installScript: `#!/bin/bash
 set -e
