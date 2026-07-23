@@ -19,6 +19,7 @@ export interface GameTemplate {
   description: string;
   estimatedSize: string;
   variables: TemplateVariable[];
+  expectedArtifacts?: string[]; // explicit runtime files to verify after install
 }
 
 // Unified variable format compatible with both Pterodactyl eggs and AMP templates
@@ -293,7 +294,7 @@ echo "Minecraft Bedrock server installed successfully"
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
+INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="730"
 
 ## Download and install SteamCMD
@@ -319,7 +320,7 @@ cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/
 cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Counter-Strike 2 server installed successfully"`,
-    startCommand: `cd {{INSTALL_PATH}} && ./cs2 -dedicated -port {{PORT}} +game_type {{GAME_TYPE}} +game_mode {{GAME_MODE}} +map {{MAP}} +sv_setsteamaccount {{GSLT_TOKEN}}`,
+    startCommand: `cd {{INSTALL_PATH}} && ./game/bin/linuxsteamrt64/cs2 -dedicated -ip 0.0.0.0 -port {{PORT}} -tv_port {{QUERY_PORT}} +game_type {{GAME_TYPE}} +game_mode {{GAME_MODE}} +map {{MAP}} +hostname "{{SERVER_NAME}}" +sv_setsteamaccount {{GSLT_TOKEN}} +rcon_password "{{RCON_PASSWORD}}"`,
     stopCommand: "quit",
     configFiles: { "game/csgo/cfg/server.cfg": "server.cfg" },
     defaultConfig: {
@@ -346,7 +347,7 @@ echo "Counter-Strike 2 server installed successfully"`,
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
+INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="232250"
 
 ## Download and install SteamCMD
@@ -401,7 +402,7 @@ echo "Team Fortress 2 server installed successfully"`,
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
+INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="4020"
 
 ## Download and install SteamCMD
@@ -454,7 +455,7 @@ echo "Garry's Mod server installed successfully"`,
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
+INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="222860"
 
 ## Download and install SteamCMD
@@ -512,7 +513,7 @@ echo "Left 4 Dead 2 server installed successfully"`,
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
+INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="258550"
 
 ## Download and install SteamCMD
@@ -562,7 +563,7 @@ echo "Rust server installed successfully"`,
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
+INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="376030"
 
 ## Download and install SteamCMD
@@ -612,7 +613,7 @@ echo "ARK: Survival Evolved server installed successfully"`,
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
+INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="896660"
 
 ## Download and install SteamCMD
@@ -661,7 +662,7 @@ echo "Valheim server installed successfully"`,
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
+INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="294420"
 
 ## Download and install SteamCMD
@@ -715,7 +716,7 @@ echo "7 Days to Die server installed successfully"`,
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
+INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="2394010"
 
 ## Download and install SteamCMD
@@ -767,7 +768,7 @@ echo "Palworld server installed successfully"`,
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
+INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="1690800"
 
 ## Download and install SteamCMD
@@ -793,7 +794,7 @@ cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/
 cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Satisfactory server installed successfully"`,
-    startCommand: `cd {{INSTALL_PATH}} && ./FactoryServer.sh -Port={{PORT}} -ServerQueryPort={{QUERY_PORT}} -BeaconPort={{BEACON_PORT}} -log -unattended`,
+    startCommand: `cd {{INSTALL_PATH}} && ./Engine/Binaries/Linux/*-Linux-Shipping FactoryGame ?listen -Port={{PORT}} -ServerQueryPort={{QUERY_PORT}} -BeaconPort={{BEACON_PORT}} -multihome=0.0.0.0 -log -unattended`,
     stopCommand: null,
     configFiles: { "FactoryGame/Saved/Config/LinuxServer/ServerSettings.ini": "ServerSettings.ini" },
     defaultConfig: {},
@@ -863,7 +864,7 @@ echo "Terraria/TShock server installed successfully"
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
+INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="2278520"
 
 ## Download and install SteamCMD
@@ -921,7 +922,7 @@ echo "Enshrouded server installed successfully"`,
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
+INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="581330"
 
 ## Download and install SteamCMD
@@ -969,7 +970,7 @@ echo "Insurgency: Sandstorm server installed successfully"`,
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
+INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="403240"
 
 ## Download and install SteamCMD
@@ -995,7 +996,7 @@ cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/
 cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Squad server installed successfully"`,
-    startCommand: `cd {{INSTALL_PATH}} && ./SquadGameServer.sh Port={{PORT}} QueryPort={{QUERY_PORT}} FIXEDMAXPLAYERS={{MAX_PLAYERS}}`,
+    startCommand: `cd {{INSTALL_PATH}} && ./SquadGame/Binaries/Linux/SquadGameServer SquadGame Port={{PORT}} QueryPort={{QUERY_PORT}} -beaconport={{RCON_PORT}}`,
     stopCommand: null,
     configFiles: { "SquadGame/ServerConfig/Server.cfg": "Server.cfg" },
     defaultConfig: {},
@@ -1018,7 +1019,7 @@ echo "Squad server installed successfully"`,
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
+INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="233780"
 
 ## Download and install SteamCMD
@@ -1079,55 +1080,89 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-# Detect architecture
 ARCH=$(uname -m)
 echo "Detected architecture: $ARCH"
 
-# Download ET:Legacy archive (not the .sh installer — archives work on all systems)
+# Use the actual ET:Legacy Linux ARCHIVE file ids from the upstream download page.
+# 716 = i386 archive, 715 = x86_64 archive, 725 = AArch64 archive
 if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-  echo "Downloading ET:Legacy AArch64 archive..."
-  curl -L -o etlegacy.tar.gz "https://www.etlegacy.com/download/file/711"
+  ETL_URL="https://www.etlegacy.com/download/file/725"
 elif [ "$ARCH" = "x86_64" ]; then
-  echo "Downloading ET:Legacy x86_64 archive..."
-  curl -L -o etlegacy.tar.gz "https://www.etlegacy.com/download/file/707"
+  ETL_URL="https://www.etlegacy.com/download/file/715"
 else
-  echo "Downloading ET:Legacy i386 archive..."
-  curl -L -o etlegacy.tar.gz "https://www.etlegacy.com/download/file/705"
+  ETL_URL="https://www.etlegacy.com/download/file/716"
 fi
 
-echo "Extracting..."
-tar xzf etlegacy.tar.gz --strip-components=1 2>/dev/null || tar xzf etlegacy.tar.gz 2>/dev/null || {
-  echo "tar.gz extraction failed, trying as zip..."
-  unzip -o etlegacy.tar.gz 2>/dev/null || true
-  # Move files from subdirectory if extracted into one
-  for d in etlegacy-*/; do
-    if [ -d "$d" ]; then
-      cp -r "$d"* . 2>/dev/null || true
-      rm -rf "$d"
-    fi
-  done
-}
-rm -f etlegacy.tar.gz
+echo "Downloading ET:Legacy archive: $ETL_URL"
+curl -fL -o etlegacy-archive "$ETL_URL"
 
-# Download base game assets (pak0.pk3)
+FILE_TYPE=$(file -b etlegacy-archive || true)
+echo "Downloaded file type: $FILE_TYPE"
+
+# ET:Legacy archives are currently zip files on Linux.
+# Support zip first, then tar.gz as a fallback in case upstream changes.
+if echo "$FILE_TYPE" | grep -qi "zip"; then
+  mv etlegacy-archive etlegacy.zip
+  unzip -o etlegacy.zip
+  rm -f etlegacy.zip
+elif echo "$FILE_TYPE" | grep -qi "gzip\|tar"; then
+  mv etlegacy-archive etlegacy.tar.gz
+  tar xzf etlegacy.tar.gz --strip-components=1 2>/dev/null || tar xzf etlegacy.tar.gz
+  rm -f etlegacy.tar.gz
+else
+  echo "Unknown ET:Legacy archive type"
+  ls -la
+  exit 1
+fi
+
+# Flatten common extracted directory layouts.
+for d in etlegacy-* ETLegacy-*; do
+  if [ -d "$d" ]; then
+    cp -r "$d"/* . 2>/dev/null || true
+    rm -rf "$d"
+  fi
+done
+
+# Download base game assets from official mirror.
 mkdir -p etmain
-if [ ! -f etmain/pak0.pk3 ]; then
-  echo "Downloading Wolfenstein ET base assets from ET:Legacy mirror..."
-  curl -L -o etmain/pak0.pk3 "https://mirror.etlegacy.com/etmain/pak0.pk3"
-fi
-if [ ! -f etmain/pak1.pk3 ]; then
-  curl -L -o etmain/pak1.pk3 "https://mirror.etlegacy.com/etmain/pak1.pk3"
-fi
-if [ ! -f etmain/pak2.pk3 ]; then
-  curl -L -o etmain/pak2.pk3 "https://mirror.etlegacy.com/etmain/pak2.pk3"
+for pak in pak0.pk3 pak1.pk3 pak2.pk3; do
+  if [ ! -f "etmain/$pak" ]; then
+    echo "Downloading $pak from official mirror..."
+    curl -fL -o "etmain/$pak" "https://mirror.etlegacy.com/etmain/$pak"
+  fi
+done
+
+# Locate and normalize the dedicated server binary name.
+if [ -f ./etlded.x86_64 ]; then
+  chmod +x ./etlded.x86_64
+  ln -sf ./etlded.x86_64 ./etlded
+elif [ -f ./etlded.arm64 ]; then
+  chmod +x ./etlded.arm64
+  ln -sf ./etlded.arm64 ./etlded
+elif [ -f ./etlded.i386 ]; then
+  chmod +x ./etlded.i386
+  ln -sf ./etlded.i386 ./etlded
+elif [ -f ./etlded ]; then
+  chmod +x ./etlded
+else
+  echo "Dedicated server binary not found after extraction"
+  find . -maxdepth 3 -type f | sort | tail -50
+  exit 1
 fi
 
-# Make server binary executable
-chmod +x etlded* 2>/dev/null || true
-ls -la etlded* 2>/dev/null || echo "Warning: etlded binary not found — check the extracted files"
+# Create a minimal default server config if none exists.
+mkdir -p etmain
+if [ ! -f etmain/server.cfg ]; then
+  cat > etmain/server.cfg << EOF
+set sv_hostname "{{SERVER_NAME}}"
+set sv_maxclients "{{MAX_PLAYERS}}"
+set g_gametype "{{GAMETYPE}}"
+set rconpassword "{{RCON_PASSWORD}}"
+EOF
+fi
 
 echo "ET:Legacy installed successfully"`,
-    startCommand: `cd {{INSTALL_PATH}} && ./etlded +set dedicated 2 +set net_port {{PORT}} +set fs_game etmain +set sv_hostname "{{SERVER_NAME}}" +set sv_maxclients {{MAX_PLAYERS}} +set g_gametype {{GAMETYPE}} +exec server.cfg`,
+    startCommand: `cd {{INSTALL_PATH}} && ./etlded +set dedicated 2 +set net_port {{PORT}} +set fs_game etmain +set sv_hostname "{{SERVER_NAME}}" +set sv_maxclients {{MAX_PLAYERS}} +set g_gametype {{GAMETYPE}} +exec etmain/server.cfg`,
     stopCommand: null,
     configFiles: { "etmain/server.cfg": "server.cfg" },
     defaultConfig: {},
@@ -1153,42 +1188,42 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-echo "Fetching latest OpenRA release info..."
-RELEASE=$(curl -s https://api.github.com/repos/OpenRA/OpenRA/releases/latest | grep tag_name | cut -d '"' -f4)
-echo "Latest release: $RELEASE"
+GAME_MOD="{{GAME_MOD}}"
+RELEASE=$(curl -sSL https://api.github.com/repos/OpenRA/OpenRA/releases/latest | grep tag_name | cut -d '"' -f4)
+echo "Latest OpenRA release: $RELEASE"
 
-echo "Downloading OpenRA $RELEASE AppImage..."
-curl -L -o OpenRA.AppImage "https://github.com/OpenRA/OpenRA/releases/download/$RELEASE/OpenRA-$RELEASE-x86_64.AppImage" || {
-  echo "AppImage download failed, trying .tar.gz..."
-  curl -L -o openra.tar.gz "https://github.com/OpenRA/OpenRA/releases/download/$RELEASE/OpenRA-$RELEASE-linux-x64.tar.gz"
-  tar xzf openra.tar.gz
-  rm -f openra.tar.gz
-  echo "OpenRA installed successfully"
-  exit 0
-}
+# Pick the correct upstream asset name for the selected mod.
+case "$GAME_MOD" in
+  ra)  ASSET_NAME="OpenRA-Red-Alert-x86_64.AppImage" ;;
+  cnc) ASSET_NAME="OpenRA-Tiberian-Dawn-x86_64.AppImage" ;;
+  d2k) ASSET_NAME="OpenRA-Dune-2000-x86_64.AppImage" ;;
+  *)
+    echo "Unknown GAME_MOD: $GAME_MOD"
+    exit 1
+    ;;
+esac
 
+APPIMAGE_URL="https://github.com/OpenRA/OpenRA/releases/download/$RELEASE/$ASSET_NAME"
+echo "Downloading OpenRA asset: $APPIMAGE_URL"
+curl -fL -o OpenRA.AppImage "$APPIMAGE_URL"
 chmod +x OpenRA.AppImage
 
-echo "Extracting AppImage..."
-./OpenRA.AppImage --appimage-extract 2>/dev/null || {
-  echo "AppImage extract failed (may need FUSE). Trying alternative method..."
-  # Manual extract without FUSE
-  offset=$(grep -aobm1 'hsqs' OpenRA.AppImage | head -1 | cut -d: -f1)
-  if [ -n "$offset" ]; then
-    apt-get install -y -qq squashfs-tools 2>/dev/null || true
-    dd if=OpenRA.AppImage bs=1 skip=$offset of=openra.squashfs 2>/dev/null
-    unsquashfs -d openra-extracted openra.squashfs 2>/dev/null
-    rm -f openra.squashfs
-  fi
-}
-
+# Keep the AppImage itself — it can run the dedicated server directly with --server.
+# Also extract a fallback runtime tree for environments without FUSE.
+echo "Extracting AppImage fallback..."
+./OpenRA.AppImage --appimage-extract >/dev/null 2>&1 || true
 if [ -d "squashfs-root" ]; then
   mv squashfs-root openra-extracted
 fi
-rm -f OpenRA.AppImage
+
+# Validate that we have something runnable.
+if [ ! -f OpenRA.AppImage ] && [ ! -f openra-extracted/AppRun ]; then
+  echo "OpenRA server runtime not found after download/extract"
+  exit 1
+fi
 
 echo "OpenRA installed successfully"`,
-    startCommand: `cd {{INSTALL_PATH}}/openra-extracted && mono OpenRA.Server.exe Game.Mod={{GAME_MOD}} Server.Name="{{SERVER_NAME}}" Server.ListenPort={{PORT}}`,
+    startCommand: `cd {{INSTALL_PATH}} && if [ -x ./OpenRA.AppImage ]; then ./OpenRA.AppImage --server Server.Name="{{SERVER_NAME}}" Server.ListenPort={{PORT}} Game.Mod={{GAME_MOD}}; elif [ -x ./openra-extracted/AppRun ]; then ./openra-extracted/AppRun --server Server.Name="{{SERVER_NAME}}" Server.ListenPort={{PORT}} Game.Mod={{GAME_MOD}}; else echo "OpenRA runtime missing"; exit 1; fi`,
     stopCommand: null,
     configFiles: {},
     defaultConfig: {},
@@ -1211,7 +1246,7 @@ echo "OpenRA installed successfully"`,
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
+INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="349090"
 
 ## Download and install SteamCMD
@@ -1299,33 +1334,42 @@ echo "Xonotic server installed successfully"
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
+INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="1829350"
 
+apt-get update -qq && apt-get install -y -qq dos2unix 2>/dev/null || true
+
 ## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
-
-cd "$INSTALL_DIR/steamcmd"
-
-# SteamCMD workaround
-chown -R $(whoami) "$INSTALL_DIR"
 export HOME="$INSTALL_DIR"
+cd /tmp
+mkdir -p "$HOME/steamcmd" "$HOME/steamapps"
+curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
+tar -xzf steamcmd.tar.gz -C "$HOME/steamcmd"
+rm steamcmd.tar.gz
+cd "$HOME/steamcmd"
+chown -R $(whoami) "$INSTALL_DIR"
 
-## Install game server
-echo "Installing V Rising (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+## V Rising uses the Windows dedicated server under wine/proton in upstream eggs
+echo "Installing V Rising Windows dedicated server (AppID: $STEAM_APPID)..."
+./steamcmd.sh +force_install_dir "$HOME" +login anonymous +@sSteamCmdForcePlatformType windows +app_update $STEAM_APPID validate +quit
 
-## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+mkdir -p "$HOME/.steam/sdk32" "$HOME/.steam/sdk64"
+cp -v linux32/steamclient.so "$HOME/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v linux64/steamclient.so "$HOME/.steam/sdk64/steamclient.so" 2>/dev/null || true
+
+mkdir -p "$HOME/save-data/Settings"
+if [ -f "$HOME/VRisingServer_Data/StreamingAssets/Settings/ServerHostSettings.json" ]; then
+  dos2unix -n "$HOME/VRisingServer_Data/StreamingAssets/Settings/ServerHostSettings.json" "$HOME/save-data/Settings/ServerHostSettings.json" 2>/dev/null || cp "$HOME/VRisingServer_Data/StreamingAssets/Settings/ServerHostSettings.json" "$HOME/save-data/Settings/ServerHostSettings.json"
+fi
+
+if [ ! -f "$HOME/VRisingServer.exe" ]; then
+  echo "VRisingServer.exe not found after install"
+  find "$HOME" -maxdepth 3 -type f | sort | tail -50
+  exit 1
+fi
 
 echo "V Rising server installed successfully"`,
-    startCommand: `cd {{INSTALL_PATH}} && ./VRisingServer.sh -persistentDataPath ./save-data -serverName "{{SERVER_NAME}}" -saveName "{{SAVE_NAME}}" -gamePort {{PORT}} -queryPort {{QUERY_PORT}}`,
+    startCommand: `cd {{INSTALL_PATH}} && wine ./VRisingServer.exe -persistentDataPath save-data -address 0.0.0.0`,
     stopCommand: null,
     configFiles: { "VRisingServer_Data/StreamingAssets/Settings/ServerHostSettings.json": "ServerHostSettings.json" },
     defaultConfig: {},
@@ -1348,7 +1392,7 @@ echo "V Rising server installed successfully"`,
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
+INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="380870"
 
 ## Download and install SteamCMD
@@ -1409,9 +1453,9 @@ rm -f factorio.tar.xz
 
 ## Create initial save
 mkdir -p saves
-if [ ! -f saves/world.zip ]; then
+if [ ! -f "saves/{{WORLD_NAME}}.zip" ]; then
   echo "Creating initial world save..."
-  ./bin/x64/factorio --create saves/world.zip
+  ./bin/x64/factorio --create "saves/{{WORLD_NAME}}.zip"
 fi
 
 echo "Factorio server installed successfully"
@@ -1442,7 +1486,7 @@ echo "Factorio server installed successfully"
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
+INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="343050"
 
 ## Download and install SteamCMD
@@ -1498,33 +1542,45 @@ echo "Don't Starve Together server installed successfully"`,
     ],
     installScript: `#!/bin/bash
 set -e
-INSTALL_DIR="{INSTALL_PATH}"
-STEAM_APPID="302550"
+INSTALL_DIR="{{INSTALL_PATH}}"
+mkdir -p "$INSTALL_DIR"
+cd "$INSTALL_DIR"
 
-## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
+apt-get update -qq && apt-get install -y -qq curl jq tar 2>/dev/null || true
 
-cd "$INSTALL_DIR/steamcmd"
+## AssettoServer is distributed from compujuckel/AssettoServer releases
+LATEST_JSON=$(curl --silent "https://api.github.com/repos/compujuckel/AssettoServer/releases/latest")
+MATCH=$([[ "$(uname -m)" == "x86_64" ]] && echo "linux-x64" || echo "linux-arm64")
+DOWNLOAD_URL=$(echo "$LATEST_JSON" | jq -r '.assets[].browser_download_url' | grep -i "$MATCH" | head -1)
 
-# SteamCMD workaround
-chown -R $(whoami) "$INSTALL_DIR"
-export HOME="$INSTALL_DIR"
+if [ -z "$DOWNLOAD_URL" ]; then
+  echo "Could not find AssettoServer release asset for architecture: $MATCH"
+  exit 1
+fi
 
-## Install game server
-echo "Installing Assetto Corsa (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+echo "Downloading AssettoServer from: $DOWNLOAD_URL"
+curl -sSL -o assetto-server-linux.tar.gz "$DOWNLOAD_URL"
+tar xvf assetto-server-linux.tar.gz
+rm -f assetto-server-linux.tar.gz
+chmod +x AssettoServer
 
-## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+mkdir -p cfg/
+if [ ! -f "cfg/server_cfg.ini" ]; then
+  cat > cfg/server_cfg.ini << EOF
+[SERVER]
+NAME={{SERVER_NAME}}
+PASSWORD=
+ADMIN_PASSWORD={{ADMIN_PASSWORD}}
+UDP_PORT={{PORT}}
+TCP_PORT={{PORT}}
+MAX_CLIENTS={{MAX_PLAYERS}}
+TRACK={{TRACK}}
+EOF
+fi
+[ -f "cfg/entry_list.ini" ] || touch cfg/entry_list.ini
 
 echo "Assetto Corsa server installed successfully"`,
-    startCommand: `cd {{INSTALL_PATH}} && ./acServer`,
+    startCommand: `cd {{INSTALL_PATH}} && ./AssettoServer`,
     stopCommand: null,
     configFiles: { "cfg/server_cfg.ini": "server_cfg.ini" },
     defaultConfig: {
@@ -1535,6 +1591,40 @@ echo "Assetto Corsa server installed successfully"`,
     },
   },
 ];
+
+export const EXPECTED_ARTIFACTS_BY_SLUG: Record<string, string[]> = {
+  "minecraft-java": ["server.jar"],
+  "minecraft-paper": ["server.jar"],
+  "minecraft-bedrock": ["bedrock_server"],
+  "cs2": ["game/bin/linuxsteamrt64/cs2"],
+  "tf2": ["srcds_run"],
+  "gmod": ["srcds_run"],
+  "l4d2": ["srcds_run"],
+  "rust": ["RustDedicated"],
+  "ark": ["ShooterGame/Binaries/Linux/ShooterGameServer"],
+  "valheim": ["valheim_server.x86_64"],
+  "7dtd": ["7DaysToDieServer.x86_64"],
+  "palworld": ["PalServer.sh"],
+  "satisfactory": ["Engine/Binaries/Linux/*-Linux-Shipping"],
+  "terraria": ["TShock.Server"],
+  "enshrouded": ["enshrouded_server"],
+  "insurgency-sandstorm": ["Insurgency/Binaries/Linux/InsurgencyServer-Linux-Shipping"],
+  "squad": ["SquadGame/Binaries/Linux/SquadGameServer"],
+  "arma3": ["arma3server_x64"],
+  "wolfenstein-et": ["etlded", "etmain/pak0.pk3"],
+  "openra": ["OpenRA.AppImage|openra-extracted/AppRun"],
+  "quake-live": ["run_server_x64.sh"],
+  "xonotic": ["xonotic-linux64-dedicated"],
+  "vrising": ["VRisingServer.sh|VRisingServer.exe"],
+  "project-zomboid": ["start-server.sh"],
+  "factorio": ["bin/x64/factorio"],
+  "dont-starve-together": ["bin64/dontstarve_dedicated_server_nullrenderer_x64"],
+  "assetto-corsa": ["AssettoServer"],
+};
+
+export function getExpectedArtifactsBySlug(slug: string): string[] {
+  return EXPECTED_ARTIFACTS_BY_SLUG[slug] || [];
+}
 
 // Helper to get templates by category
 export function getTemplatesByCategory(): Record<string, GameTemplate[]> {
@@ -1550,5 +1640,6 @@ export function getTemplatesByCategory(): Record<string, GameTemplate[]> {
 
 // Helper to get a single template by slug
 export function getTemplateBySlug(slug: string): GameTemplate | undefined {
-  return gameTemplates.find((t) => t.slug === slug);
+  const t = gameTemplates.find((template) => template.slug === slug);
+  return t ? { ...t, expectedArtifacts: getExpectedArtifactsBySlug(slug) } : undefined;
 }

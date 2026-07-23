@@ -3,11 +3,11 @@ import { db } from "@/db";
 import { gameDefinitions, gameServers, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { eq } from "drizzle-orm";
-import { mkdtemp, writeFile, chmod, rm, mkdir, access, constants, stat } from "fs/promises";
+import { mkdtemp, writeFile, chmod, rm, mkdir, access, constants, stat, readdir } from "fs/promises";
 import { tmpdir, homedir } from "os";
 import { basename, dirname, join } from "path";
 import { spawn, type ChildProcess } from "child_process";
-import { getTemplateBySlug } from "@/db/seeds";
+import { getTemplateBySlug, getExpectedArtifactsBySlug } from "@/db/seeds";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -229,6 +229,70 @@ async function materializeServerFiles(options: {
   return generated;
 }
 
+async function pathPatternExists(installPath: string, pattern: string): Promise<boolean> {
+  // alternative paths: a|b
+  if (pattern.includes("|")) {
+    const alts = pattern.split("|").map((s) => s.trim()).filter(Boolean);
+    for (const alt of alts) {
+      if (await pathPatternExists(installPath, alt)) return true;
+    }
+    return false;
+  }
+
+  // simple exact path
+  if (!pattern.includes("*")) {
+    return exists(join(installPath, pattern));
+  }
+
+  // support wildcard in final filename segment only
+  const dir = dirname(pattern);
+  const base = basename(pattern)
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*");
+  const rx = new RegExp(`^${base}$`);
+  const fullDir = join(installPath, dir === "." ? "" : dir);
+  try {
+    const entries = await readdir(fullDir);
+    return entries.some((name: string) => rx.test(name));
+  } catch {
+    return false;
+  }
+}
+
+async function verifyInstalledArtifacts(installPath: string, renderedStartCommand: string, explicitArtifacts: string[] = []) {
+  const checks: string[] = [];
+  const missing: string[] = [];
+
+  if (explicitArtifacts.length > 0) {
+    for (const artifact of explicitArtifacts) {
+      checks.push(artifact);
+      if (!(await pathPatternExists(installPath, artifact))) missing.push(artifact);
+    }
+    return { checks, missing };
+  }
+
+  // Fallback heuristic for custom/imported templates
+  const jarMatch = renderedStartCommand.match(/-jar\s+([^\s]+)/);
+  if (jarMatch) {
+    const jarPath = jarMatch[1].replace(/^\.\//, "");
+    checks.push(jarPath);
+    if (!(await exists(join(installPath, jarPath)))) missing.push(jarPath);
+  }
+
+  const execMatches = [
+    ...renderedStartCommand.matchAll(/(?:^|&&|then)\s*(?:[A-Z0-9_]+=\S+\s+)*\.\/([^\s;]+)/g),
+  ].map((m) => m[1]);
+
+  const uniqueExecs = [...new Set(execMatches)];
+  for (const rel of uniqueExecs) {
+    const normalized = rel.replace(/^\.\//, "");
+    checks.push(normalized);
+    if (!(await exists(join(installPath, normalized)))) missing.push(normalized);
+  }
+
+  return { checks, missing };
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -432,6 +496,23 @@ echo "=== Installation Complete ==="
         variables,
       });
 
+      const renderedStartCommand = startCommandSource ? replaceTemplateVariables(startCommandSource, variables) : "";
+      const explicitArtifacts = server.gameSlug ? getExpectedArtifactsBySlug(server.gameSlug) : [];
+      const verification = await verifyInstalledArtifacts(effectiveInstallPath, renderedStartCommand, explicitArtifacts);
+
+      if (verification.missing.length > 0) {
+        await db
+          .update(gameServers)
+          .set({ status: "install_failed", updatedAt: new Date() })
+          .where(eq(gameServers.id, server.id));
+
+        return NextResponse.json({
+          error: `Install finished, but expected runtime files are missing: ${verification.missing.join(", ")}`,
+          output: `${stdout}\n\nGenerated files:\n${generatedFiles.map((f) => `- ${f}`).join("\n")}\n\nVerification checks:\n${verification.checks.map((c) => `- ${c}`).join("\n")}`.slice(-8000),
+          errorOutput: stderr.slice(-8000),
+        }, { status: 500 });
+      }
+
       await db
         .update(gameServers)
         .set({ status: "stopped", updatedAt: new Date() })
@@ -440,7 +521,7 @@ echo "=== Installation Complete ==="
       return NextResponse.json({
         ok: true,
         message: `${server.gameName || "Game"} files installed for ${server.name}`,
-        output: `${stdout}\n\nGenerated files:\n${generatedFiles.map((f) => `- ${f}`).join("\n")}`.slice(-8000),
+        output: `${stdout}\n\nGenerated files:\n${generatedFiles.map((f) => `- ${f}`).join("\n")}\n\nVerified runtime files:\n${verification.checks.map((c) => `- ${c}`).join("\n")}`.slice(-8000),
         errorOutput: stderr.slice(-8000),
       });
     } catch (e: unknown) {

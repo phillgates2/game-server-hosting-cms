@@ -15,7 +15,7 @@ A modern, open-source TCAdmin alternative built with **Next.js 16**, **PostgreSQ
 - **✍️ Blog & Changelogs** — Built-in CMS to publish blog posts and changelogs on the public site
 - **🖥️ Multi-Node Support** — Manage game servers across multiple physical/virtual machines
 - **🎮 Game Server Management** — Create, start, stop, install files, edit files, and delete game servers
-- **📦 30+ Game Templates** — Pterodactyl-style install scripts, AMP-compatible variables, editable, importable
+- **📦 30+ Game Templates** — Pterodactyl-style install scripts, AMP-compatible variables, editable, importable, and runtime-binary verified
 - **🔑 Advanced Permissions** — Custom roles with 40+ granular permissions, color/icon/priority
 - **👥 User Management** — Profiles, login tracking, suspend/ban, per-user server limits
 - **📊 Server Monitoring** — Real-time CPU, RAM, disk, and network monitoring with live charts

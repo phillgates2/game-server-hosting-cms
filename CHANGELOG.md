@@ -29,6 +29,23 @@ All notable changes to GameServer Manager are documented in this file.
 
 ---
 
+## [2.2.0] — 2026-07-23
+
+### Fixed
+- **Full seed binary audit** across all 27 built-in templates
+- Corrected broken placeholder substitution in 19 SteamCMD templates (`{{INSTALL_PATH}}`)
+- Corrected runtime binary/start paths to match upstream templates:
+  - CS2 → `game/bin/linuxsteamrt64/cs2`
+  - Satisfactory → `Engine/Binaries/Linux/*-Linux-Shipping`
+  - Squad → `SquadGame/Binaries/Linux/SquadGameServer`
+  - Assetto Corsa → `AssettoServer`
+- Added explicit expected-artifact verification for every built-in seed
+  - supports exact paths, wildcard paths, and alternative paths
+  - install now fails clearly if the expected runtime file is missing
+- ET:Legacy and OpenRA verification hardened with explicit artifact checks
+
+---
+
 ## [2.0.0] — 2026-07-21
 
 ### Added
