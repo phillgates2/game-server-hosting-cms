@@ -15,6 +15,7 @@ import ProfilePanel from "./panels/ProfilePanel";
 import RolesPanel from "./panels/RolesPanel";
 import RconPanel from "./panels/RconPanel";
 import FilesPanel from "./panels/FilesPanel";
+import AuditPanel from "./panels/AuditPanel";
 
 interface AuthUser {
   id: number;
@@ -30,7 +31,7 @@ interface Props {
   onLogout: () => void;
 }
 
-type Tab = "overview" | "servers" | "files" | "rcon" | "nodes" | "games" | "monitor" | "forum" | "cms" | "users" | "roles" | "profile" | "database";
+type Tab = "overview" | "servers" | "files" | "rcon" | "nodes" | "games" | "audit" | "monitor" | "forum" | "cms" | "users" | "roles" | "profile" | "database";
 
 interface NavItem {
   key: Tab;
@@ -47,6 +48,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: "rcon", label: "RCON Console", icon: "🖥️", permission: "servers.console", section: "main" },
   { key: "nodes", label: "Nodes", icon: "🌐", permission: "nodes.view", section: "main" },
   { key: "games", label: "Games", icon: "📦", permission: "games.view", section: "main" },
+  { key: "audit", label: "Audit", icon: "🔍", permission: "games.install", section: "main" },
   { key: "monitor", label: "Monitor", icon: "📈", permission: "monitor.view", section: "main" },
   { key: "forum", label: "Forum", icon: "💬", permission: "forum.view", section: "community" },
   { key: "cms", label: "CMS", icon: "✍️", permission: "cms.view", section: "community" },
@@ -105,6 +107,7 @@ export default function Dashboard({ user, onLogout }: Props) {
       case "rcon": return <RconPanel user={user} />;
       case "nodes": return <NodesPanel user={user} />;
       case "games": return <GamesPanel />;
+      case "audit": return <AuditPanel />;
       case "monitor": return <MonitorPanel user={user} />;
       case "forum": return <ForumPanel user={user} />;
       case "cms": return <CmsPanel />;
