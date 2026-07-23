@@ -1096,24 +1096,21 @@ fi
 echo "Downloading ET:Legacy archive: $ETL_URL"
 curl -fL -o etlegacy-archive "$ETL_URL"
 
-FILE_TYPE=$(file -b etlegacy-archive || true)
-echo "Downloaded file type: $FILE_TYPE"
-
-# ET:Legacy archives are currently zip files on Linux.
-# Support zip first, then tar.gz as a fallback in case upstream changes.
-if echo "$FILE_TYPE" | grep -qi "zip"; then
-  mv etlegacy-archive etlegacy.zip
-  unzip -o etlegacy.zip
-  rm -f etlegacy.zip
-elif echo "$FILE_TYPE" | grep -qi "gzip\|tar"; then
-  mv etlegacy-archive etlegacy.tar.gz
-  tar xzf etlegacy.tar.gz --strip-components=1 2>/dev/null || tar xzf etlegacy.tar.gz
-  rm -f etlegacy.tar.gz
+# Upstream currently serves Linux archives as ZIP files.
+# Do not rely on the 'file' utility being present; try unzip first, then tar.
+echo "Extracting ET:Legacy archive..."
+if unzip -o etlegacy-archive >/dev/null 2>&1; then
+  echo "Extracted as ZIP archive"
+elif tar xzf etlegacy-archive --strip-components=1 >/dev/null 2>&1; then
+  echo "Extracted as tar.gz archive with stripped top-level directory"
+elif tar xzf etlegacy-archive >/dev/null 2>&1; then
+  echo "Extracted as tar.gz archive"
 else
-  echo "Unknown ET:Legacy archive type"
+  echo "Failed to extract ET:Legacy archive"
   ls -la
   exit 1
 fi
+rm -f etlegacy-archive
 
 # Flatten common extracted directory layouts.
 for d in etlegacy-* ETLegacy-*; do
@@ -1146,7 +1143,7 @@ elif [ -f ./etlded ]; then
   chmod +x ./etlded
 else
   echo "Dedicated server binary not found after extraction"
-  find . -maxdepth 3 -type f | sort | tail -50
+  find . -maxdepth 4 -type f | sort | tail -100
   exit 1
 fi
 
