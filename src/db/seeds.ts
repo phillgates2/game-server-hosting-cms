@@ -1129,6 +1129,35 @@ for pak in pak0.pk3 pak1.pk3 pak2.pk3; do
   fi
 done
 
+# Download ET:Legacy mod pack (contains qagame, cgame, ui .so modules).
+# File 727 = "All supported archive" from the ET:Legacy download page.
+if [ ! -f "etmain/qagame.mp.x86_64.so" ] && [ ! -f "legacy/qagame.mp.x86_64.so" ]; then
+  echo "Downloading ET:Legacy mod pack (game modules)..."
+  curl -fL -o legacy-mod.zip "https://www.etlegacy.com/download/file/727"
+  unzip -o legacy-mod.zip -d . 2>/dev/null || true
+  rm -f legacy-mod.zip
+
+  # The mod pack may extract into a legacy/ directory or directly.
+  # Copy .so modules into etmain/ so the server can find them.
+  for d in legacy etlegacy-mod etmain; do
+    if [ -d "$d" ]; then
+      find "$d" -name "*.so" -exec cp -v {} etmain/ \; 2>/dev/null || true
+    fi
+  done
+
+  # Also check if the .so files landed in the current directory
+  find . -maxdepth 1 -name "qagame*.so" -exec cp -v {} etmain/ \; 2>/dev/null || true
+fi
+
+# Verify the critical game module exists
+if [ ! -f "etmain/qagame.mp.x86_64.so" ] && [ ! -f "etmain/qagame.mp.i386.so" ]; then
+  echo "WARNING: qagame module not found. The server may not start."
+  echo "Contents of etmain/:"
+  ls -la etmain/ | head -30
+  echo "Searching for .so files:"
+  find . -name "*.so" | head -20
+fi
+
 # Locate and normalize the dedicated server binary name.
 if [ -f ./etlded.x86_64 ]; then
   chmod +x ./etlded.x86_64
