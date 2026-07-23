@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 
 interface AuthUser {
   id: number;
@@ -68,6 +68,10 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [showDiscord, setShowDiscord] = useState(false);
+  const [consoleServerId, setConsoleServerId] = useState<number | null>(null);
+  const [consoleLog, setConsoleLog] = useState("");
+  const [consoleInfo, setConsoleInfo] = useState<{ status: string; pid: number | null; lines: number; fileSizeKb: number } | null>(null);
+  const consoleRef = useRef<HTMLDivElement>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -216,6 +220,36 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
     }
   }
 
+  async function openConsole(id: number) {
+    setConsoleServerId(id);
+    setConsoleLog("");
+    setConsoleInfo(null);
+    fetchLog(id);
+  }
+
+  async function fetchLog(id: number) {
+    try {
+      const res = await fetch(`/api/servers/${id}/log?tail=300`);
+      if (res.ok) {
+        const data = await res.json();
+        setConsoleLog(data.log || data.message || "");
+        setConsoleInfo({ status: data.status, pid: data.pid, lines: data.lines || 0, fileSizeKb: data.fileSizeKb || 0 });
+        // Auto scroll
+        setTimeout(() => {
+          if (consoleRef.current) consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
+        }, 50);
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Auto-refresh console every 3 seconds while open
+  useEffect(() => {
+    if (consoleServerId === null) return;
+    const interval = setInterval(() => fetchLog(consoleServerId), 3000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [consoleServerId]);
+
   async function testWebhook(url: string, name: string) {
     try {
       await fetch(url, {
@@ -339,6 +373,35 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
         </form>
       )}
 
+      {/* Server Console */}
+      {consoleServerId && (
+        <div className="bg-bg-card border border-border rounded-xl overflow-hidden">
+          <div className="bg-bg-secondary px-5 py-3 border-b border-border flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <h3 className="font-semibold text-sm">📋 Server Console</h3>
+              <span className="text-xs text-text-muted">{servers.find((s) => s.id === consoleServerId)?.name}</span>
+              {consoleInfo && (
+                <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${consoleInfo.status === "running" ? "bg-success/15 text-success" : "bg-bg-tertiary text-text-muted"}`}>
+                  {consoleInfo.status} {consoleInfo.pid ? `PID:${consoleInfo.pid}` : ""}
+                </span>
+              )}
+              {consoleInfo && <span className="text-[10px] text-text-muted">{consoleInfo.lines} lines · {consoleInfo.fileSizeKb} KB</span>}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => fetchLog(consoleServerId)} className="text-accent text-xs hover:underline">Refresh</button>
+              <button onClick={() => setConsoleServerId(null)} className="text-text-muted hover:text-text-primary text-xs">Close</button>
+            </div>
+          </div>
+          <div ref={consoleRef} className="h-96 overflow-y-auto p-4 bg-[#0d1117] font-mono text-xs leading-relaxed whitespace-pre-wrap text-text-secondary">
+            {consoleLog || <span className="text-text-muted italic">No log output yet. Start the server to see console output here.</span>}
+          </div>
+          <div className="px-5 py-2 border-t border-border flex items-center justify-between text-[10px] text-text-muted">
+            <span>Auto-refreshes every 3 seconds while open</span>
+            <span>Log file: gsm-server.log</span>
+          </div>
+        </div>
+      )}
+
       {/* Install Log Modal */}
       {installLog && (
         <div className="bg-bg-card border border-border rounded-xl overflow-hidden">
@@ -415,6 +478,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                   ) : (
                     <button onClick={() => controlProcess(server.id, "start")} className="px-3 py-1.5 bg-success/15 text-success rounded-lg text-xs font-medium">▶ Start</button>
                   )}
+                  <button onClick={() => openConsole(server.id)} className="px-3 py-1.5 bg-bg-secondary text-text-secondary hover:text-text-primary rounded-lg text-xs font-medium">📋 Console</button>
                   {server.discordWebhook && (
                     <button onClick={() => testWebhook(server.discordWebhook!, server.name)} className="px-3 py-1.5 bg-[#5865F2]/15 text-[#5865F2] rounded-lg text-xs font-medium">Test 🔔</button>
                   )}
