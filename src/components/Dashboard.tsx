@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import ErrorBoundary from "./ErrorBoundary";
 import ServersPanel from "./panels/ServersPanel";
 import MonitorPanel from "./panels/MonitorPanel";
@@ -37,7 +37,7 @@ interface NavItem {
   key: Tab;
   label: string;
   icon: string;
-  permission?: string; // required permission, undefined = everyone
+  permission?: string;
   section: string;
 }
 
@@ -69,6 +69,25 @@ export default function Dashboard({ user, onLogout }: Props) {
   const [tab, setTab] = useState<Tab>("overview");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [perms, setPerms] = useState<Record<string, boolean>>({});
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState("");
+
+  const TAB_META: Record<Tab, { title: string; subtitle: string }> = {
+    overview: { title: "Overview", subtitle: "Your hosting control center and quick-start checklist." },
+    servers: { title: "Servers", subtitle: "Create, install, start, and manage game servers." },
+    files: { title: "File Manager", subtitle: "Browse and edit server files directly in the browser." },
+    rcon: { title: "RCON Console", subtitle: "Send remote console commands to supported servers." },
+    nodes: { title: "Nodes", subtitle: "Manage the machines that host your servers." },
+    games: { title: "Games", subtitle: "Install, edit, import, and create server templates." },
+    audit: { title: "Audit", subtitle: "Verify templates, binaries, and live install paths." },
+    monitor: { title: "Monitor", subtitle: "Track system health, memory, and buffer/cache usage." },
+    forum: { title: "Forum", subtitle: "Community discussions, moderation, and user profiles." },
+    cms: { title: "CMS", subtitle: "Publish blog posts, pages, and changelogs." },
+    users: { title: "Users", subtitle: "Manage accounts, limits, roles, and account status." },
+    roles: { title: "Roles", subtitle: "Create advanced roles and assign granular permissions." },
+    profile: { title: "My Profile", subtitle: "Update your account details, password, and security info." },
+    database: { title: "Database", subtitle: "Inspect and manage PostgreSQL tables and queries." },
+  };
 
   const loadPerms = useCallback(async () => {
     try {
@@ -87,11 +106,7 @@ export default function Dashboard({ user, onLogout }: Props) {
     onLogout();
   }
 
-  // Filter nav by permissions
-  const filteredNav = NAV_ITEMS.filter((item) => {
-    if (!item.permission) return true;
-    return perms[item.permission] === true;
-  });
+  const filteredNav = NAV_ITEMS.filter((item) => !item.permission || perms[item.permission] === true);
 
   const sections: Record<string, NavItem[]> = {};
   for (const item of filteredNav) {
@@ -99,9 +114,60 @@ export default function Dashboard({ user, onLogout }: Props) {
     sections[item.section].push(item);
   }
 
+  const paletteItems = useMemo(() => {
+    const base = filteredNav.map((item) => ({
+      id: item.key,
+      icon: item.icon,
+      title: item.label,
+      subtitle: TAB_META[item.key].subtitle,
+      section: SECTION_LABELS[item.section] || item.section,
+      action: () => { setTab(item.key); setPaletteOpen(false); setPaletteQuery(""); },
+    }));
+
+    const extras = [
+      {
+        id: "logout",
+        icon: "🚪",
+        title: "Log out",
+        subtitle: "Return to the public site.",
+        section: "Account",
+        action: () => { setPaletteOpen(false); setPaletteQuery(""); handleLogout(); },
+      },
+      {
+        id: "toggle-sidebar",
+        icon: sidebarOpen ? "◀" : "▶",
+        title: sidebarOpen ? "Collapse sidebar" : "Expand sidebar",
+        subtitle: "Toggle the navigation width.",
+        section: "Interface",
+        action: () => { setSidebarOpen((v) => !v); setPaletteOpen(false); setPaletteQuery(""); },
+      },
+    ];
+
+    const all = [...base, ...extras];
+    const q = paletteQuery.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter((item) =>
+      item.title.toLowerCase().includes(q)
+      || item.subtitle.toLowerCase().includes(q)
+      || item.section.toLowerCase().includes(q)
+    );
+  }, [filteredNav, paletteQuery, sidebarOpen]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+      if (e.key === "Escape") setPaletteOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   function renderPanel() {
     switch (tab) {
-      case "overview": return <OverviewPanel user={user} />;
+      case "overview": return <OverviewPanel user={user} onNavigate={setTab} />;
       case "servers": return <ServersPanel user={user} />;
       case "files": return <FilesPanel user={user} />;
       case "rcon": return <RconPanel user={user} />;
@@ -115,7 +181,7 @@ export default function Dashboard({ user, onLogout }: Props) {
       case "roles": return <RolesPanel />;
       case "profile": return <ProfilePanel />;
       case "database": return <DatabasePanel />;
-      default: return <OverviewPanel user={user} />;
+      default: return <OverviewPanel user={user} onNavigate={setTab} />;
     }
   }
 
@@ -146,10 +212,11 @@ export default function Dashboard({ user, onLogout }: Props) {
               )}
               <div className="space-y-0.5">
                 {items.map((item) => (
-                  <button key={item.key} onClick={() => setTab(item.key)}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      tab === item.key ? "bg-accent/15 text-accent" : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"
-                    }`}>
+                  <button
+                    key={item.key}
+                    onClick={() => setTab(item.key)}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${tab === item.key ? "bg-accent/15 text-accent" : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"}`}
+                  >
                     <span className="text-base">{item.icon}</span>
                     {sidebarOpen && <span>{item.label}</span>}
                   </button>
@@ -179,10 +246,60 @@ export default function Dashboard({ user, onLogout }: Props) {
       </aside>
 
       <main className="flex-1 overflow-auto">
-        <div className="p-6">
+        <div className="p-6 space-y-6">
+          <div className="bg-bg-card border border-border rounded-xl px-5 py-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="text-xl font-bold">{TAB_META[tab].title}</h2>
+              <p className="text-text-secondary text-sm">{TAB_META[tab].subtitle}</p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={() => setPaletteOpen(true)} className="px-3 py-2 bg-bg-secondary border border-border hover:border-accent/30 text-text-secondary rounded-lg text-sm transition-colors">
+                ⌘/Ctrl + K Quick Jump
+              </button>
+              <span className="px-2 py-1 bg-bg-secondary rounded-lg text-xs text-text-muted">{user.roleName || user.role}</span>
+              <span className="px-2 py-1 bg-bg-secondary rounded-lg text-xs text-text-muted">{user.username}</span>
+            </div>
+          </div>
           <ErrorBoundary key={tab} name={tab}>{renderPanel()}</ErrorBoundary>
         </div>
       </main>
+
+      {paletteOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-start justify-center p-4" onClick={() => setPaletteOpen(false)}>
+          <div className="w-full max-w-2xl bg-bg-card border border-border rounded-2xl shadow-2xl overflow-hidden mt-20" onClick={(e) => e.stopPropagation()}>
+            <div className="p-4 border-b border-border">
+              <input
+                autoFocus
+                value={paletteQuery}
+                onChange={(e) => setPaletteQuery(e.target.value)}
+                placeholder="Search pages and actions..."
+                className="w-full px-4 py-3 bg-bg-secondary border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+              />
+              <p className="text-[10px] text-text-muted mt-2">Tip: type “servers”, “audit”, “roles”, or “logout”. Press Esc to close.</p>
+            </div>
+            <div className="max-h-[60vh] overflow-y-auto p-2">
+              {paletteItems.length > 0 ? paletteItems.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={item.action}
+                  className="w-full text-left p-3 rounded-xl hover:bg-bg-hover transition-colors flex items-start gap-3"
+                >
+                  <span className="text-xl mt-0.5">{item.icon}</span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-medium text-sm">{item.title}</p>
+                      <span className="text-[10px] text-text-muted bg-bg-secondary px-1.5 py-0.5 rounded">{item.section}</span>
+                    </div>
+                    <p className="text-xs text-text-muted mt-0.5">{item.subtitle}</p>
+                  </div>
+                </button>
+              )) : (
+                <div className="p-6 text-center text-sm text-text-muted">No matching pages or actions.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
