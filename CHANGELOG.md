@@ -4,6 +4,31 @@ All notable changes to GameServer Manager are documented in this file.
 
 ---
 
+## [2.1.0] — 2026-07-21
+
+### Changed
+- **All 27 install scripts rewritten to use Pterodactyl-style patterns**
+  - **19 SteamCMD games** now use the proven Pterodactyl pattern:
+    - Downloads SteamCMD to a local directory inside the server path
+    - Sets `HOME` and ownership for non-root compatibility
+    - Installs via `steamcmd.sh +force_install_dir +login anonymous +app_update`
+    - Copies Steam SDK libraries to `.steam/sdk32` and `.steam/sdk64`
+    - No more global `/usr/local/bin/steamcmd` wrapper needed
+  - **Minecraft Java** — Uses Mojang version manifest API with proper JSON parsing
+  - **Minecraft Paper** — Uses PaperMC API v2 with version/build resolution
+  - **Minecraft Bedrock** — Direct download from Mojang CDN with fallback URL
+  - **Terraria/TShock** — GitHub Releases API with Linux-specific asset detection
+  - **Factorio** — Direct headless download with initial world creation
+  - **Xonotic** — Direct download from dl.xonotic.org
+  - **ET:Legacy** — Architecture-detected archive download (x86_64/aarch64/i386)
+  - **OpenRA** — GitHub release with AppImage extraction fallbacks
+
+### Fixed
+- SteamCMD is no longer installed globally — each server gets its own copy inside the install directory, eliminating all permission and PATH issues
+- Shell variable escaping fixed in all template literals (`${VAR}` properly escaped inside JS backtick strings)
+
+---
+
 ## [2.0.0] — 2026-07-21
 
 ### Added
