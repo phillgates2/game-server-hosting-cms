@@ -158,10 +158,16 @@ sudo apt install -y postgresql postgresql-contrib
 sudo systemctl enable postgresql
 sudo systemctl start postgresql
 
-# Create database and user (change the password!)
-sudo -u postgres psql -c "CREATE USER gsmadmin WITH PASSWORD 'CHANGE_THIS_PASSWORD';"
+# Set a password once and reuse it below and in the .env file later
+export DB_PASS='CHANGE_THIS_PASSWORD'
+
+# Create database and user
+sudo -u postgres psql -c "CREATE USER gsmadmin WITH PASSWORD '${DB_PASS}';"
 sudo -u postgres psql -c "CREATE DATABASE gameserver_db OWNER gsmadmin;"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE gameserver_db TO gsmadmin;"
+
+# Optional: verify the account works
+PGPASSWORD="$DB_PASS" psql -h 127.0.0.1 -U gsmadmin -d gameserver_db -c 'select 1;'
 ```
 
 ### Step 4 — Install SteamCMD *(optional — for Steam games)*
@@ -221,22 +227,27 @@ npm install
 # Generate a secure JWT secret
 JWT_SECRET=$(openssl rand -hex 32)
 
-# Create .env (replace CHANGE_THIS_PASSWORD with your PostgreSQL password from Step 3)
+# Recommended production setup: run app on 3000 and let Caddy expose it on :80/:443
 cat > .env << EOF
-DATABASE_URL=postgresql://gsmadmin:CHANGE_THIS_PASSWORD@127.0.0.1:5432/gameserver_db
+DATABASE_URL=postgresql://gsmadmin:${DB_PASS}@127.0.0.1:5432/gameserver_db
 JWT_SECRET=${JWT_SECRET}
 NODE_ENV=production
-PORT=80
+PORT=3000
 EOF
+
+# Optional direct-bind setup (without Caddy):
+# sed -i 's/PORT=3000/PORT=80/' .env
 ```
 
-> **⚠️ Important:** Replace `CHANGE_THIS_PASSWORD` with the password you set in Step 3.
+> **Why PORT=3000 by default?**
+> It is the most reliable setup for PM2 and avoids root/capability issues.
+> Caddy will expose the panel on the default IP/domain with no port in the URL.
 >
-> **Port 80** requires root. For non-root:
+> If you really want to bind Node directly to port 80:
 > ```bash
 > sudo setcap 'cap_net_bind_service=+ep' $(which node)
+> sed -i 's/PORT=3000/PORT=80/' .env
 > ```
-> Or use `PORT=3000` and put Caddy in front (see below).
 
 ### Step 7 — Build
 
@@ -258,9 +269,34 @@ pm2 startup
 # Run the sudo command that PM2 outputs!
 ```
 
-### Step 9 — Open the Panel
+### Step 9 — Put Caddy in Front *(recommended)*
 
-Visit `http://YOUR_SERVER_IP` (or `:3000` if using port 3000).
+```bash
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update
+sudo apt install -y caddy
+```
+
+Edit `/etc/caddy/Caddyfile`:
+
+```caddyfile
+YOUR_SERVER_IP {
+    reverse_proxy 127.0.0.1:3000
+}
+```
+
+Then reload Caddy:
+
+```bash
+sudo systemctl reload caddy
+sudo systemctl status caddy
+```
+
+### Step 10 — Open the Panel
+
+Visit `http://YOUR_SERVER_IP` (or your domain if you configured one).
 
 The **installation wizard** appears automatically on first visit:
 1. Enter your panel name and admin credentials
@@ -374,13 +410,8 @@ pct restart YOUR_CONTAINER_ID
 
 ## 🔧 Caddy Reverse Proxy
 
-```caddyfile
-panel.yourdomain.com {
-    reverse_proxy localhost:3000
-}
-```
-
-Caddy automatically handles HTTPS, certificates, and renewal.
+Caddy is already covered in **Step 9** of the installation guide above.
+Use it to expose the panel on the default IP/domain with no port in the URL while the Node app runs safely on `127.0.0.1:3000`.
 
 ---
 
