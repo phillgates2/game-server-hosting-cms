@@ -1,473 +1,192 @@
-# 🎮 GameServer Manager — Modern Game Server Hosting Panel
+<p align="center">
+  <h1 align="center">🎮 GameServer Manager</h1>
+  <p align="center">
+    <strong>Modern, open-source game server hosting panel</strong><br/>
+    A full-featured TCAdmin / Pterodactyl alternative built with Next.js, PostgreSQL, and Tailwind CSS
+  </p>
+  <p align="center">
+    <a href="https://github.com/phillgates2/game-server-hosting-cms">Repository</a> ·
+    <a href="#-quick-start">Quick Start</a> ·
+    <a href="#-features">Features</a> ·
+    <a href="#-screenshots">Screenshots</a> ·
+    <a href="#-api-reference">API Reference</a>
+  </p>
+</p>
 
-A modern, open-source TCAdmin alternative built with **Next.js 16**, **PostgreSQL**, **Drizzle ORM**, and **Tailwind CSS 4**. Features a dark-themed control panel for managing game servers across multiple nodes, built-in forum, server monitoring with RAM buffer management, database viewer/editor, IPv6 support, and automatic game server file installation.
+---
 
-**Repository:** https://github.com/phillgates2/game-server-hosting-cms.git
+## ⚡ At a Glance
+
+| | |
+|---|---|
+| **60 API routes** | Full REST API for every panel feature |
+| **27 game templates** | Minecraft, CS2, Rust, ARK, Valheim, ET:Legacy, and more |
+| **18 panel sections** | Servers, Files, RCON, Nodes, Games, Monitor, Forum, CMS, Users, Roles, Audit, Scheduler, API Keys, Database, and more |
+| **40+ permissions** | Granular role-based access across 10 categories |
+| **8 languages** | English, Spanish, German, French, Portuguese, Japanese, Chinese, Russian |
+| **Dark + Light theme** | Toggle with persistence, full CSS variable swap |
+| **Mobile responsive** | Hamburger sidebar, touch-friendly, works on phones |
 
 ---
 
 ## ✨ Features
 
-- **🌐 Public CMS Site** — Blog, changelogs, and feature showcase for visitors — no login needed
-- **🔧 Admin Panel** — Full dashboard after login at the same URL — no port, no subfolder
-- **📂 File Manager** — Full web-based server file browser/uploader/editor (SFTP-like in the browser)
-- **🖥️ RCON Console** — Full remote console for game servers (Source RCON, UDP RCON, WebRCON)
-- **✍️ Blog & Changelogs** — Built-in CMS to publish blog posts and changelogs on the public site
-- **🖥️ Multi-Node Support** — Manage game servers across multiple physical/virtual machines
-- **🎮 Game Server Management** — Create, start, stop, install files, edit files, and delete game servers
-- **📦 30+ Game Templates** — Pterodactyl-style install scripts, AMP-compatible variables, editable, importable, and runtime-binary verified
-- **🔑 Advanced Permissions** — Custom roles with 40+ granular permissions, color/icon/priority
-- **👥 User Management** — Profiles, login tracking, suspend/ban, per-user server limits
-- **📊 Server Monitoring** — Real-time CPU, RAM, disk, and network monitoring with live charts
-- **🧹 RAM Buffer Management** — Automatic buffer/cache threshold detection and one-click clearing
-- **💬 Forum System** — Full forum with user profiles, moderation, quoting, role badges
-- **🗄️ Database Manager** — Built-in PostgreSQL viewer/editor (like phpMyAdmin) with SQL query editor
-- **🔔 Discord Webhooks** — Real-time server event notifications
-- **🌐 IPv6 Support** — Full IPv6 support for game servers and network monitoring
-- **🔐 Authentication** — JWT-based auth with bcrypt password hashing
-- **🎨 Modern Dark Theme** — Beautiful dark UI with smooth animations
-- **🚀 Web Installer** — Step-by-step web-based installation wizard
+### 🎮 Server Management
+- **Create servers** with a guided 3-step wizard and game-specific settings
+- **Start / Stop / Restart** with real process control (PID tracking, crash detection)
+- **Install game files** from 27 Pterodactyl-style templates with verified binaries
+- **Update servers** — one-click SteamCMD `app_update` without full reinstall
+- **Backup & Restore** — timestamped `.tar.gz` archives with one-click restore
+- **Clone servers** — duplicate with all settings and a new port
+- **Server Console** — live log viewer with auto-refresh every 3 seconds
+- **Uptime tracking** — shows how long each server has been running
+- **Bulk actions** — select multiple servers and Start/Stop/Install all at once
+- **Auto-restart on crash** — polls running servers every 15 seconds
 
-### Permission System
+### 📂 File Manager
+- Browse, upload, download, rename, delete server files
+- In-browser text editor for configs with Ctrl+S save
+- Binary-safe — large/binary files are download-only
 
-40+ granular permissions across 10 categories, fully customizable per role:
+### 🖥️ RCON Console
+- Source RCON (TCP), UDP RCON, WebRCON protocols
+- Auto-detection per game template
+- Terminal UI with command history and game-specific quick commands
 
-| Category | Permissions |
-|----------|------------|
-| **Game Servers** | View, create, edit, delete, start/stop, install files, browse/edit files, console |
-| **Nodes** | View, create, edit, delete |
-| **Game Templates** | View, browse templates, install, uninstall |
-| **Users** | View list, edit profiles, delete, change roles, suspend/ban |
-| **Roles** | View, create, edit permissions, delete |
-| **Forum** | View, post, edit own/any, delete own/any, pin, lock |
-| **CMS** | View, create, edit, delete, publish/unpublish |
-| **Monitoring** | View stats, clear RAM buffers |
-| **Database** | View tables, edit rows, execute SQL |
-| **Panel** | Settings, Discord webhooks |
+### 🌐 Multi-Node
+- Local and remote server nodes
+- Auto-detection of hostname, IP, RAM, disk
+- Heartbeat API for remote node health metrics
+- Node editing — change paths, limits, SSH settings
 
-Three system roles are created during install:
-- **🛡️ Administrator** — All permissions
-- **⚔️ Moderator** — Server management + forum moderation + CMS
-- **👤 User** — Basic server and forum access
+### 📦 Game Templates
+- 27 built-in templates with Pterodactyl-style install scripts
+- AMP/Pterodactyl variable format with dropdowns, checkboxes, passwords
+- Import from Pterodactyl eggs or AMP templates
+- Create custom templates with full script editor
+- Template audit tool with live binary verification
 
-Create unlimited custom roles from the Roles panel with any combination of permissions.
+### 🔑 Permissions & Roles
+- 40+ granular permissions across 10 categories
+- Custom role creation with color, icon, priority
+- Permission-aware sidebar — tabs hidden if user lacks access
+- Three system roles: Administrator, Moderator, User
 
-### Supported Games (30+ Templates)
+### 👥 Users
+- User profiles with bio, location, website
+- Login tracking (IP, timestamp, count)
+- Suspend/ban accounts
+- Per-user server limits
+- Password change with current-password verification
 
-#### Minecraft
-| Game | Engine | Default Port | Install Method |
-|------|--------|-------------|----------------|
-| 🧱 Minecraft: Java Edition | Java | 25565 | Official Download |
-| 📄 Minecraft: Paper | Java (Paper) | 25565 | PaperMC API |
-| 🪨 Minecraft: Bedrock Edition | Bedrock | 19132 | Official Download |
+### 💬 Forum
+- Categories with thread/post counts
+- User profiles in posts (role badge, post count, join date)
+- Quoting, editing, deleting, pinning, locking
+- Moderator permissions
 
-#### Valve / Source Engine
-| Game | Engine | Default Port | Install Method |
-|------|--------|-------------|----------------|
-| 🔫 Counter-Strike 2 | Source 2 | 27015 | SteamCMD |
-| 🎩 Team Fortress 2 | Source | 27015 | SteamCMD |
-| 🔧 Garry's Mod | Source | 27015 | SteamCMD |
-| 🧟 Left 4 Dead 2 | Source | 27015 | SteamCMD |
+### ✍️ CMS
+- Blog posts, changelogs, and pages
+- Publish/draft toggle, pinning, tags
+- Public site shows blog and changelogs to visitors
 
-#### Survival Games
-| Game | Engine | Default Port | Install Method |
-|------|--------|-------------|----------------|
-| 🪓 Rust | Unity | 28015 | SteamCMD |
-| 🦖 ARK: Survival Evolved | Unreal Engine 4 | 7777 | SteamCMD |
-| ⚔️ Valheim | Unity | 2456 | SteamCMD |
-| 🧟‍♂️ 7 Days to Die | Unity | 26900 | SteamCMD |
-| 🦎 Palworld | Unreal Engine 5 | 8211 | SteamCMD |
-| 🏭 Satisfactory | Unreal Engine | 7777 | SteamCMD |
-| ⛏️ Terraria (TShock) | Custom | 7777 | GitHub Release |
-| 🏰 Enshrouded | Holistic | 15636 | SteamCMD |
+### 📊 Monitoring
+- Real-time CPU, RAM, disk, network from `/proc/*`
+- RAM buffer/cache management with one-click clearing
+- IPv6 status detection
+- Historical resource charts
 
-#### FPS / Action
-| Game | Engine | Default Port | Install Method |
-|------|--------|-------------|----------------|
-| 🎖️ Insurgency: Sandstorm | Unreal Engine 4 | 27102 | SteamCMD |
-| 🪖 Squad | Unreal Engine 4 | 7787 | SteamCMD |
-| 🎯 Arma 3 | Real Virtuality 4 | 2302 | SteamCMD |
+### 🔔 Discord Webhooks
+- 13 event types (start, stop, crash, install, backup, clone, login, etc.)
+- Per-server webhook URL with event toggles
+- Colored embeds with game icons
 
-#### Classic / Other
-| Game | Engine | Default Port | Install Method |
-|------|--------|-------------|----------------|
-| 🐺 Wolfenstein: Enemy Territory | id Tech 3 | 27960 | Direct Download |
-| ⚔️ OpenRA | OpenRA Engine | 1234 | GitHub Release |
-| ⚡ Quake Live | id Tech 3 | 27960 | SteamCMD |
-| 🧛 V Rising | Unity | 9876 | SteamCMD |
-| ⚙️ Factorio | Custom | 34197 | Official Download |
-| 🔥 Don't Starve Together | Custom | 10999 | SteamCMD |
-| 🏎️ Assetto Corsa | Custom | 9600 | SteamCMD |
+### ⏰ Scheduler
+- Cron-based scheduled restarts, backups, updates, commands
+- 6 preset schedules (hourly, daily, weekly, etc.)
+- Enable/disable per task
+
+### 🔐 Security
+- JWT authentication with bcrypt password hashing
+- Two-Factor Authentication (TOTP) with QR code setup
+- API key system for external tools/scripts
+- Secure cookie handling (HTTP/HTTPS auto-detection)
+
+### 🗄️ Database Manager
+- Browse tables, view structure, edit rows inline
+- Full SQL query editor with Ctrl+Enter execution
+- Like phpMyAdmin, built into the panel
+
+### 📋 Activity Log
+- Full audit trail — who did what and when
+- Action icons, user info, IP address, timestamps
+
+### ⚙️ Panel Settings
+- Export/Import configuration as JSON
+- Email notifications (SMTP) with built-in templates
+- Dark/Light theme toggle with persistence
+- 8-language localization
 
 ---
 
-## 🖥️ Fresh Server Installation Guide
+## 🖥️ Quick Start
 
 ### Prerequisites
 
-- **OS:** Ubuntu 22.04+ / Debian 12+ (or any Linux with systemd)
-- **Node.js:** v20+ (v22 LTS recommended)
-- **PostgreSQL:** 15+ (16 recommended)
-- **RAM:** 2GB+ (4GB+ recommended)
-- **Disk:** 20GB+ for panel, additional space for game servers
+- **Node.js** 20+ (22 LTS recommended)
+- **PostgreSQL** 15+
+- **Linux** (Ubuntu 22.04+ / Debian 12+)
 
----
-
-### Step 1: System Update & Base Packages
+### 1. Install & Configure
 
 ```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
-
-# Install required packages
-sudo apt install -y curl git build-essential unzip wget gnupg ca-certificates
-```
-
----
-
-### Step 2: Install Node.js 22 LTS
-
-```bash
-# Add NodeSource repository
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-
-# Install Node.js
-sudo apt install -y nodejs
-
-# Verify installation
-node --version   # Should show v22.x.x
-npm --version    # Should show 10.x.x
-```
-
----
-
-### Step 3: Install PostgreSQL
-
-```bash
-# Install PostgreSQL
-sudo apt install -y postgresql postgresql-contrib
-
-# Start and enable PostgreSQL
-sudo systemctl start postgresql
-sudo systemctl enable postgresql
-
-# Verify it's running
-sudo systemctl status postgresql
-```
-
-#### Create Database and User
-
-```bash
-# Switch to postgres user and create database
-sudo -u postgres psql -c "CREATE USER gsmadmin WITH PASSWORD 'CHANGE_THIS_PASSWORD';"
-sudo -u postgres psql -c "CREATE DATABASE gameserver_db OWNER gsmadmin;"
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE gameserver_db TO gsmadmin;"
-sudo -u postgres psql -c "ALTER USER gsmadmin CREATEDB;"
-
-# Test connection
-psql -h 127.0.0.1 -U gsmadmin -d gameserver_db -c "SELECT 1;"
-# Enter password when prompted
-```
-
-> ⚠️ **Important:** Replace `CHANGE_THIS_PASSWORD` with a secure password!
-
----
-
-### Step 4: Install SteamCMD (Optional — for Steam games)
-
-SteamCMD is needed for CS2, Rust, ARK, Valheim, and other Steam-based servers. Skip this step if you only plan to run non-Steam games (Minecraft, Terraria, Factorio, etc.).
-
-```bash
-# 1. Install 32-bit libraries (SteamCMD is a 32-bit application)
-sudo dpkg --add-architecture i386
-sudo apt update
-sudo apt install -y lib32gcc-s1 lib32stdc++6 ca-certificates
-
-# 2. Create directory, download, and extract SteamCMD
-sudo mkdir -p /opt/steamcmd
-cd /opt/steamcmd
-sudo curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | sudo tar xzf -
-
-# 3. Set ownership to YOUR user (NOT root — this prevents permission errors)
-sudo chown -R $USER:$USER /opt/steamcmd
-
-# 4. Set executable permissions
-chmod +x /opt/steamcmd/steamcmd.sh
-chmod +x /opt/steamcmd/linux32/steamcmd
-
-# 5. Create a wrapper script
-#    SteamCMD MUST run from /opt/steamcmd — a symlink does NOT work.
-#    This wrapper cd's into the correct directory before running.
-sudo bash -c 'cat > /usr/local/bin/steamcmd << "WRAPPER"
-#!/bin/bash
-cd /opt/steamcmd && exec ./steamcmd.sh "$@"
-WRAPPER'
-sudo chmod +x /usr/local/bin/steamcmd
-
-# 6. Create package directory with correct permissions
-mkdir -p /opt/steamcmd/package
-
-# 7. First run — DO NOT use sudo!
-#    Downloads ~40MB of updates. May take a few minutes.
-cd /opt/steamcmd
-./steamcmd.sh +quit
-```
-
-> ⚠️ **Important:** Do NOT run SteamCMD with `sudo`. Running as root writes cache
-> files to `/root/Steam/` which then can't be read by non-root parts of the script.
-> Always run as your regular user.
-
-#### If SteamCMD update fails ("Download of package failed")
-
-This is a common SteamCMD bug where the download finishes but package verification fails.
-
-```bash
-# Clean ALL cached data
-rm -rf ~/Steam ~/.steam /opt/steamcmd/package /tmp/dumps
-
-# Recreate package directory
-mkdir -p /opt/steamcmd/package
-
-# Re-extract fresh SteamCMD binaries
-cd /opt/steamcmd
-rm -f steamcmd.sh
-rm -rf linux32
-curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-chmod +x steamcmd.sh linux32/steamcmd
-
-# Try the direct binary (bypasses the shell script updater)
-./linux32/steamcmd +quit
-```
-
-If that also fails, try forcing IPv4 (some containers have broken IPv6):
-```bash
-cd /opt/steamcmd
-./steamcmd.sh +@nClientDownloadEnableHTTP2PlatformLinux 0 +@sSteamCmdForcePlatformBitness 32 +quit
-```
-
-#### LXC / Proxmox container users
-
-SteamCMD requires `nesting` to be enabled on your container. Run this on the **host** (not inside the container):
-
-```bash
-# Replace 100 with your LXC container ID
-pct set 100 -features nesting=1,keyctl=1
-pct restart 100
-```
-
-Then retry inside the container:
-```bash
-rm -rf ~/Steam /opt/steamcmd/package
-cd /opt/steamcmd
-./steamcmd.sh +quit
-```
-
-#### Still not working? Skip it.
-
-SteamCMD is only required for Steam-based games. You can install the panel now and set up SteamCMD later. Non-Steam games work without it:
-- ✅ Minecraft (Java, Paper, Bedrock)
-- ✅ Terraria (TShock)
-- ✅ Factorio
-- ✅ OpenRA
-- ✅ Wolfenstein: ET / ET:Legacy
-- ✅ Xonotic
-
----
-
-### Step 5: Clone & Install the Panel
-
-```bash
-# Clone repository
+# Clone
 cd /opt
 sudo git clone https://github.com/phillgates2/game-server-hosting-cms.git gsm-panel
 cd gsm-panel
-
-# Set ownership to your user
 sudo chown -R $USER:$USER /opt/gsm-panel
 
-# Install Node.js dependencies
+# Install dependencies
 npm install
-```
 
----
-
-### Step 6: Configure Environment
-
-```bash
-# Generate a secure JWT secret
-JWT_SECRET=$(openssl rand -hex 32)
-
-# Create .env file (replace password with your PostgreSQL password)
+# Configure
 cat > .env << EOF
-DATABASE_URL=postgresql://gsmadmin:CHANGE_THIS_PASSWORD@127.0.0.1:5432/gameserver_db
-JWT_SECRET=${JWT_SECRET}
+DATABASE_URL=postgresql://gsmadmin:YOUR_PASSWORD@127.0.0.1:5432/gameserver_db
+JWT_SECRET=$(openssl rand -hex 32)
 NODE_ENV=production
-PORT=3000
+PORT=80
 EOF
-
-# Verify .env was created
-cat .env
 ```
 
-> ⚠️ **Important:** Replace `CHANGE_THIS_PASSWORD` with the password you set in Step 3!
-
----
-
-### Step 7: Build the Application
+### 2. Build & Run
 
 ```bash
-# Build for production
+# Build
 npm run build
 
-# You should see output like:
-# ✓ Compiled successfully
-# ✓ Collecting page data
-# ✓ Generating static pages
-```
-
----
-
-### Step 8: Test the Panel
-
-```bash
-# Start the panel (for testing)
-npm start
-
-# Open in browser: http://YOUR_SERVER_IP:3000
-# Press Ctrl+C to stop after testing
-```
-
----
-
-### Step 9: Setup PM2 (Production Process Manager)
-
-PM2 keeps your panel running 24/7 and auto-restarts on crashes or server reboots.
-
-```bash
-# Install PM2 globally
+# Run with PM2
 sudo npm install -g pm2
-
-# Start the panel with PM2
-cd /opt/gsm-panel
 pm2 start npm --name "gsm-panel" -- start
-
-# Verify it's running
-pm2 status
-
-# Save the process list
-pm2 save
-
-# Setup auto-start on boot
-pm2 startup
-# PM2 will output a command - COPY AND RUN IT!
-# Example: sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u youruser --hp /home/youruser
+pm2 save && pm2 startup
 ```
 
-#### PM2 Commands Reference
+### 3. Open the Panel
 
-```bash
-pm2 status              # View all processes
-pm2 logs gsm-panel      # View logs (Ctrl+C to exit)
-pm2 restart gsm-panel   # Restart the panel
-pm2 stop gsm-panel      # Stop the panel
-pm2 delete gsm-panel    # Remove from PM2
-pm2 monit               # Real-time monitoring dashboard
-```
+Visit `http://YOUR_SERVER_IP` — the installer wizard appears automatically.
+
+> **Port 80 requires root** or `sudo setcap 'cap_net_bind_service=+ep' $(which node)`.
+> Alternatively, use `PORT=3000` and put Caddy in front.
+
+### 4. First-Time Setup
+
+1. Complete the web installer
+2. Go to **Nodes** → Add Local Node
+3. Go to **Games** → Templates → Install a game
+4. Go to **Servers** → Create Server → Install Files → Start
 
 ---
 
-### Step 10: Run the Web Installer
-
-1. Open your browser: `http://YOUR_SERVER_IP` (or `:3000` if using port 3000)
-2. The installation wizard appears automatically since the panel is not yet set up
-3. Enter:
-   - **Panel Name:** Your panel's display name
-   - **Admin Username:** Your admin username
-   - **Admin Email:** Your email address
-   - **Admin Password:** A strong password
-4. Click **"Install Now"**
-5. Wait for installation to complete
-6. Click **"Go to Login"** and sign in with your admin credentials
-
-> Everything runs at the root URL — no `/panel` or other path needed.
-> 
-> | State | What you see |
-> |-------|-------------|
-> | Not installed | Installer wizard |
-> | Installed, not logged in | Public site with blog, changelogs, Login button |
-> | Logged in | Full admin dashboard |
-
----
-
-### Step 11: Initial Panel Setup
-
-After logging in, you'll see the admin dashboard. Then:
-
-1. **Add a Node (Required):**
-   - Go to **Nodes** in the sidebar
-   - Click **"+ Add Local Node"**
-   - If the panel runs as a normal user, the local node now defaults to `~/gameservers`
-   - If the panel runs as root, it defaults to `/opt/gameservers`
-
-2. **Install or Create Game Templates:**
-   - Go to **Games** → **Templates** tab → Click **"Install Game"**
-   - Or go to **Games** → **+ Custom** tab to create your own from scratch
-   - Installed templates can be edited: change install scripts, start commands, variables, configs
-
-3. **Create a Server:**
-   - Go to **Servers** → **"+ New Server"**
-   - Select node and game → **"Create Server"**
-
-4. **Install Game Server Files:**
-   - On the server, click **"Install Files"**
-
-5. **Manage Server Files:**
-   - Open **File Manager** in the sidebar
-   - Select a server
-   - Upload or edit configs, maps, plugins, worlds, mods, and archives
-
-6. **Create Blog/Changelog Posts:**
-   - Go to **CMS** in the sidebar
-   - Create blog posts and changelogs — they appear on the public site for logged-out visitors
-
-> ⚠️ Make sure the panel user can write to the game server path.
-> 
-> If running as a normal user, prefer:
-> ```bash
-> mkdir -p ~/gameservers
-> ```
-> 
-> If using `/opt/gameservers`, fix ownership first:
-> ```bash
-> sudo mkdir -p /opt/gameservers
-> sudo chown -R $USER:$USER /opt/gameservers
-> ```
-
----
-
-## 🔧 Caddy Reverse Proxy (Recommended for Production)
-
-Caddy provides automatic HTTPS with Let's Encrypt certificates.
-
-### Install Caddy
-
-```bash
-# Add Caddy repository
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update
-sudo apt install -y caddy
-```
-
-### Configure Caddy
-
-```bash
-# Edit Caddyfile
-sudo nano /etc/caddy/Caddyfile
-```
-
-Replace contents with:
+## 🔧 Caddy Reverse Proxy
 
 ```caddyfile
 panel.yourdomain.com {
@@ -475,430 +194,25 @@ panel.yourdomain.com {
 }
 ```
 
-```bash
-# Reload Caddy
-sudo systemctl reload caddy
-
-# Check status
-sudo systemctl status caddy
-```
-
-That's it! Caddy automatically:
-- Obtains SSL certificates from Let's Encrypt
-- Redirects HTTP to HTTPS
-- Renews certificates automatically
-
-### Caddy with IPv6
-
-```caddyfile
-panel.yourdomain.com {
-    bind 0.0.0.0 [::]
-    reverse_proxy localhost:3000
-}
-```
+Caddy automatically handles HTTPS, certificates, and renewal.
 
 ---
 
-## 🖥️ Multi-Node Server Management
-
-GameServer Manager supports managing game servers across multiple physical or virtual machines.
-
-### Node Types
-
-| Type | Description |
-|------|-------------|
-| **Local Node** | This server running the panel (auto-detected) |
-| **Remote Node** | External server connected via SSH or API |
-
-### Adding a Remote Node
-
-1. Go to **Nodes** panel
-2. Click **"+ Add Remote Node"**
-3. Fill in:
-   - **Name** — Display name (e.g., "US East Server")
-   - **Hostname** — FQDN or IP address
-   - **SSH Port** — Usually 22
-   - **SSH User** — root or dedicated user
-   - **SSH Key Path** — Path to private key on panel server
-   - **Max Servers** — Limit for this node
-   - **Max RAM** — Total RAM available (MB)
-   - **Game Server Path** — Where servers are installed
-   - **Location** — Physical location
-   - **Provider** — Hosting provider
-
-### Node Heartbeat API
-
-Remote nodes can send health metrics to the panel:
-
-```bash
-curl -X POST https://panel.example.com/api/nodes/1/heartbeat \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-node-api-key" \
-  -d '{
-    "cpuPercent": 45,
-    "cpuLoad1": 1.5,
-    "ramUsedMb": 8192,
-    "ramTotalMb": 16384,
-    "diskUsedMb": 50000,
-    "diskTotalMb": 100000,
-    "serverCount": 5,
-    "ipv6Enabled": true
-  }'
-```
-
----
-
-## 🔔 Discord Webhook Notifications
-
-### Setting Up Webhooks
-
-1. **Create a Discord Webhook:**
-   - Open Discord → Server Settings → Integrations → Webhooks
-   - Click "New Webhook"
-   - Choose the channel for notifications
-   - Copy the Webhook URL
-
-2. **Configure in Panel:**
-   - When creating a server, expand "Discord Notifications"
-   - Paste your webhook URL
-   - Select which events to notify
-
-### Notification Events
-
-| Event | Color | Description |
-|-------|-------|-------------|
-| 🆕 Server Created | Green | Server has been created |
-| ▶️ Server Started | Blue | Server is now online |
-| ⏹️ Server Stopped | Amber | Server has been stopped |
-| 🔄 Server Restarted | Purple | Server is restarting |
-| 💥 Server Crashed | Red | Server crashed unexpectedly |
-
----
-
-## 📂 File Manager
-
-A full web-based file manager is built into the panel, giving you an SFTP-like experience directly in the browser.
-
-### Features
-
-- **Directory browsing** — Navigate the server install directory with breadcrumbs
-- **Create files/folders** — Make new config files and directories
-- **Upload files** — Upload plugins, maps, configs, worlds, mods, and archives
-- **Download files** — Download any file directly from the browser
-- **Rename / Delete** — Manage files and folders inline
-- **Text editor** — Edit common text/config files in-browser with dark monospace editor
-- **Ctrl+S save** — Quick keyboard save shortcut when editing
-- **Binary-safe** — Large/binary files are download-only and not opened as text
-- **Server sandboxing** — All file operations are restricted to the selected server’s install path
-
-### Supported File Operations
-
-| Operation | Description |
-|-----------|-------------|
-| Browse | List folders and files in the server directory |
-| Read | Open text files up to 2MB |
-| Save | Save edited text/config files |
-| Upload | Upload new files via browser |
-| Download | Download files as attachments |
-| Create File | Create a blank file |
-| Create Folder | Create directories recursively |
-| Rename | Rename files/folders inline |
-| Delete | Delete files/folders recursively |
-
-### API
-
-| Route | Method | Description |
-|-------|--------|-------------|
-| `GET /api/servers/[id]/files` | GET | List directories or read/download files |
-| `POST /api/servers/[id]/files` | POST | Create, save, rename, delete |
-| `POST /api/servers/[id]/files/upload` | POST | Upload multipart file |
-
-Requires `servers.files` permission.
-
-### Local Node Path Notes
-
-For non-root panel installs, local nodes now prefer a writable path like:
-
-```bash
-/home/youruser/gameservers
-```
-
-instead of `/opt/gameservers`. Existing local servers created with `/opt/gameservers/...` are automatically migrated to a writable home-directory path during **Install Files** if the panel is not running as root.
-
----
-
-## 🖥️ RCON Console
-
-Full remote console for game servers, built into the panel with no external dependencies.
-
-### Supported Protocols
-
-| Protocol | Transport | Games |
-|----------|-----------|-------|
-| **Source RCON** | TCP | CS2, TF2, GMod, L4D2, Minecraft, ARK, Valheim, 7DTD, Palworld, Terraria, Insurgency, Squad, and 30+ more |
-| **UDP RCON** | UDP | Wolfenstein ET, Quake Live, Xonotic, OpenRA |
-| **WebRCON** | HTTP | Rust |
-
-The protocol is auto-detected based on the game template. No configuration needed.
-
-### Using RCON
-
-1. Go to **RCON Console** in the sidebar
-2. Select a **running** server from the dropdown
-3. Enter the **RCON password** (or leave blank to use the server's saved `RCON_PASSWORD` variable)
-4. Type commands and press Enter
-
-### Features
-
-- **Terminal UI** — Dark terminal theme with colored output
-- **Command history** — Arrow Up/Down to cycle through previous commands
-- **Quick command buttons** — Game-specific presets (e.g., `status`, `list`, `save`)
-- **Multi-packet response** — Handles large responses that span multiple packets
-- **Auto-protocol detection** — Selects Source/UDP/WebRCON based on game
-- **Response timing** — Shows duration in ms for each command
-
-### Setting Up RCON on Game Servers
-
-When creating a server, set the `RCON_PASSWORD` variable. Each game template supports this:
-
-- **Source games (CS2, TF2, GMod):** Set `rcon_password` in `server.cfg`
-- **Minecraft:** Set `enable-rcon=true` and `rcon.password=...` in `server.properties`
-- **Rust:** Set via `+rcon.password` startup parameter
-- **Valheim/ARK/7DTD:** Set via admin password variables
-
-### API
-
-| Route | Method | Description |
-|-------|--------|-------------|
-| `GET /api/servers/[id]/rcon` | GET | Get RCON connection info |
-| `POST /api/servers/[id]/rcon` | POST | Send command, get response |
-
-Requires `servers.console` permission.
-
----
-
-## 🌐 IPv6 Configuration
-
-### Enable IPv6 on Your Server
-
-```bash
-# Check if IPv6 is enabled
-cat /proc/sys/net/ipv6/conf/all/disable_ipv6
-# 0 = enabled, 1 = disabled
-
-# Enable if disabled
-sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0
-sudo sysctl -w net.ipv6.conf.default.disable_ipv6=0
-
-# Make permanent
-echo "net.ipv6.conf.all.disable_ipv6 = 0" | sudo tee -a /etc/sysctl.conf
-echo "net.ipv6.conf.default.disable_ipv6 = 0" | sudo tee -a /etc/sysctl.conf
-sudo sysctl -p
-```
-
----
-
-## 🧹 RAM Buffer Management
-
-The panel includes automatic RAM buffer/cache monitoring:
-
-- **Threshold:** Configurable (default 80%)
-- **Auto-detection:** Monitors `/proc/meminfo`
-- **One-click clearing:** Admin can clear caches via the Monitor panel
-
-### Automatic Buffer Clearing (Cron)
-
-```bash
-# Clear buffers when usage exceeds 80% (every 5 minutes)
-(crontab -l 2>/dev/null; echo "*/5 * * * * free | awk '/Mem/{if(\$6/\$2*100 > 80) system(\"sync && echo 3 > /proc/sys/vm/drop_caches\")}'") | crontab -
-```
-
----
-
-## 🗄️ Database Manager
-
-The built-in database manager provides:
-
-- **Table browser** — View all tables with row counts
-- **Data editor** — Edit rows inline, insert, delete
-- **Structure viewer** — View column types, nullability, defaults
-- **SQL query editor** — Execute raw SQL with results display
-- **Keyboard shortcut:** Ctrl+Enter to execute queries
-
-Access from the admin sidebar (admin role required).
-
----
-
-## 🔧 Troubleshooting
-
-### SteamCMD Issues
-
-**"/usr/local/bin/linux32/steamcmd: No such file or directory":**
-
-You used `ln -sf` to create a symlink — this doesn't work with SteamCMD:
-
-```bash
-# Remove the broken symlink and create a wrapper script
-sudo rm -f /usr/local/bin/steamcmd
-sudo bash -c 'cat > /usr/local/bin/steamcmd << "WRAPPER"
-#!/bin/bash
-cd /opt/steamcmd && exec ./steamcmd.sh "$@"
-WRAPPER'
-sudo chmod +x /usr/local/bin/steamcmd
-```
-
-**"Permission denied" error:**
-
-Don't run SteamCMD with `sudo`. Fix ownership instead:
-
-```bash
-sudo chown -R $USER:$USER /opt/steamcmd
-chmod +x /opt/steamcmd/steamcmd.sh /opt/steamcmd/linux32/steamcmd
-cd /opt/steamcmd && ./steamcmd.sh +quit
-```
-
-**"Download of package (steamcmd_public_all) failed after 0 bytes":**
-
-This is a common SteamCMD bug — the download succeeds but verification fails:
-
-```bash
-# 1. Clean everything
-rm -rf ~/Steam ~/.steam /opt/steamcmd/package /tmp/dumps
-
-# 2. Re-extract fresh binaries
-cd /opt/steamcmd
-rm -f steamcmd.sh && rm -rf linux32
-curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -
-chmod +x steamcmd.sh linux32/steamcmd
-mkdir -p package
-
-# 3. Run the binary directly (bypasses the shell script)
-./linux32/steamcmd +quit
-
-# 4. If still failing, force IPv4
-./steamcmd.sh +@nClientDownloadEnableHTTP2PlatformLinux 0 +@sSteamCmdForcePlatformBitness 32 +quit
-```
-
-**LXC/Proxmox containers** — run on the HOST:
-```bash
-pct set YOUR_CONTAINER_ID -features nesting=1,keyctl=1
-pct restart YOUR_CONTAINER_ID
-```
-
-**32-bit libraries missing:**
-```bash
-sudo dpkg --add-architecture i386
-sudo apt update
-sudo apt install -y lib32gcc-s1 lib32stdc++6
-```
-
-### PM2 Issues
-
-**"EACCES permission denied" when installing:**
-```bash
-sudo npm install -g pm2
-```
-
-**PM2 not auto-starting on reboot:**
-```bash
-pm2 startup
-# Run the command it outputs!
-pm2 save
-```
-
-### Database Connection Issues
-
-**"ECONNREFUSED" error:**
-```bash
-# Check PostgreSQL status
-sudo systemctl status postgresql
-sudo systemctl start postgresql
-```
-
-**"password authentication failed":**
-```bash
-# Reset password
-sudo -u postgres psql -c "ALTER USER gsmadmin WITH PASSWORD 'new_password';"
-# Update .env file with new password
-```
-
-### Game File Install Issues
-
-**"Remote node installation requires a node agent API URL":**
-
-The current panel can directly install files only on a **Local Node**. For remote nodes, configure a node-agent API URL or add the machine as the local node where the panel is running.
-
-### File Manager Issues
-
-**Permission denied writing to files or folders:**
-- Make sure the local node path is writable by the panel user.
-- For non-root installs, prefer `~/gameservers`.
-- Existing `/opt/gameservers/...` local servers are auto-migrated during Install Files.
-
-**Cannot browse outside the server directory:**
-- This is intentional. The file manager is sandboxed to the selected server’s install path for security.
-
-**Large file will not open in editor:**
-- Files over 2MB and binary files are download-only.
-
-**Permission denied writing to the game server path:**
-
-Preferred non-root local-node path:
-```bash
-mkdir -p ~/gameservers
-```
-
-If your node is already configured to use `/opt/gameservers`:
-```bash
-sudo mkdir -p /opt/gameservers
-sudo chown -R $USER:$USER /opt/gameservers
-chmod 755 /opt/gameservers
-```
-
-If you already created a local node with `/opt/gameservers`, either:
-- fix permissions as above, or
-- update the node path in the database/database manager to your home directory path, e.g. `/home/admin/gameservers`
-
-**Steam game install fails:**
-- Confirm SteamCMD works first:
-```bash
-steamcmd +quit
-```
-- If SteamCMD is broken, non-Steam templates like Minecraft/Paper/Terraria can still install.
-
-### Panel Not Loading
-
-**Check if running:**
-```bash
-pm2 status
-pm2 logs gsm-panel
-```
-
-**Check port 3000:**
-```bash
-sudo lsof -i :3000
-curl http://localhost:3000/api/health
-```
-
-**Firewall:**
-```bash
-sudo ufw allow 3000/tcp
-# or
-sudo iptables -A INPUT -p tcp --dport 3000 -j ACCEPT
-```
-
-### Caddy Issues
-
-**Check status:**
-```bash
-sudo systemctl status caddy
-sudo journalctl -u caddy -f
-```
-
-**Validate config:**
-```bash
-caddy validate --config /etc/caddy/Caddyfile
-```
+## 📦 Tech Stack
+
+| Technology | Version | Purpose |
+|-----------|---------|---------|
+| Next.js | 16.x | Fullstack React framework |
+| React | 19.x | UI components |
+| TypeScript | 5.9.x | Type safety |
+| PostgreSQL | 15+ | Database |
+| Drizzle ORM | 0.45.x | Database queries |
+| Tailwind CSS | 4.x | Styling |
+| bcryptjs | Latest | Password hashing |
+| jsonwebtoken | Latest | JWT auth |
+| otpauth | Latest | TOTP 2FA |
+| nodemailer | Latest | Email notifications |
+| qrcode | Latest | 2FA QR codes |
 
 ---
 
@@ -907,94 +221,199 @@ caddy validate --config /etc/caddy/Caddyfile
 ```
 gsm-panel/
 ├── src/
-│   ├── app/
-│   │   ├── api/
-│   │   │   ├── auth/          # Login, register, logout, profile, permissions
-│   │   │   ├── cms/           # Blog posts & changelogs
-│   │   │   ├── database/      # DB viewer/editor/query
-│   │   │   ├── discord/       # Webhook testing
-│   │   │   ├── forum/         # Categories, threads, posts
-│   │   │   ├── games/         # Installed game definitions
-│   │   │   ├── health/        # Health check
-│   │   │   ├── install/       # Web installer
-│   │   │   ├── monitor/       # System monitoring & buffer clear
-│   │   │   ├── nodes/         # Multi-node management
-│   │   │   ├── roles/         # Role CRUD & permissions
-│   │   │   ├── servers/       # Server CRUD, install, files, RCON
-│   │   │   ├── templates/     # Game template library
-│   │   │   └── users/         # User management (admin)
-│   │   ├── globals.css
-│   │   ├── layout.tsx
-│   │   └── page.tsx           # Root: installer → public site → panel
+│   ├── app/api/          # 60 API routes
+│   │   ├── auth/         # Login, register, 2FA, profile, permissions
+│   │   ├── servers/      # CRUD, install, process, files, RCON, backup, clone, update, log
+│   │   ├── nodes/        # Multi-node management, heartbeat
+│   │   ├── games/        # Templates, custom, import, variables
+│   │   ├── forum/        # Categories, threads, posts
+│   │   ├── cms/          # Blog posts, changelogs
+│   │   ├── users/        # User management
+│   │   ├── roles/        # Role & permission management
+│   │   ├── scheduler/    # Scheduled tasks
+│   │   ├── api-keys/     # API key generation
+│   │   ├── audit-log/    # Activity log
+│   │   ├── database/     # DB viewer/editor/query
+│   │   ├── monitor/      # System monitoring, buffer management
+│   │   ├── search/       # Global search
+│   │   ├── settings/     # Export, import, email
+│   │   ├── templates/    # Game template library
+│   │   └── audit/        # Template audit tool
 │   ├── components/
-│   │   ├── panels/
-│   │   │   ├── CmsPanel.tsx       # Blog/changelog editor
-│   │   │   ├── DatabasePanel.tsx  # PostgreSQL manager
-│   │   │   ├── FilesPanel.tsx     # Web-based server file manager
-│   │   │   ├── ForumPanel.tsx     # Forum with user profiles
-│   │   │   ├── GamesPanel.tsx     # Game templates & install
-│   │   │   ├── MonitorPanel.tsx   # System monitoring
-│   │   │   ├── NodesPanel.tsx     # Multi-node management
-│   │   │   ├── OverviewPanel.tsx  # Dashboard overview
-│   │   │   ├── ProfilePanel.tsx   # User profile & settings
-│   │   │   ├── RconPanel.tsx      # RCON terminal console
-│   │   │   ├── RolesPanel.tsx     # Role & permission editor
-│   │   │   ├── ServersPanel.tsx   # Server management
-│   │   │   └── UsersPanel.tsx     # User admin panel
-│   │   ├── Dashboard.tsx          # Sidebar + panel router
-│   │   ├── ErrorBoundary.tsx      # React error boundary
-│   │   ├── InstallWizard.tsx      # 3-step installer
-│   │   ├── LoginForm.tsx          # Login/register forms
-│   │   └── PublicSite.tsx         # Public CMS frontend
+│   │   ├── panels/       # 17 dashboard panels
+│   │   ├── Dashboard.tsx # Sidebar, routing, command palette, shortcuts
+│   │   ├── ToastProvider.tsx    # Toast notifications
+│   │   ├── ConfirmDialog.tsx    # Styled confirmation modals
+│   │   ├── NotificationCenter.tsx  # Bell icon + notification history
+│   │   ├── ThemeToggle.tsx      # Dark/light theme
+│   │   ├── ErrorBoundary.tsx    # Per-panel crash isolation
+│   │   ├── PublicSite.tsx       # Public CMS frontend
+│   │   ├── InstallWizard.tsx    # 3-step installer
+│   │   └── LoginForm.tsx        # Authentication forms
 │   ├── db/
-│   │   ├── index.ts           # Database connection (pg pool)
-│   │   ├── schema.ts          # Drizzle ORM schema (all tables)
-│   │   └── seeds.ts           # Game template library
+│   │   ├── schema.ts     # 14 database tables
+│   │   └── seeds.ts      # 27 game templates + variable definitions
 │   └── lib/
-│       ├── auth.ts            # JWT, bcrypt, cookie helpers
-│       ├── discord.ts         # Webhook sender & queue
-│       ├── permissions.ts     # Permission definitions & checker
-│       └── rcon.ts            # Source/UDP/WebRCON protocols
+│       ├── auth.ts       # JWT, bcrypt, cookies
+│       ├── discord.ts    # 13 webhook event types
+│       ├── email.ts      # SMTP + email templates
+│       ├── i18n.ts       # 8-language localization
+│       ├── permissions.ts # 40+ permission definitions
+│       └── rcon.ts       # Source/UDP/WebRCON protocols
 ├── .env
 ├── CHANGELOG.md
-├── package.json
-└── README.md
+├── README.md
+└── package.json
 ```
 
 ---
 
-## 🔒 Security Notes
+## 🔐 Security
 
-- Change `JWT_SECRET` in production (auto-generated during setup)
-- Use strong PostgreSQL passwords
-- Enable SSL/TLS via Caddy reverse proxy
-- All admin features are permission-gated (40+ granular permissions)
-- RCON passwords are stored in server variables, never exposed to non-owners
-- Database manager requires `database.view` permission
-- Buffer clearing requires `monitor.clear_cache` permission
-- First registered user auto-gets the Administrator role
-- Suspended/banned users cannot log in
-
----
-
-## 📦 Tech Stack
-
-| Technology | Version | Purpose |
-|-----------|---------|---------|
-| Next.js | 16.x | React fullstack framework |
-| React | 19.x | UI library |
-| TypeScript | 5.9.x | Type safety |
-| PostgreSQL | 15+ | Database |
-| Drizzle ORM | 0.45.x | Database ORM |
-| Tailwind CSS | 4.x | Styling |
-| bcryptjs | Latest | Password hashing |
-| jsonwebtoken | Latest | JWT authentication |
+- JWT tokens with httpOnly cookies (HTTPS auto-detection)
+- bcrypt password hashing (12 rounds)
+- Two-Factor Authentication (TOTP)
+- API keys with SHA-256 hashing (shown once on creation)
+- Role-based access control (40+ permissions)
+- RCON passwords stored in server variables, never exposed
+- SQL query access restricted to `database.view` permission
+- Suspended/banned users blocked at login
+- Per-panel error boundaries prevent cascade failures
 
 ---
 
-## 📄 License
+## 🎮 Supported Games
 
-MIT License — See [LICENSE](LICENSE) file for details.
+<details>
+<summary><strong>27 game templates</strong> (click to expand)</summary>
+
+| Game | Engine | Port | Install |
+|------|--------|------|---------|
+| 🧱 Minecraft Java | Java | 25565 | Mojang API |
+| 📄 Minecraft Paper | Java | 25565 | PaperMC API |
+| 🪨 Minecraft Bedrock | Bedrock | 19132 | Mojang CDN |
+| 🔫 Counter-Strike 2 | Source 2 | 27015 | SteamCMD |
+| 🎩 Team Fortress 2 | Source | 27015 | SteamCMD |
+| 🔧 Garry's Mod | Source | 27015 | SteamCMD |
+| 🧟 Left 4 Dead 2 | Source | 27015 | SteamCMD |
+| 🪓 Rust | Unity | 28015 | SteamCMD |
+| 🦖 ARK: Survival Evolved | UE4 | 7777 | SteamCMD |
+| ⚔️ Valheim | Unity | 2456 | SteamCMD |
+| 🧟‍♂️ 7 Days to Die | Unity | 26900 | SteamCMD |
+| 🦎 Palworld | UE5 | 8211 | SteamCMD |
+| 🏭 Satisfactory | UE | 7777 | SteamCMD |
+| ⛏️ Terraria (TShock) | Custom | 7777 | GitHub |
+| 🏰 Enshrouded | Custom | 15636 | SteamCMD |
+| 🎖️ Insurgency: Sandstorm | UE4 | 27102 | SteamCMD |
+| 🪖 Squad | UE4 | 7787 | SteamCMD |
+| 🎯 Arma 3 | RV4 | 2302 | SteamCMD |
+| 🐺 ET:Legacy | id Tech 3 | 27960 | Direct |
+| ⚔️ OpenRA | Custom | 1234 | GitHub |
+| ⚡ Quake Live | id Tech 3 | 27960 | SteamCMD |
+| 🔵 Xonotic | DarkPlaces | 26000 | Direct |
+| 🧛 V Rising | Unity | 9876 | SteamCMD |
+| 🧟‍♀️ Project Zomboid | Java | 16261 | SteamCMD |
+| ⚙️ Factorio | Custom | 34197 | Direct |
+| 🔥 Don't Starve Together | Custom | 10999 | SteamCMD |
+| 🏎️ Assetto Corsa | Custom | 9600 | GitHub |
+
+</details>
+
+---
+
+## 📡 API Reference
+
+<details>
+<summary><strong>60 API routes</strong> (click to expand)</summary>
+
+#### Authentication
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/auth/login` | POST | Login with username/password |
+| `/api/auth/register` | POST | Create account |
+| `/api/auth/logout` | POST | Clear session |
+| `/api/auth/me` | GET | Current user + permissions |
+| `/api/auth/profile` | GET/PATCH | View/edit own profile |
+| `/api/auth/permissions` | GET | Current user's permissions |
+| `/api/auth/2fa/setup` | POST | Generate TOTP secret + QR |
+| `/api/auth/2fa/verify` | POST | Enable/disable 2FA |
+
+#### Servers
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/servers` | GET/POST | List/create servers |
+| `/api/servers/[id]` | GET/PATCH/DELETE | Server CRUD |
+| `/api/servers/[id]/install` | POST | Install game files |
+| `/api/servers/[id]/process` | POST | Start/stop/restart/status |
+| `/api/servers/[id]/update` | POST | SteamCMD app_update |
+| `/api/servers/[id]/backup` | GET/POST | List/create/restore backups |
+| `/api/servers/[id]/clone` | POST | Clone server |
+| `/api/servers/[id]/files` | GET/POST | File manager operations |
+| `/api/servers/[id]/files/upload` | POST | Upload files |
+| `/api/servers/[id]/log` | GET | Read server console log |
+| `/api/servers/[id]/rcon` | GET/POST | RCON connection/commands |
+
+#### Games & Templates
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/games` | GET/POST | List/create game definitions |
+| `/api/games/[id]` | GET/PATCH | View/edit game |
+| `/api/games/[id]/variables` | GET | Template variables |
+| `/api/games/custom` | POST | Create custom template |
+| `/api/games/import` | POST | Import Pterodactyl/AMP template |
+| `/api/templates` | GET | Built-in template library |
+| `/api/templates/[slug]` | GET | Template details |
+| `/api/templates/[slug]/install` | POST/DELETE | Install/uninstall template |
+
+#### Nodes
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/nodes` | GET/POST | List/create nodes |
+| `/api/nodes/[id]` | GET/PATCH/DELETE | Node CRUD |
+| `/api/nodes/[id]/heartbeat` | POST | Node health metrics |
+| `/api/nodes/local` | POST | Add local node |
+
+#### Users & Roles
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/users` | GET | List users |
+| `/api/users/[id]` | GET/PATCH/DELETE | User CRUD |
+| `/api/roles` | GET/POST | List/create roles |
+| `/api/roles/[id]` | PATCH/DELETE | Role CRUD |
+| `/api/api-keys` | GET/POST/DELETE | API key management |
+
+#### Forum & CMS
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/forum/categories` | GET | Forum categories |
+| `/api/forum/threads` | GET/POST | Threads |
+| `/api/forum/threads/[id]` | GET/POST/PATCH/DELETE | Thread CRUD + replies |
+| `/api/forum/posts/[id]` | PATCH/DELETE | Edit/delete posts |
+| `/api/cms` | GET/POST | CMS posts |
+| `/api/cms/[slug]` | GET/PATCH/DELETE | Single post CRUD |
+
+#### System
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/monitor` | GET | System metrics |
+| `/api/monitor/clear-buffers` | POST | Clear RAM buffers |
+| `/api/database` | GET | List tables |
+| `/api/database/table/[name]` | GET | Browse table |
+| `/api/database/table/[name]/row` | POST | Insert/update/delete row |
+| `/api/database/query` | POST | Execute SQL |
+| `/api/scheduler` | GET/POST | Scheduled tasks |
+| `/api/scheduler/[id]` | PATCH/DELETE | Task CRUD |
+| `/api/audit-log` | GET/POST | Activity log |
+| `/api/audit/templates` | GET | Template audit |
+| `/api/search` | GET | Global search |
+| `/api/settings/export` | GET | Export config |
+| `/api/settings/import` | POST | Import config |
+| `/api/settings/email` | GET/POST | Email config/test |
+| `/api/health` | GET | Health check |
+| `/api/install` | GET/POST | Web installer |
+| `/api/discord/test` | POST | Test webhook |
+
+</details>
 
 ---
 
@@ -1008,4 +427,12 @@ MIT License — See [LICENSE](LICENSE) file for details.
 
 ---
 
-**Built with ❤️ for the game server hosting community**
+## 📄 License
+
+MIT License — See [LICENSE](LICENSE) file for details.
+
+---
+
+<p align="center">
+  <strong>Built with ❤️ for the game server hosting community</strong>
+</p>
