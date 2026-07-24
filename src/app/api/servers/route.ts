@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { eq } from "drizzle-orm";
 import { homedir } from "os";
 import { basename, join } from "path";
+import { mkdir } from "fs/promises";
 
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
@@ -49,32 +50,74 @@ export async function GET(req: NextRequest) {
   }
 }
 
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64) || "server";
+}
+
+async function buildUniqueServerPath(basePath: string, gameSlug: string, serverName: string) {
+  const safeGame = slugify(gameSlug || "game");
+  const safeName = slugify(serverName);
+  let candidate = join(basePath, safeGame, safeName);
+
+  // Ensure uniqueness against existing DB paths
+  const existing = await db.select({ installPath: gameServers.installPath }).from(gameServers);
+  const used = new Set(existing.map((s) => s.installPath));
+
+  let i = 2;
+  while (used.has(candidate)) {
+    candidate = join(basePath, safeGame, `${safeName}-${i}`);
+    i++;
+  }
+  return candidate;
+}
+
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
     const body = await req.json();
-    const { name, gameId, nodeId, port, ipv4, ipv6, installPath, discordWebhook } = body;
+    const { name, gameId, nodeId, port, ipv4, ipv6, installPath: _installPath, discordWebhook } = body;
 
-    if (!name || !gameId || !port || !installPath) {
+    if (!name || !gameId || !port || !nodeId) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    let finalInstallPath = installPath;
+    const [game] = await db
+      .select({ slug: gameDefinitions.slug })
+      .from(gameDefinitions)
+      .where(eq(gameDefinitions.id, Number(gameId)))
+      .limit(1);
+    if (!game) {
+      return NextResponse.json({ error: "Selected game not found" }, { status: 404 });
+    }
 
-    // If this is a local node and the panel is not running as root, avoid /opt by default.
-    if (nodeId) {
-      const [node] = await db
-        .select({ isLocal: nodes.isLocal, gameServerPath: nodes.gameServerPath })
-        .from(nodes)
-        .where(eq(nodes.id, Number(nodeId)))
-        .limit(1);
+    const [node] = await db
+      .select({ isLocal: nodes.isLocal, gameServerPath: nodes.gameServerPath })
+      .from(nodes)
+      .where(eq(nodes.id, Number(nodeId)))
+      .limit(1);
+    if (!node) {
+      return NextResponse.json({ error: "Selected node not found" }, { status: 404 });
+    }
 
-      const isRootUser = process.getuid?.() === 0;
-      if (node?.isLocal && !isRootUser && finalInstallPath.startsWith("/opt/gameservers")) {
-        finalInstallPath = join(homedir() || "/home", "gameservers", basename(finalInstallPath));
-      }
+    // Base path comes from the node. Local non-root installs should avoid /opt.
+    let basePath = node.gameServerPath || "/home/gameservers";
+    const isRootUser = process.getuid?.() === 0;
+    if (node.isLocal && !isRootUser && basePath.startsWith("/opt/gameservers")) {
+      basePath = join(homedir() || "/home", "gameservers");
+    }
+
+    // Every new server gets its own unique folder.
+    const finalInstallPath = await buildUniqueServerPath(basePath, game.slug, name);
+
+    // Pre-create the directory for local nodes so the folder exists immediately.
+    if (node.isLocal) {
+      await mkdir(finalInstallPath, { recursive: true }).catch(() => {});
     }
 
     const [server] = await db

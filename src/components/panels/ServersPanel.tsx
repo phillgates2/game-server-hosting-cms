@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useToast } from "@/components/ToastProvider";
-import { useConfirm } from "@/components/ConfirmDialog";
+import { useConfirm, useConfirmChoice } from "@/components/ConfirmDialog";
 
 interface AuthUser { id: number; username: string; role: string }
 interface GameDef { id: number; name: string; slug: string; defaultPort: number; iconEmoji: string | null }
@@ -40,9 +40,18 @@ function formatUptime(startedAt: string | null): string {
   return `${d}d ${h % 24}h`;
 }
 
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64) || "server";
+}
+
 export default function ServersPanel({ user }: { user: AuthUser }) {
   const toast = useToast();
   const confirm = useConfirm();
+  const confirmChoice = useConfirmChoice();
 
   const [servers, setServers] = useState<Server[]>([]);
   const [games, setGames] = useState<GameDef[]>([]);
@@ -76,7 +85,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
         const online = ((await nodeR.value.json()).nodes || []).filter((n: NodeInfo) => n.status === "online");
         setNodeList(online);
         const def = online.find((n: NodeInfo) => n.isDefault);
-        if (def) setForm((f) => ({ ...f, nodeId: String(def.id), installPath: def.gameServerPath || "" }));
+        if (def) setForm((f) => ({ ...f, nodeId: String(def.id) }));
       }
     } catch { /**/ } finally { setLoaded(true); }
   }, []);
@@ -117,10 +126,8 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
 
   async function onGameChange(gameId: string) {
     const game = games.find((g) => g.id === Number(gameId));
-    const node = nodeList.find((n) => n.id === Number(form.nodeId));
-    const base = node?.gameServerPath || "/home/gameservers";
     if (game) {
-      setForm((f) => ({ ...f, gameId, port: String(game.defaultPort), installPath: `${base}/${game.slug}` }));
+      setForm((f) => ({ ...f, gameId, port: String(game.defaultPort) }));
       try {
         const res = await fetch(`/api/games/${game.id}/variables`);
         if (res.ok) {
@@ -142,7 +149,15 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
       const res = await fetch("/api/servers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, variables: varValues }) });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Failed"); toast.error("Create Failed", data.error); }
-      else { setWizard(false); setWizardStep(0); toast.success("Server Created", `"${form.name}" is ready. Click Install Files to download game files.`); loadData(); }
+      else {
+        setWizard(false);
+        setWizardStep(0);
+        toast.success(
+          "Server Created",
+          `"${form.name}" is ready. Folder: ${data.server?.installPath || installPathPreview}. Click Install Files to download game files.`
+        );
+        loadData();
+      }
     } catch (e) { const msg = e instanceof Error ? e.message : "Failed"; setError(msg); toast.error("Error", msg); } finally { setLoading(false); }
   }
 
@@ -164,10 +179,50 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
 
   async function deleteServer(id: number) {
     const srv = servers.find((s) => s.id === id);
-    const ok = await confirm({ title: "Delete Server", message: `Permanently delete "${srv?.name}"? This cannot be undone.`, confirmLabel: "Delete", danger: true });
-    if (!ok) return;
-    await fetch(`/api/servers/${id}`, { method: "DELETE" });
-    toast.info("Server Deleted", srv?.name || "");
+    const result = await confirmChoice({
+      title: "Delete Server",
+      message: `Choose how to delete "${srv?.name}". This action cannot be undone.`,
+      confirmLabel: "Delete",
+      danger: true,
+      choices: [
+        {
+          value: "db",
+          label: "Delete DB record only",
+          description: "Keeps the server files/folders on disk.",
+        },
+        {
+          value: "all",
+          label: "Delete DB record + server files",
+          description: "Removes the assigned install folder too (recommended for local nodes).",
+        },
+      ],
+      defaultChoice: "all",
+    });
+    if (!result.confirmed) return;
+
+    const res = await fetch(`/api/servers/${id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deleteMode: result.choice }),
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      toast.error("Delete Failed", data.error || "Could not delete server.");
+      return;
+    }
+
+    if (result.choice === "db") {
+      toast.info("Server Deleted", `${srv?.name || "Server"} record removed. Files were kept.`);
+    } else if (data.filesDeleted) {
+      toast.success("Server Deleted", `${srv?.name || "Server"} and its assigned folder were removed.`);
+    } else {
+      toast.warning(
+        "Server Deleted",
+        `${srv?.name || "Server"} record removed, but file deletion was skipped. ${data.filesDeleteSkippedReason || ""}`.trim()
+      );
+    }
+
     setSelected((prev) => { const n = new Set(prev); n.delete(id); return n; });
     loadData();
   }
@@ -260,10 +315,14 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   useEffect(() => { if (consoleId === null) return; const i = setInterval(() => fetchLog(consoleId), 3000); return () => clearInterval(i); }, [consoleId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedGame = games.find((g) => g.id === Number(form.gameId));
+  const selectedNode = nodeList.find((n) => n.id === Number(form.nodeId));
   const onlineNodes = nodeList;
   const canCreate = form.name && form.gameId && form.nodeId && form.port;
   const visibleVars = gameVars.filter((v) => !["SERVER_NAME","PORT","INSTALL_PATH","QUERY_PORT"].includes(v.env_variable));
   const inputCls = "w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/50 transition-colors";
+  const installPathPreview = selectedNode && selectedGame && form.name
+    ? `${selectedNode.gameServerPath || "/home/gameservers"}/${slugify(selectedGame.slug)}/${slugify(form.name)}`
+    : (selectedNode?.gameServerPath || form.installPath || "");
 
   function VarField({ v }: { v: TemplateVar }) {
     const val = varValues[v.env_variable] ?? v.default_value ?? "";
@@ -329,6 +388,13 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                   <div><label className="block text-xs font-medium text-text-secondary mb-1.5">Node *</label><select value={form.nodeId} onChange={(e) => setForm({ ...form, nodeId: e.target.value })} className={inputCls} required><option value="">Choose a node...</option>{onlineNodes.map((n) => <option key={n.id} value={n.id}>{n.name} {n.isDefault ? "★" : ""}</option>)}</select></div>
                   <div><label className="block text-xs font-medium text-text-secondary mb-1.5">Port *</label><input type="number" value={form.port} onChange={(e) => setForm({ ...form, port: e.target.value })} className={inputCls} required placeholder={selectedGame ? String(selectedGame.defaultPort) : "27015"} /><p className="text-[10px] text-text-muted mt-1">Default: {selectedGame?.defaultPort || "varies"}</p></div>
                 </div>
+                {installPathPreview && (
+                  <div className="bg-bg-secondary rounded-lg p-3 text-xs">
+                    <p className="text-text-muted mb-1">Server folder preview</p>
+                    <p className="font-mono text-text-primary break-all">{installPathPreview}</p>
+                    <p className="text-text-muted mt-1">A unique folder is created for every new server automatically.</p>
+                  </div>
+                )}
                 <div className="flex justify-end pt-2"><button type="button" disabled={!form.gameId || !form.name || !form.nodeId || !form.port} onClick={() => setWizardStep(1)} className="px-6 py-2.5 bg-accent hover:bg-accent-hover disabled:opacity-40 text-white rounded-lg text-sm font-medium">Next →</button></div>
               </div>
             )}
@@ -348,7 +414,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                     <div><p className="text-text-muted text-xs">Node</p><p>{onlineNodes.find((n) => n.id === Number(form.nodeId))?.name || "—"}</p></div>
                     <div><p className="text-text-muted text-xs">Port</p><p>{form.port}</p></div>
                     <div><p className="text-text-muted text-xs">IPv4</p><p>{form.ipv4 || "0.0.0.0"}</p></div>
-                    <div><p className="text-text-muted text-xs">Path</p><p className="font-mono text-xs truncate">{form.installPath}</p></div>
+                    <div><p className="text-text-muted text-xs">Path</p><p className="font-mono text-xs truncate">{installPathPreview || "(auto-generated)"}</p></div>
                   </div>
                   {Object.keys(varValues).length > 0 && (
                     <div className="pt-3 border-t border-border"><p className="text-text-muted text-xs mb-2">Game Settings</p><div className="grid grid-cols-2 md:grid-cols-3 gap-2">{Object.entries(varValues).filter(([,v]) => v).map(([k,v]) => { const def = gameVars.find((gv) => gv.env_variable === k); let display = v; if (def?.enum_values?.[v]) display = def.enum_values[v]; if (def?.field_type === "password" && v) display = "••••••"; return <div key={k} className="text-xs"><span className="text-text-muted">{def?.name || k}:</span> <span className="font-medium">{display}</span></div>; })}</div></div>
