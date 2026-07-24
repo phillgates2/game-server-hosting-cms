@@ -167,24 +167,39 @@ sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE gameserver_db TO gsma
 ### Step 4 — Install SteamCMD *(optional — for Steam games)*
 
 ```bash
+# 1. Install 32-bit libraries (SteamCMD is a 32-bit application)
 sudo dpkg --add-architecture i386
 sudo apt update
-sudo apt install -y lib32gcc-s1 lib32stdc++6
+sudo apt install -y lib32gcc-s1 lib32stdc++6 ca-certificates
 
+# 2. Create directory, download, and extract SteamCMD
 sudo mkdir -p /opt/steamcmd
 cd /opt/steamcmd
 sudo curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | sudo tar xzf -
+
+# 3. Set ownership to YOUR user (NOT root — this prevents permission errors)
 sudo chown -R $USER:$USER /opt/steamcmd
 
-# Create wrapper script (SteamCMD must run from its directory)
+# 4. Set executable permissions
+chmod +x /opt/steamcmd/steamcmd.sh
+chmod +x /opt/steamcmd/linux32/steamcmd
+
+# 5. Create a wrapper script
+#    SteamCMD MUST run from /opt/steamcmd — a symlink does NOT work.
+#    This wrapper cd's into the correct directory before running.
 sudo bash -c 'cat > /usr/local/bin/steamcmd << "WRAPPER"
 #!/bin/bash
 cd /opt/steamcmd && exec ./steamcmd.sh "$@"
 WRAPPER'
 sudo chmod +x /usr/local/bin/steamcmd
 
-# Test (first run downloads ~40MB of updates)
-steamcmd +quit
+# 6. Create package directory with correct permissions
+mkdir -p /opt/steamcmd/package
+
+# 7. First run — DO NOT use sudo!
+#    Downloads ~40MB of updates. May take a few minutes.
+cd /opt/steamcmd
+./steamcmd.sh +quit
 ```
 
 > Skip this step if you only want non-Steam games (Minecraft, Terraria, Factorio, etc.).
@@ -288,9 +303,8 @@ When creating a server, expand **Discord Notifications** and paste your webhook 
 **Panel shows blank page after login:**
 - Cookie issue — you're accessing via HTTP but `NODE_ENV=production` was set. The panel auto-detects HTTPS now, so this should work. Clear browser cookies and retry.
 
-**SteamCMD "No such file or directory":**
+**SteamCMD wrapper / path issues:**
 ```bash
-# Remove broken symlink and create wrapper
 sudo rm -f /usr/local/bin/steamcmd
 sudo bash -c 'cat > /usr/local/bin/steamcmd << "WRAPPER"
 #!/bin/bash
@@ -299,11 +313,16 @@ WRAPPER'
 sudo chmod +x /usr/local/bin/steamcmd
 ```
 
-**SteamCMD "Download of package failed":**
+**SteamCMD update / package issues:**
 ```bash
+# Clean local cache and retry (do NOT use sudo)
 rm -rf ~/Steam /opt/steamcmd/package
-steamcmd +quit
+mkdir -p /opt/steamcmd/package
+cd /opt/steamcmd
+./steamcmd.sh +quit
 ```
+
+**Important:** Do not run the first update with `sudo steamcmd ...` — keep ownership under your user so the cache and package directory remain writable.
 
 **"Permission denied" writing to game server path:**
 ```bash
