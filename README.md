@@ -129,60 +129,227 @@
 
 ---
 
-## 🖥️ Quick Start
+## 🖥️ Fresh Server Installation Guide
 
-### Prerequisites
+> Tested on Ubuntu 22.04+, Debian 12+/13. Run all commands as a regular user with `sudo` access.
 
-- **Node.js** 20+ (22 LTS recommended)
-- **PostgreSQL** 15+
-- **Linux** (Ubuntu 22.04+ / Debian 12+)
-
-### 1. Install & Configure
+### Step 1 — System Packages
 
 ```bash
-# Clone
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y curl git build-essential unzip wget gnupg ca-certificates
+```
+
+### Step 2 — Install Node.js 22 LTS
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs
+
+# Verify
+node --version   # v22.x.x
+npm --version    # 10.x.x
+```
+
+### Step 3 — Install PostgreSQL
+
+```bash
+sudo apt install -y postgresql postgresql-contrib
+sudo systemctl enable postgresql
+sudo systemctl start postgresql
+
+# Create database and user (change the password!)
+sudo -u postgres psql -c "CREATE USER gsmadmin WITH PASSWORD 'CHANGE_THIS_PASSWORD';"
+sudo -u postgres psql -c "CREATE DATABASE gameserver_db OWNER gsmadmin;"
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE gameserver_db TO gsmadmin;"
+```
+
+### Step 4 — Install SteamCMD *(optional — for Steam games)*
+
+```bash
+sudo dpkg --add-architecture i386
+sudo apt update
+sudo apt install -y lib32gcc-s1 lib32stdc++6
+
+sudo mkdir -p /opt/steamcmd
+cd /opt/steamcmd
+sudo curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | sudo tar xzf -
+sudo chown -R $USER:$USER /opt/steamcmd
+
+# Create wrapper script (SteamCMD must run from its directory)
+sudo bash -c 'cat > /usr/local/bin/steamcmd << "WRAPPER"
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER'
+sudo chmod +x /usr/local/bin/steamcmd
+
+# Test (first run downloads ~40MB of updates)
+steamcmd +quit
+```
+
+> Skip this step if you only want non-Steam games (Minecraft, Terraria, Factorio, etc.).
+
+### Step 5 — Clone & Install the Panel
+
+```bash
 cd /opt
 sudo git clone https://github.com/phillgates2/game-server-hosting-cms.git gsm-panel
 cd gsm-panel
 sudo chown -R $USER:$USER /opt/gsm-panel
 
-# Install dependencies
 npm install
+```
 
-# Configure
-cat > .env << EOF
-DATABASE_URL=postgresql://gsmadmin:YOUR_PASSWORD@127.0.0.1:5432/gameserver_db
+### Step 6 — Configure Environment
+
+```bash
+# Generate a secure JWT secret
 JWT_SECRET=$(openssl rand -hex 32)
+
+# Create .env (replace CHANGE_THIS_PASSWORD with your PostgreSQL password from Step 3)
+cat > .env << EOF
+DATABASE_URL=postgresql://gsmadmin:CHANGE_THIS_PASSWORD@127.0.0.1:5432/gameserver_db
+JWT_SECRET=${JWT_SECRET}
 NODE_ENV=production
 PORT=80
 EOF
 ```
 
-### 2. Build & Run
+> **⚠️ Important:** Replace `CHANGE_THIS_PASSWORD` with the password you set in Step 3.
+>
+> **Port 80** requires root. For non-root:
+> ```bash
+> sudo setcap 'cap_net_bind_service=+ep' $(which node)
+> ```
+> Or use `PORT=3000` and put Caddy in front (see below).
+
+### Step 7 — Build
 
 ```bash
-# Build
 npm run build
-
-# Run with PM2
-sudo npm install -g pm2
-pm2 start npm --name "gsm-panel" -- start
-pm2 save && pm2 startup
 ```
 
-### 3. Open the Panel
+### Step 8 — Start with PM2
 
-Visit `http://YOUR_SERVER_IP` — the installer wizard appears automatically.
+```bash
+sudo npm install -g pm2
 
-> **Port 80 requires root** or `sudo setcap 'cap_net_bind_service=+ep' $(which node)`.
-> Alternatively, use `PORT=3000` and put Caddy in front.
+cd /opt/gsm-panel
+pm2 start npm --name "gsm-panel" -- start
 
-### 4. First-Time Setup
+# Save and auto-start on boot
+pm2 save
+pm2 startup
+# Run the sudo command that PM2 outputs!
+```
 
-1. Complete the web installer
-2. Go to **Nodes** → Add Local Node
-3. Go to **Games** → Templates → Install a game
-4. Go to **Servers** → Create Server → Install Files → Start
+### Step 9 — Open the Panel
+
+Visit `http://YOUR_SERVER_IP` (or `:3000` if using port 3000).
+
+The **installation wizard** appears automatically on first visit:
+1. Enter your panel name and admin credentials
+2. Click **Install Now**
+3. Click **Go to Login** and sign in
+
+### Step 10 — Initial Setup
+
+After logging in:
+
+1. **Nodes** → Click **"+ Add Local Node"**
+2. **Games** → **Templates** tab → Install a game template
+3. **Servers** → **"+ Create Server"** → follow the wizard
+4. Click **Install Files** on the server to download game files
+5. Click **▶ Start** to launch the server
+6. Click **📋 Console** to watch the startup output
+
+### Optional — Email Notifications
+
+Add to your `.env` file:
+```bash
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=noreply@example.com
+SMTP_PASS=your_password
+SMTP_FROM=noreply@example.com
+```
+
+### Optional — Discord Webhooks
+
+When creating a server, expand **Discord Notifications** and paste your webhook URL. Get it from Discord: Server Settings → Integrations → Webhooks → New Webhook → Copy URL.
+
+---
+
+## 🔧 Troubleshooting
+
+<details>
+<summary><strong>Common issues</strong> (click to expand)</summary>
+
+**Panel shows blank page after login:**
+- Cookie issue — you're accessing via HTTP but `NODE_ENV=production` was set. The panel auto-detects HTTPS now, so this should work. Clear browser cookies and retry.
+
+**SteamCMD "No such file or directory":**
+```bash
+# Remove broken symlink and create wrapper
+sudo rm -f /usr/local/bin/steamcmd
+sudo bash -c 'cat > /usr/local/bin/steamcmd << "WRAPPER"
+#!/bin/bash
+cd /opt/steamcmd && exec ./steamcmd.sh "$@"
+WRAPPER'
+sudo chmod +x /usr/local/bin/steamcmd
+```
+
+**SteamCMD "Download of package failed":**
+```bash
+rm -rf ~/Steam /opt/steamcmd/package
+steamcmd +quit
+```
+
+**"Permission denied" writing to game server path:**
+```bash
+# For non-root installs, the panel defaults to ~/gameservers
+mkdir -p ~/gameservers
+
+# Or fix /opt/gameservers permissions
+sudo mkdir -p /opt/gameservers
+sudo chown -R $USER:$USER /opt/gameservers
+```
+
+**"spawn bash ENOENT" during Install Files:**
+- Fixed in current version — the panel now finds bash at `/usr/bin/bash` or `/bin/bash` automatically.
+
+**PostgreSQL connection refused:**
+```bash
+sudo systemctl status postgresql
+sudo systemctl start postgresql
+```
+
+**PM2 permission denied:**
+```bash
+sudo npm install -g pm2
+```
+
+**PM2 not starting on reboot:**
+```bash
+pm2 startup
+# Run the sudo command it outputs!
+pm2 save
+```
+
+**Port 80 permission denied:**
+```bash
+sudo setcap 'cap_net_bind_service=+ep' $(which node)
+# Or use PORT=3000 and Caddy reverse proxy
+```
+
+**LXC/Proxmox containers — SteamCMD fails:**
+```bash
+# Run on the HOST (not in the container)
+pct set YOUR_CONTAINER_ID -features nesting=1,keyctl=1
+pct restart YOUR_CONTAINER_ID
+```
+
+</details>
 
 ---
 
