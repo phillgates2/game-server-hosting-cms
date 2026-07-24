@@ -76,6 +76,13 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
   const hasGames = games.length > 0;
   const hasServers = servers.length > 0;
 
+  async function quickAction(id: number, action: "start" | "stop") {
+    try {
+      await fetch(`/api/servers/${id}/process`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
+      loadData();
+    } catch { /**/ }
+  }
+
   const setupSteps = [
     { done: hasNodes, title: "Add a node", detail: hasNodes ? `${onlineNodes}/${nodeList.length} online` : "Connect the machine that will host servers.", action: "nodes" as OverviewTab, cta: "Open Nodes" },
     { done: hasGames, title: "Install a game template", detail: hasGames ? `${games.length} game template${games.length !== 1 ? "s" : ""} installed` : "Choose a built-in template or import your own.", action: "games" as OverviewTab, cta: "Open Games" },
@@ -230,13 +237,13 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
           <div className="flex items-center justify-between mb-4 gap-3">
             <div>
               <h3 className="text-lg font-semibold">🎮 Your Servers ({servers.length})</h3>
-              <p className="text-text-secondary text-sm">Jump back into your most recent server work.</p>
+              <p className="text-text-secondary text-sm">Quick actions — start, stop, or jump to full management.</p>
             </div>
             {onNavigate && <button onClick={() => onNavigate("servers")} className="text-accent text-sm hover:underline">Manage Servers →</button>}
           </div>
           <div className="space-y-2">
             {servers.slice(0, 6).map((s) => (
-              <div key={s.id} className="flex items-center justify-between bg-bg-secondary rounded-lg p-3">
+              <div key={s.id} className="flex items-center justify-between bg-bg-secondary rounded-lg p-3 group">
                 <div className="flex items-center gap-3 min-w-0">
                   <span className="text-lg">{s.gameIcon || "🎮"}</span>
                   <div className="min-w-0">
@@ -244,7 +251,16 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
                     <p className="text-xs text-text-muted truncate">{s.gameName} {s.nodeName ? `on ${s.nodeName}` : ""}</p>
                   </div>
                 </div>
-                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.status === "running" ? "bg-success/15 text-success" : "bg-bg-tertiary text-text-muted"}`}>{s.status}</span>
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.status === "running" ? "bg-success/15 text-success" : "bg-bg-tertiary text-text-muted"}`}>{s.status}</span>
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {s.status === "running" ? (
+                      <button onClick={() => quickAction(s.id, "stop")} className="px-2 py-1 bg-danger/15 text-danger rounded text-[10px] font-medium">⏹</button>
+                    ) : (
+                      <button onClick={() => quickAction(s.id, "start")} className="px-2 py-1 bg-success/15 text-success rounded text-[10px] font-medium">▶</button>
+                    )}
+                  </div>
+                </div>
               </div>
             ))}
           </div>

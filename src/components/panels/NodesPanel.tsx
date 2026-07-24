@@ -65,6 +65,8 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
   });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [editingNode, setEditingNode] = useState<Node | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", hostname: "", ipv4: "", ipv6: "", sshPort: "22", maxServers: "10", maxRamMb: "16384", gameServerPath: "", location: "", provider: "", description: "" });
 
   const loadNodes = useCallback(async () => {
     try {
@@ -148,6 +150,35 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
     } finally {
       setLoading(false);
     }
+  }
+
+  function startEditNode(node: Node) {
+    setEditingNode(node);
+    setEditForm({
+      name: node.name, hostname: node.hostname, ipv4: node.ipv4 || "", ipv6: node.ipv6 || "",
+      sshPort: String(node.sshPort || 22), maxServers: String(node.maxServers || 10),
+      maxRamMb: String(node.maxRamMb || 16384), gameServerPath: node.gameServerPath || "",
+      location: node.location || "", provider: node.provider || "", description: node.description || "",
+    });
+  }
+
+  async function saveEditNode() {
+    if (!editingNode) return;
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/nodes/${editingNode.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editForm.name, hostname: editForm.hostname, ipv4: editForm.ipv4 || null, ipv6: editForm.ipv6 || null,
+          sshPort: parseInt(editForm.sshPort), maxServers: parseInt(editForm.maxServers), maxRamMb: parseInt(editForm.maxRamMb),
+          gameServerPath: editForm.gameServerPath, location: editForm.location || null, provider: editForm.provider || null,
+          description: editForm.description || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) setMessage({ type: "error", text: data.error });
+      else { setMessage({ type: "success", text: `Node "${editForm.name}" updated` }); setEditingNode(null); loadNodes(); }
+    } catch (e) { setMessage({ type: "error", text: e instanceof Error ? e.message : "Failed" }); }
   }
 
   async function deleteNode(id: number) {
@@ -474,22 +505,35 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold">{selectedNode.name} — Details</h3>
             <div className="flex gap-2">
+              <button onClick={() => startEditNode(selectedNode)} className="px-3 py-1.5 bg-accent/15 text-accent rounded-lg text-xs font-medium">✏️ Edit</button>
               {!selectedNode.isDefault && (
-                <button
-                  onClick={() => setDefaultNode(selectedNode.id)}
-                  className="px-3 py-1.5 bg-accent/15 text-accent rounded-lg text-xs font-medium"
-                >
-                  Set as Default
-                </button>
+                <button onClick={() => setDefaultNode(selectedNode.id)} className="px-3 py-1.5 bg-success/15 text-success rounded-lg text-xs font-medium">Set as Default</button>
               )}
-              <button
-                onClick={() => deleteNode(selectedNode.id)}
-                className="px-3 py-1.5 bg-danger/15 text-danger rounded-lg text-xs font-medium"
-              >
-                Delete Node
-              </button>
+              <button onClick={() => deleteNode(selectedNode.id)} className="px-3 py-1.5 bg-danger/15 text-danger rounded-lg text-xs font-medium">Delete Node</button>
             </div>
           </div>
+          {/* Edit form */}
+          {editingNode?.id === selectedNode.id && (
+            <div className="border-t border-border pt-4 mt-4 space-y-4">
+              <h4 className="font-semibold text-sm">Edit Node</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div><label className="block text-xs text-text-muted mb-1">Name</label><input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
+                <div><label className="block text-xs text-text-muted mb-1">Hostname</label><input value={editForm.hostname} onChange={(e) => setEditForm({ ...editForm, hostname: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
+                <div><label className="block text-xs text-text-muted mb-1">IPv4</label><input value={editForm.ipv4} onChange={(e) => setEditForm({ ...editForm, ipv4: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
+                <div><label className="block text-xs text-text-muted mb-1">SSH Port</label><input type="number" value={editForm.sshPort} onChange={(e) => setEditForm({ ...editForm, sshPort: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
+                <div><label className="block text-xs text-text-muted mb-1">Max Servers</label><input type="number" value={editForm.maxServers} onChange={(e) => setEditForm({ ...editForm, maxServers: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
+                <div><label className="block text-xs text-text-muted mb-1">Max RAM (MB)</label><input type="number" value={editForm.maxRamMb} onChange={(e) => setEditForm({ ...editForm, maxRamMb: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
+                <div><label className="block text-xs text-text-muted mb-1">Game Server Path</label><input value={editForm.gameServerPath} onChange={(e) => setEditForm({ ...editForm, gameServerPath: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
+                <div><label className="block text-xs text-text-muted mb-1">Location</label><input value={editForm.location} onChange={(e) => setEditForm({ ...editForm, location: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
+                <div><label className="block text-xs text-text-muted mb-1">Provider</label><input value={editForm.provider} onChange={(e) => setEditForm({ ...editForm, provider: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={saveEditNode} className="px-4 py-2 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium">Save Changes</button>
+                <button onClick={() => setEditingNode(null)} className="px-4 py-2 bg-bg-secondary border border-border text-text-primary rounded-lg text-sm font-medium">Cancel</button>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
               <p className="text-text-muted text-xs">Hostname</p>

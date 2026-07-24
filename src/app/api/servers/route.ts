@@ -23,6 +23,8 @@ export async function GET(req: NextRequest) {
         autoRestart: gameServers.autoRestart,
         discordWebhook: gameServers.discordWebhook,
         nodeId: gameServers.nodeId,
+        pid: gameServers.pid,
+        lastStarted: gameServers.lastStarted,
         createdAt: gameServers.createdAt,
         gameName: gameDefinitions.name,
         gameSlug: gameDefinitions.slug,

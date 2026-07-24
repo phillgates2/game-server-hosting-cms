@@ -8,6 +8,11 @@ export type WebhookEvent =
   | "server_crashed"
   | "server_deleted"
   | "server_updated"
+  | "server_installed"
+  | "server_backup"
+  | "server_cloned"
+  | "user_login"
+  | "user_registered"
   | "player_joined"
   | "player_left";
 
@@ -33,6 +38,11 @@ const EVENT_COLORS: Record<WebhookEvent, number> = {
   server_crashed: 0xef4444,   // Red
   server_deleted: 0x64748b,   // Gray
   server_updated: 0x06b6d4,   // Cyan
+  server_installed: 0x06b6d4, // Cyan
+  server_backup: 0x8b5cf6,   // Violet
+  server_cloned: 0x14b8a6,   // Teal
+  user_login: 0x6366f1,      // Indigo
+  user_registered: 0x22d3ee, // Sky
   player_joined: 0x10b981,    // Emerald
   player_left: 0xf97316,      // Orange
 };
@@ -45,6 +55,11 @@ const EVENT_TITLES: Record<WebhookEvent, string> = {
   server_crashed: "💥 Server Crashed",
   server_deleted: "🗑️ Server Deleted",
   server_updated: "📝 Server Updated",
+  server_installed: "📥 Files Installed",
+  server_backup: "💾 Backup Created",
+  server_cloned: "📑 Server Cloned",
+  user_login: "🔑 User Login",
+  user_registered: "📝 User Registered",
   player_joined: "👋 Player Joined",
   player_left: "👋 Player Left",
 };

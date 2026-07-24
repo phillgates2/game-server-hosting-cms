@@ -251,6 +251,19 @@ export const scheduledTasks = pgTable("scheduled_tasks", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// ── API Keys ──────────────────────────────────────────────────
+export const apiKeys = pgTable("api_keys", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id).notNull(),
+  name: varchar("name", { length: 128 }).notNull(),
+  keyHash: text("key_hash").notNull(),
+  keyPrefix: varchar("key_prefix", { length: 12 }).notNull(),
+  permissions: jsonb("permissions"),
+  lastUsedAt: timestamp("last_used_at"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // ── Audit Log ─────────────────────────────────────────────────
 export const auditLog = pgTable("audit_log", {
   id: serial("id").primaryKey(),
