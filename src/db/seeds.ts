@@ -1073,14 +1073,13 @@ echo "Arma 3 server installed successfully"`,
     variables: [
       ...COMMON_VARS,
       V("Game Type", "GAMETYPE", "2=Objective, 3=Stopwatch, 4=Campaign", "2", { required: false, type: "number" }),
-      V("Mod", "ET_MOD", "Server mod to run", "legacy", {
+      V("Mod", "ET_MOD", "Server mod / fs_game folder to run", "etmain", {
         required: false, type: "select",
         enum_values: {
-          "legacy": "ET:Legacy (default)",
+          "etmain": "ET:Legacy / Vanilla (default)",
           "jaymod": "Jaymod 2.2.0",
           "etpub": "ETPub 1.0",
           "nitmod": "N!tmod 2.3.5",
-          "etmain": "Vanilla (no mod)",
         },
       }),
     ],
@@ -1166,21 +1165,21 @@ fi
 
 # ── Install selected mod ──
 ET_MOD="{{ET_MOD}}"
-if [ -z "$ET_MOD" ]; then ET_MOD="legacy"; fi
-echo "Selected mod: $ET_MOD"
+if [ -z "$ET_MOD" ]; then ET_MOD="etmain"; fi
+echo "Selected fs_game / mod folder: $ET_MOD"
 
 if [ "$ET_MOD" = "jaymod" ]; then
   echo "Downloading Jaymod 2.2.0..."
   mkdir -p jaymod
-  curl -fL -o jaymod-dl.zip "https://www.moddb.com/downloads/mirror/61829/108/6aa7df04b73c8e5b7acf06b80e0fd3c6/" 2>/dev/null || \
-  curl -fL -o jaymod-dl.zip "https://mirror.etlegacy.com/mods/jaymod-2.2.0.zip" 2>/dev/null || \
+  curl -fL -o jaymod-dl.tar.gz "https://jaymod.clanfu.org/jaymod-2.2.0.tar.gz" 2>/dev/null || \
   echo "Jaymod download failed — you may need to manually place files in jaymod/"
-  if [ -f jaymod-dl.zip ]; then
-    unzip -o jaymod-dl.zip -d jaymod-extract 2>/dev/null || true
+  if [ -f jaymod-dl.tar.gz ]; then
+    mkdir -p jaymod-extract
+    tar xzf jaymod-dl.tar.gz -C jaymod-extract 2>/dev/null || true
     find jaymod-extract -name "*.so" -exec cp -v {} jaymod/ \; 2>/dev/null || true
     find jaymod-extract -name "*.pk3" -exec cp -v {} jaymod/ \; 2>/dev/null || true
     find jaymod-extract -name "*.cfg" -exec cp -v {} jaymod/ \; 2>/dev/null || true
-    rm -rf jaymod-extract jaymod-dl.zip
+    rm -rf jaymod-extract jaymod-dl.tar.gz
   fi
   # Copy base pak files so the mod can find them
   for pak in pak0.pk3 pak1.pk3 pak2.pk3; do
@@ -1209,8 +1208,7 @@ elif [ "$ET_MOD" = "etpub" ]; then
 elif [ "$ET_MOD" = "nitmod" ]; then
   echo "Downloading N!tmod 2.3.5..."
   mkdir -p nitmod
-  curl -fL -o nitmod-dl.zip "https://mirror.etlegacy.com/mods/nitmod-2.3.5.zip" 2>/dev/null || \
-  curl -fL -o nitmod-dl.zip "https://fearless-assassins.com/files/file/2640-nitmod-235/?do=download" 2>/dev/null || \
+  curl -fL -o nitmod-dl.zip "http://etmods.net/downloads/nitmod_2.3.5.zip" 2>/dev/null || \
   echo "N!tmod download failed — you may need to manually place files in nitmod/"
   if [ -f nitmod-dl.zip ]; then
     unzip -o nitmod-dl.zip -d nitmod-extract 2>/dev/null || true
@@ -1227,7 +1225,6 @@ fi
 
 # Create mod-specific server.cfg if needed
 MOD_DIR="$ET_MOD"
-if [ "$ET_MOD" = "legacy" ] || [ "$ET_MOD" = "etmain" ]; then MOD_DIR="etmain"; fi
 mkdir -p "$MOD_DIR"
 if [ ! -f "$MOD_DIR/server.cfg" ]; then
   cat > "$MOD_DIR/server.cfg" << MODCFG
@@ -1262,7 +1259,7 @@ else
 fi
 
 echo "ET:Legacy installed successfully (mod: {{ET_MOD}})"`,
-    startCommand: `cd {{INSTALL_PATH}} && MOD={{ET_MOD}}; [ -z "$MOD" ] && MOD=legacy; [ "$MOD" = "legacy" ] && MOD=etmain; ./etlded +set dedicated 2 +set net_port {{PORT}} +set fs_basepath "{{INSTALL_PATH}}" +set fs_homepath "{{INSTALL_PATH}}" +set fs_game $MOD +exec server.cfg`,
+    startCommand: `cd {{INSTALL_PATH}} && ./etlded +set dedicated 2 +set net_port {{PORT}} +set fs_basepath "{{INSTALL_PATH}}" +set fs_homepath "{{INSTALL_PATH}}" +set fs_game {{ET_MOD}} +exec server.cfg`,
     stopCommand: null,
     configFiles: { "etmain/server.cfg": "server.cfg" },
     defaultConfig: {},
