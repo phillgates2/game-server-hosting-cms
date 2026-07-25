@@ -1062,14 +1062,14 @@ echo "Arma 3 server installed successfully"`,
   {
     slug: "wolfenstein-et",
     name: "Wolfenstein: Enemy Territory / ET:Legacy",
-    engine: "id Tech 3",
+    engine: "id Tech 3 (32-bit forced for mod compatibility)",
     defaultPort: 27960,
     steamAppId: null,
     iconEmoji: "🐺",
     supportsIpv6: true,
     category: "Classic",
-    description: "Free WWII multiplayer FPS classic",
-    estimatedSize: "~500 MB",
+    description: "Free WWII multiplayer FPS classic — installed as 32-bit for max mod compatibility",
+    estimatedSize: "~650 MB",
     variables: [
       ...COMMON_VARS,
       V("Game Type", "GAMETYPE", "2=Objective, 3=Stopwatch, 4=Campaign", "2", { required: false, type: "number" }),
@@ -1084,44 +1084,44 @@ echo "Arma 3 server installed successfully"`,
       }),
     ],
     installScript: `#!/bin/bash
+# ── ET:Legacy Installer (32-bit forced for all mods) ─────────
+# Forced to i386 (32-bit) because most mods (Jaymod, N!tmod, ETPub)
+# ship 32-bit .so modules. 64-bit ET:Legacy cannot load them.
 set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
 ARCH=$(uname -m)
-echo "Detected architecture: $ARCH"
+echo "Host architecture: $ARCH"
+echo "→ Using i386 (32-bit) ET:Legacy for maximum mod compatibility"
 
-# Use the actual ET:Legacy Linux ARCHIVE file ids from the upstream download page.
-# 716 = i386 archive, 715 = x86_64 archive, 725 = AArch64 archive
-if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-  ETL_URL="https://www.etlegacy.com/download/file/725"
-elif [ "$ARCH" = "x86_64" ]; then
-  ETL_URL="https://www.etlegacy.com/download/file/715"
-else
-  ETL_URL="https://www.etlegacy.com/download/file/716"
-fi
+# ── Step 1: Download ET:Legacy 32-bit archive ────────────────
+# File/716 = i386 archive from https://www.etlegacy.com/download
+ETL_URL="https://www.etlegacy.com/download/file/716"
+echo "Downloading ET:Legacy 32-bit archive..."
+curl -fL -o etlegacy-archive "$ETL_URL" || {
+  echo "ERROR: Failed to download ET:Legacy 32-bit archive"
+  echo "URL: $ETL_URL"
+  exit 1
+}
 
-echo "Downloading ET:Legacy archive: $ETL_URL"
-curl -fL -o etlegacy-archive "$ETL_URL"
-
-# Upstream currently serves Linux archives as ZIP files.
-# Do not rely on the 'file' utility being present; try unzip first, then tar.
-echo "Extracting ET:Legacy archive..."
+# Upstream serves Linux archives as ZIP files (not tar.gz)
+echo "Extracting ET:Legacy 32-bit archive..."
 if unzip -o etlegacy-archive >/dev/null 2>&1; then
-  echo "Extracted as ZIP archive"
+  echo "  Extracted as ZIP archive"
 elif tar xzf etlegacy-archive --strip-components=1 >/dev/null 2>&1; then
-  echo "Extracted as tar.gz archive with stripped top-level directory"
+  echo "  Extracted as tar.gz (stripped)"
 elif tar xzf etlegacy-archive >/dev/null 2>&1; then
-  echo "Extracted as tar.gz archive"
+  echo "  Extracted as tar.gz"
 else
-  echo "Failed to extract ET:Legacy archive"
+  echo "ERROR: Failed to extract archive"
   ls -la
   exit 1
 fi
 rm -f etlegacy-archive
 
-# Flatten common extracted directory layouts.
+# Flatten common extracted directory layouts
 for d in etlegacy-* ETLegacy-*; do
   if [ -d "$d" ]; then
     cp -r "$d"/* . 2>/dev/null || true
@@ -1129,106 +1129,159 @@ for d in etlegacy-* ETLegacy-*; do
   fi
 done
 
-# Download base game assets from official mirror.
+# ── Step 2: Download base game assets ────────────────────────
+echo "Downloading base game assets (pak files)..."
 mkdir -p etmain
 for pak in pak0.pk3 pak1.pk3 pak2.pk3; do
   if [ ! -f "etmain/$pak" ]; then
-    echo "Downloading $pak from official mirror..."
-    curl -fL -o "etmain/$pak" "https://mirror.etlegacy.com/etmain/$pak"
+    echo "  Downloading $pak ..."
+    curl -fL -o "etmain/$pak" "https://mirror.etlegacy.com/etmain/$pak" || {
+      echo "  WARNING: Could not download $pak — some maps may be missing"
+    }
   fi
 done
 
-# Download ET:Legacy mod pack (contains qagame, cgame, ui .so modules).
-# File 727 = "All supported archive" from the ET:Legacy download page.
-if [ ! -f "etmain/qagame.mp.x86_64.so" ] && [ ! -f "legacy/qagame.mp.x86_64.so" ]; then
-  echo "Downloading ET:Legacy mod pack (game modules)..."
-  curl -fL -o legacy-mod.zip "https://www.etlegacy.com/download/file/727"
-  unzip -o legacy-mod.zip -d . 2>/dev/null || true
-  rm -f legacy-mod.zip
-
-  # The mod pack may extract into a legacy/ directory or directly.
-  # Copy .so modules into etmain/ so the server can find them.
-  for d in legacy etlegacy-mod etmain; do
-    if [ -d "$d" ]; then
-      find "$d" -name "*.so" -exec cp -v {} etmain/ \; 2>/dev/null || true
-    fi
-  done
-
-  # Also check if the .so files landed in the current directory
-  find . -maxdepth 1 -name "qagame*.so" -exec cp -v {} etmain/ \; 2>/dev/null || true
+# ── Step 3: Download Legacy mod pack (game modules) ──────────
+# File/727 = "All supported archive" — contains .so files needed
+# for the etmain/legacy mod (qagame, cgame, ui modules).
+echo "Downloading ET:Legacy mod pack (game modules)..."
+if [ ! -f "etmain/qagame.mp.i386.so" ]; then
+  curl -fL -o legacy-mod.zip "https://www.etlegacy.com/download/file/727" || {
+    echo "  WARNING: Mod pack download failed — server may not start with legacy mod"
+  }
+  if [ -f legacy-mod.zip ]; then
+    unzip -o legacy-mod.zip -d . 2>/dev/null || true
+    rm -f legacy-mod.zip
+    # Find and copy .so files (32-bit i386) into etmain/
+    for d in legacy etlegacy-mod etmain .; do
+      if [ -d "$d" ]; then
+        find "$d" \\( -name "qagame*.i386.so" -o -name "cgame*.i386.so" -o -name "ui*.i386.so" \\) 2>/dev/null | \
+          while read -r f; do cp -v "$f" etmain/ 2>/dev/null || true; done
+      fi
+    done
+  fi
 fi
 
-# Verify the critical game module exists for legacy/etmain
-if [ ! -f "etmain/qagame.mp.x86_64.so" ] && [ ! -f "etmain/qagame.mp.i386.so" ]; then
-  echo "WARNING: qagame module not found in etmain/. The server may not start with legacy mod."
-fi
-
-# ── Install selected mod ──
+# ── Step 4: Install selected mod ─────────────────────────────
 ET_MOD="{{ET_MOD}}"
 if [ -z "$ET_MOD" ]; then ET_MOD="etmain"; fi
-echo "Selected fs_game / mod folder: $ET_MOD"
+echo ""
+echo "═══ Installing mod: $ET_MOD ═══"
 
-if [ "$ET_MOD" = "jaymod" ]; then
+install_jaymod() {
   echo "Downloading Jaymod 2.2.0..."
   mkdir -p jaymod
-  curl -fL -o jaymod-dl.tar.gz "https://jaymod.clanfu.org/jaymod-2.2.0.tar.gz" 2>/dev/null || \
-  echo "Jaymod download failed — you may need to manually place files in jaymod/"
-  if [ -f jaymod-dl.tar.gz ]; then
-    mkdir -p jaymod-extract
-    tar xzf jaymod-dl.tar.gz -C jaymod-extract 2>/dev/null || true
-    find jaymod-extract -name "*.so" -exec cp -v {} jaymod/ \; 2>/dev/null || true
-    find jaymod-extract -name "*.pk3" -exec cp -v {} jaymod/ \; 2>/dev/null || true
-    find jaymod-extract -name "*.cfg" -exec cp -v {} jaymod/ \; 2>/dev/null || true
-    rm -rf jaymod-extract jaymod-dl.tar.gz
-  fi
-  # Copy base pak files so the mod can find them
-  for pak in pak0.pk3 pak1.pk3 pak2.pk3; do
-    [ -f "jaymod/$pak" ] || ln -sf "../etmain/$pak" "jaymod/$pak" 2>/dev/null || true
+  local jm_urls=(
+    "https://github.com/etlegacy/etlegacy-mods/releases/download/jaymod-2.2.0/jaymod-2.2.0-linux-i386.zip"
+    "https://mirror.etlegacy.com/mods/jaymod-2.2.0.zip"
+    "https://jaymod.clanfu.org/jaymod-2.2.0.tar.gz"
+  )
+  local downloaded=0
+  for url in "\${jm_urls[@]}"; do
+    echo "  Trying: \$url"
+    if curl -fL --connect-timeout 10 -o jaymod-dl "\$url" 2>/dev/null; then
+      echo "  Downloaded from: \$url"
+      downloaded=1
+      break
+    fi
   done
-  echo "Jaymod installed to jaymod/"
+  if [ "\$downloaded" = "0" ]; then
+    echo "  WARNING: Could not download Jaymod — install manually into jaymod/"
+    return
+  fi
+  # Extract — try unzip first, then tar
+  if unzip -o jaymod-dl -d jaymod 2>/dev/null; then
+    :
+  elif tar xzf jaymod-dl -C jaymod 2>/dev/null; then
+    :
+  fi
+  rm -f jaymod-dl
+  # Copy .so, .pk3, .cfg from subdirectories
+  find jaymod -name "*.i386.so" -o -name "*.so" 2>/dev/null | while read -r f; do cp -v "\$f" jaymod/ 2>/dev/null || true; done
+  find jaymod -name "*.pk3" 2>/dev/null | while read -r f; do cp -v "\$f" jaymod/ 2>/dev/null || true; done
+  # Symlink base pak files
+  for pak in pak0.pk3 pak1.pk3 pak2.pk3; do
+    [ -f "jaymod/\$pak" ] || ln -sf "../etmain/\$pak" "jaymod/\$pak" 2>/dev/null || true
+  done
+  echo "  Jaymod installed to jaymod/"
+}
 
-elif [ "$ET_MOD" = "etpub" ]; then
-  echo "Downloading ETPub..."
+install_etpub() {
+  echo "Downloading ETPub 1.0..."
   mkdir -p etpub
-  curl -fL -o etpub-dl.zip "https://github.com/BulldogDrummond/etpub/releases/download/v1.0/etpub-1.0.zip" 2>/dev/null || \
-  curl -fL -o etpub-dl.zip "https://mirror.etlegacy.com/mods/etpub-1.0.zip" 2>/dev/null || \
-  echo "ETPub download failed — you may need to manually place files in etpub/"
-  if [ -f etpub-dl.zip ]; then
-    unzip -o etpub-dl.zip -d etpub-extract 2>/dev/null || true
-    find etpub-extract -name "*.so" -exec cp -v {} etpub/ \; 2>/dev/null || true
-    find etpub-extract -name "*.pk3" -exec cp -v {} etpub/ \; 2>/dev/null || true
-    find etpub-extract -name "*.cfg" -exec cp -v {} etpub/ \; 2>/dev/null || true
-    rm -rf etpub-extract etpub-dl.zip
-  fi
-  for pak in pak0.pk3 pak1.pk3 pak2.pk3; do
-    [ -f "etpub/$pak" ] || ln -sf "../etmain/$pak" "etpub/$pak" 2>/dev/null || true
+  local ep_urls=(
+    "https://github.com/etlegacy/etlegacy-mods/releases/download/etpub-1.0/etpub-1.0-linux-i386.zip"
+    "https://mirror.etlegacy.com/mods/etpub-1.0.zip"
+  )
+  local downloaded=0
+  for url in "\${ep_urls[@]}"; do
+    echo "  Trying: \$url"
+    if curl -fL --connect-timeout 10 -o etpub-dl "\$url" 2>/dev/null; then
+      echo "  Downloaded from: \$url"
+      downloaded=1
+      break
+    fi
   done
-  echo "ETPub installed to etpub/"
+  if [ "\$downloaded" = "0" ]; then
+    echo "  WARNING: Could not download ETPub — install manually into etpub/"
+    return
+  fi
+  unzip -o etpub-dl -d etpub 2>/dev/null || true
+  rm -f etpub-dl
+  find etpub -name "*.i386.so" -o -name "*.so" 2>/dev/null | while read -r f; do cp -v "\$f" etpub/ 2>/dev/null || true; done
+  find etpub -name "*.pk3" 2>/dev/null | while read -r f; do cp -v "\$f" etpub/ 2>/dev/null || true; done
+  for pak in pak0.pk3 pak1.pk3 pak2.pk3; do
+    [ -f "etpub/\$pak" ] || ln -sf "../etmain/\$pak" "etpub/\$pak" 2>/dev/null || true
+  done
+  echo "  ETPub installed to etpub/"
+}
 
-elif [ "$ET_MOD" = "nitmod" ]; then
+install_nitmod() {
   echo "Downloading N!tmod 2.3.5..."
   mkdir -p nitmod
-  curl -fL -o nitmod-dl.zip "http://etmods.net/downloads/nitmod_2.3.5.zip" 2>/dev/null || \
-  echo "N!tmod download failed — you may need to manually place files in nitmod/"
-  if [ -f nitmod-dl.zip ]; then
-    unzip -o nitmod-dl.zip -d nitmod-extract 2>/dev/null || true
-    find nitmod-extract -name "*.so" -exec cp -v {} nitmod/ \; 2>/dev/null || true
-    find nitmod-extract -name "*.pk3" -exec cp -v {} nitmod/ \; 2>/dev/null || true
-    find nitmod-extract -name "*.cfg" -exec cp -v {} nitmod/ \; 2>/dev/null || true
-    rm -rf nitmod-extract nitmod-dl.zip
-  fi
-  for pak in pak0.pk3 pak1.pk3 pak2.pk3; do
-    [ -f "nitmod/$pak" ] || ln -sf "../etmain/$pak" "nitmod/$pak" 2>/dev/null || true
+  local nt_urls=(
+    "https://github.com/etlegacy/etlegacy-mods/releases/download/nitmod-2.3.5/nitmod-2.3.5-linux-i386.zip"
+    "https://mirror.etlegacy.com/mods/nitmod_2.3.5.zip"
+    "http://etmods.net/downloads/nitmod_2.3.5.zip"
+  )
+  local downloaded=0
+  for url in "\${nt_urls[@]}"; do
+    echo "  Trying: \$url"
+    if curl -fL --connect-timeout 10 -o nitmod-dl "\$url" 2>/dev/null; then
+      echo "  Downloaded from: \$url"
+      downloaded=1
+      break
+    fi
   done
-  echo "N!tmod installed to nitmod/"
-fi
+  if [ "\$downloaded" = "0" ]; then
+    echo "  WARNING: Could not download N!tmod — install manually into nitmod/"
+    return
+  fi
+  unzip -o nitmod-dl -d nitmod 2>/dev/null || true
+  rm -f nitmod-dl
+  find nitmod -name "*.i386.so" -o -name "*.so" 2>/dev/null | while read -r f; do cp -v "\$f" nitmod/ 2>/dev/null || true; done
+  find nitmod -name "*.pk3" 2>/dev/null | while read -r f; do cp -v "\$f" nitmod/ 2>/dev/null || true; done
+  for pak in pak0.pk3 pak1.pk3 pak2.pk3; do
+    [ -f "nitmod/\$pak" ] || ln -sf "../etmain/\$pak" "nitmod/\$pak" 2>/dev/null || true
+  done
+  echo "  N!tmod installed to nitmod/"
+}
 
-# Create mod-specific server.cfg if needed
-MOD_DIR="$ET_MOD"
+case "\$ET_MOD" in
+  jaymod) install_jaymod ;;
+  etpub)  install_etpub ;;
+  nitmod) install_nitmod ;;
+  *)      echo "  Using etmain/legacy (no additional mod)" ;;
+esac
+
+# ── Step 5: Create server.cfg ────────────────────────────────
+# Use the actual mod directory if set, else etmain
+MOD_DIR="\${ET_MOD:-etmain}"
 mkdir -p "$MOD_DIR"
 if [ ! -f "$MOD_DIR/server.cfg" ]; then
-  cat > "$MOD_DIR/server.cfg" << MODCFG
-// ET:Legacy Server Config for $ET_MOD — generated by GSM
+  cat > "$MOD_DIR/server.cfg" << 'MODCFG'
+// ET:Legacy Server Config — generated by GSM
+// NOTE: Running 32-bit ET:Legacy for maximum mod compatibility
 set sv_hostname "{{SERVER_NAME}}"
 set sv_maxclients "{{MAX_PLAYERS}}"
 set g_gametype "{{GAMETYPE}}"
@@ -1240,25 +1293,27 @@ map oasis
 MODCFG
 fi
 
-# Locate and normalize the dedicated server binary name.
-if [ -f ./etlded.x86_64 ]; then
-  chmod +x ./etlded.x86_64
-  ln -sf ./etlded.x86_64 ./etlded
-elif [ -f ./etlded.arm64 ]; then
-  chmod +x ./etlded.arm64
-  ln -sf ./etlded.arm64 ./etlded
-elif [ -f ./etlded.i386 ]; then
+# ── Step 6: Locate 32-bit binary and symlink ─────────────────
+echo ""
+echo "═══ Locating 32-bit dedicated server binary ═══"
+if [ -f ./etlded.i386 ]; then
+  echo "  Found: etlded.i386 (32-bit)"
   chmod +x ./etlded.i386
   ln -sf ./etlded.i386 ./etlded
 elif [ -f ./etlded ]; then
+  echo "  Found: etlded (generic)"
   chmod +x ./etlded
 else
-  echo "Dedicated server binary not found after extraction"
-  find . -maxdepth 4 -type f | sort | tail -100
+  echo "  ERROR: Dedicated server binary not found after extraction"
+  echo "  Files in install directory:"
+  find . -maxdepth 3 -type f -executable | sort
   exit 1
 fi
 
-echo "ET:Legacy installed successfully (mod: {{ET_MOD}})"`,
+echo ""
+echo "✅ ET:Legacy 32-bit installed successfully (mod: $ET_MOD)"
+echo "   Binary: ./etlded (linked to 32-bit version)"
+echo "   Mod dir: $MOD_DIR"`,
     startCommand: `cd {{INSTALL_PATH}} && ./etlded +set dedicated 2 +set net_port {{PORT}} +set fs_basepath "{{INSTALL_PATH}}" +set fs_homepath "{{INSTALL_PATH}}" +set fs_game {{ET_MOD}} +exec server.cfg`,
     stopCommand: null,
     configFiles: { "etmain/server.cfg": "server.cfg" },
