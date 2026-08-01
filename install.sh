@@ -34,7 +34,7 @@ info "Project directory: ${PROJECT_DIR}"
 # ── Step 1: Clone the repo (if git is available and no .git) ─
 if command -v git >/dev/null 2>&1 && [ ! -d "${PROJECT_DIR}/.git" ]; then
   warn "No .git found — cloning repository..."
-  read -p "Repository URL (https://github.com/user/repo.git): " GIT_URL 2>/dev/null || true
+  read -p "Repository URL (https://github.com/phillgates2/game-server-hosting-cms.git): " GIT_URL 2>/dev/null || true
   if [ -n "${GIT_URL:-}" ]; then
     cd "$(dirname "$PROJECT_DIR")"
     git clone "$GIT_URL" "$(basename "$PROJECT_DIR")" 2>/dev/null || err "Failed to clone repository"
