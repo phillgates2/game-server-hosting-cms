@@ -2,7 +2,7 @@
 # ═══════════════════════════════════════════════════════════
 # GameServer Manager — One-Line Installer
 # ═══════════════════════════════════════════════════════════
-# Usage: curl -fsSL https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/Yphillgates2/game-server-hosting-cms/main/install.sh | bash
 # Or download and run: chmod +x install.sh && ./install.sh
 #
 # This script handles everything: Node.js, PostgreSQL, cloning,
