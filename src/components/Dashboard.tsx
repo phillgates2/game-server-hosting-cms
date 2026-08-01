@@ -83,6 +83,12 @@ export default function Dashboard({ user, onLogout }: Props) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Array<{ type: string; icon: string; id: number; title: string; subtitle: string }>>([]);
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({
+    main: false,
+    community: false,
+    admin: false,
+    account: false,
+  });
 
   const loadPerms = useCallback(async () => {
     try { const res = await fetch("/api/auth/permissions"); if (res.ok) setPerms((await res.json()).permissions || {}); } catch { /**/ }

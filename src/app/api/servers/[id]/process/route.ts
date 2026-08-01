@@ -18,18 +18,33 @@ async function findBash(): Promise<string> {
   return "bash";
 }
 
-function killProcess(pid: number): boolean {
+function killProcess(pid: number): Promise<boolean> {
   try {
     process.kill(pid, 0); // check if alive
-    process.kill(pid, "SIGTERM");
-    // Give it 5s then force kill
-    setTimeout(() => {
-      try { process.kill(pid, "SIGKILL"); } catch { /* already dead */ }
-    }, 5000);
-    return true;
   } catch {
-    return false;
+    return Promise.resolve(false);
   }
+
+  process.kill(pid, "SIGTERM");
+
+  return new Promise((resolve) => {
+    const deadline = Date.now() + 10000; // 10s total deadline
+    const check = () => {
+      if (!isProcessAlive(pid)) {
+        resolve(true);
+        return;
+      }
+      if (Date.now() >= deadline) {
+        // Force kill after deadline
+        try { process.kill(pid, "SIGKILL"); } catch { /* already dead */ }
+        // Wait a moment for SIGKILL to take effect
+        setTimeout(() => resolve(true), 500);
+        return;
+      }
+      setTimeout(check, 200);
+    };
+    setTimeout(check, 200);
+  });
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -103,8 +118,11 @@ export async function POST(
     // ─── STOP ───
     if (action === "stop") {
       if (server.pid && isProcessAlive(server.pid)) {
-        killProcess(server.pid);
+        await killProcess(server.pid);
+        // Give the process a moment to fully exit and release resources
+        await new Promise((r) => setTimeout(r, 500));
       }
+      // Final check — update DB only after the process is confirmed dead
       await db.update(gameServers).set({
         status: "stopped",
         pid: null,
@@ -127,9 +145,9 @@ export async function POST(
     if (action === "start" || action === "restart") {
       // Kill existing process if restarting
       if (server.pid && isProcessAlive(server.pid)) {
-        killProcess(server.pid);
-        // Wait a moment for the process to die
-        await new Promise((r) => setTimeout(r, 2000));
+        await killProcess(server.pid);
+        // Give the process a moment to fully exit and release resources
+        await new Promise((r) => setTimeout(r, 500));
       }
 
       const startScript = join(server.installPath, "gsm-start.sh");
