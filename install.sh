@@ -160,15 +160,20 @@ sudo -u "${ORIG_USER}" npm install --unsafe-perm
 # Step 6: Create .env
 echo "Step 6: Creating .env file..."
 JWT_SECRET="$(openssl rand -hex 32)"
+PF_ENV_VALUE=""
+if [ -n "${PF_RULES_RAW}" ]; then
+  PF_ENV_VALUE="${PF_RULES_RAW}"
+fi
 cat > .env <<EOF
 DATABASE_URL=postgresql://gsmadmin:${DB_PASS}@127.0.0.1:5432/gameserver_db
 JWT_SECRET=${JWT_SECRET}
 NODE_ENV=production
 PORT=${APP_PORT}
+PF_RULES=${PF_ENV_VALUE}
 EOF
 sudo chown "${ORIG_USER}:${ORIG_USER}" .env
 chmod 600 .env
-echo ".env created (PORT=${APP_PORT})."
+echo ".env created (PORT=${APP_PORT}, PF_RULES=${PF_ENV_VALUE:-<none>})."
 
 # Step 7: Build
 echo "Step 7: Building the project..."
