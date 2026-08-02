@@ -4,14 +4,17 @@ All notable changes to GameServer Manager are documented in this file.
 
 ---
 
-## [2.3.0] — 2026-08-02
+## [2.4.0] — 2026-08-02
 
 ### Added
-- Server installs now attempt to configure host port forwarding for the server's main port, plus query and RCON ports when present
-- Installer and install wizard now support a user-supplied PostgreSQL password end to end
+- Dashboard-style overview layout with collapsible, reorderable panels for a more focused control-center experience
+- Per-server health cards with status, node, and game context directly on the overview
+- More shortcut buttons for common admin actions such as nodes, games, monitor, users, and roles
+- Quick action and recent-activity panels to surface issues and latest changes at a glance
 
 ### Changed
-- README updated with the configurable installer flow, custom DB password support, and automatic server-port forwarding behavior
+- Server management and overview screens now prioritize active and attention-needed servers for faster triage
+- README updated to reflect the new dashboard experience and panel shortcuts
 
 ---
 

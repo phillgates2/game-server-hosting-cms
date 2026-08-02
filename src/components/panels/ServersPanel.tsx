@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useToast } from "@/components/ToastProvider";
 import { useConfirm, useConfirmChoice } from "@/components/ConfirmDialog";
+import { sortServersForPanel, summarizeServerStatus } from "./serverPanelUtils";
 
 interface AuthUser { id: number; username: string; role: string }
 interface GameDef { id: number; name: string; slug: string; defaultPort: number; iconEmoji: string | null }
@@ -61,6 +62,8 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   const [form, setForm] = useState({ name: "", gameId: "", nodeId: "", port: "", ipv4: "0.0.0.0", ipv6: "", installPath: "", discordWebhook: "" });
   const [loading, setLoading] = useState(false);
   const [installingId, setInstallingId] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "running" | "stopped" | "installing" | "install_failed">("all");
   const [installLog, setInstallLog] = useState<{ output: string; error: string; success: boolean } | null>(null);
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -335,6 +338,15 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   const selectedNode = nodeList.find((n) => n.id === Number(form.nodeId));
   const onlineNodes = nodeList;
   const canCreate = form.name && form.gameId && form.nodeId && form.port;
+  const filteredServers = sortServersForPanel(
+    servers.filter((server) => {
+      const query = searchQuery.trim().toLowerCase();
+      const matchesQuery = !query || [server.name, server.gameName, server.nodeName].filter(Boolean).some((value) => value!.toLowerCase().includes(query));
+      const matchesStatus = statusFilter === "all" || server.status === statusFilter;
+      return matchesQuery && matchesStatus;
+    })
+  );
+  const serverSummary = summarizeServerStatus(servers);
   const visibleVars = gameVars.filter((v) => !["SERVER_NAME","PORT","INSTALL_PATH","QUERY_PORT"].includes(v.env_variable));
   const inputCls = "w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/50 transition-colors";
   const installPathPreview = selectedNode && selectedGame && form.name
@@ -357,14 +369,19 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   return (
     <div className="animate-fade-in space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <h2 className="text-2xl font-bold">🎮 Game Servers</h2>
           <p className="text-text-secondary text-sm">{servers.length} server{servers.length !== 1 ? "s" : ""}{servers.filter((s) => s.status === "running").length > 0 ? ` · ${servers.filter((s) => s.status === "running").length} running` : ""}</p>
         </div>
-        <button onClick={() => { setWizard(!wizard); setWizardStep(0); setError(""); }} className="px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium transition-colors shadow-sm">
-          {wizard ? "✕ Cancel" : "+ Create Server"}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={() => { setLoaded(false); void loadData(); }} className="px-3 py-2 border border-border bg-bg-card rounded-lg text-sm text-text-secondary hover:border-accent/30 hover:text-accent transition-colors">
+            ↻ Refresh
+          </button>
+          <button onClick={() => { setWizard(!wizard); setWizardStep(0); setError(""); }} className="px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium transition-colors shadow-sm">
+            {wizard ? "✕ Cancel" : "+ Create Server"}
+          </button>
+        </div>
       </div>
 
       {/* Bulk action bar */}
@@ -480,7 +497,37 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
       {/* ═══ SERVER LIST ═══ */}
       {servers.length > 0 && (
         <div className="space-y-4">
-          {servers.map((server) => {
+          <div className="flex flex-col gap-3 rounded-xl border border-border bg-bg-card p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-wrap gap-2 text-sm">
+              <span className="rounded-full bg-success/10 px-3 py-1 text-success">Running: {serverSummary.running}</span>
+              <span className="rounded-full bg-accent/10 px-3 py-1 text-accent">Installing: {serverSummary.installing}</span>
+              <span className="rounded-full bg-danger/10 px-3 py-1 text-danger">Failed: {serverSummary.install_failed}</span>
+              <span className="rounded-full bg-bg-secondary px-3 py-1 text-text-secondary">Stopped: {serverSummary.stopped}</span>
+            </div>
+            <div className="flex-1">
+              <label className="text-xs font-medium uppercase tracking-wider text-text-muted">Search servers</label>
+              <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Name, game, node..." className="mt-1 w-full rounded-lg border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40" />
+            </div>
+            <div className="min-w-[180px]">
+              <label className="text-xs font-medium uppercase tracking-wider text-text-muted">Status</label>
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} className="mt-1 w-full rounded-lg border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40">
+                <option value="all">All statuses</option>
+                <option value="running">Running</option>
+                <option value="stopped">Stopped</option>
+                <option value="installing">Installing</option>
+                <option value="install_failed">Install failed</option>
+              </select>
+            </div>
+            <div className="text-sm text-text-secondary">
+              <p className="font-medium">{filteredServers.length} shown</p>
+              <p className="text-xs text-text-muted">out of {servers.length} total</p>
+            </div>
+          </div>
+          {filteredServers.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border bg-bg-card p-8 text-center text-sm text-text-muted">
+              No servers match the current search or status filter.
+            </div>
+          ) : filteredServers.map((server) => {
             const st = STATUS_MAP[server.status] || STATUS_MAP.stopped;
             const isInstalling = installingId === server.id || server.status === "installing";
             const uptime = server.status === "running" ? formatUptime(server.lastStarted) : "";

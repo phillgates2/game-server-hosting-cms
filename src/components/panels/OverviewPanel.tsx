@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { movePanelInOrder, type DashboardPanelId } from "./dashboardLayoutUtils";
 
 interface AuthUser {
   id: number;
@@ -41,12 +42,32 @@ interface NodeRow {
   serverCount: number;
 }
 
+interface ActivityEntry {
+  id: number;
+  action: string;
+  details: string | null;
+  createdAt: string;
+  username: string | null;
+}
+
 export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; onNavigate?: (tab: OverviewTab) => void }) {
   const [monitor, setMonitor] = useState<MonitorData | null>(null);
   const [servers, setServers] = useState<ServerRow[]>([]);
   const [games, setGames] = useState<GameRow[]>([]);
   const [nodeList, setNodeList] = useState<NodeRow[]>([]);
+  const [recentActivity, setRecentActivity] = useState<ActivityEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string>("");
+  const [panelOrder, setPanelOrder] = useState<DashboardPanelId[]>(["quick-start", "stats", "actions", "health", "nodes", "games", "servers"]);
+  const [collapsedPanels, setCollapsedPanels] = useState<Record<DashboardPanelId, boolean>>({
+    "quick-start": false,
+    stats: false,
+    actions: false,
+    health: false,
+    nodes: false,
+    games: false,
+    servers: false,
+  });
 
   const loadData = useCallback(async () => {
     try {
@@ -61,6 +82,7 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
       if (srvRes.status === "fulfilled" && srvRes.value.ok) setServers((await srvRes.value.json()).servers || []);
       if (gameRes.status === "fulfilled" && gameRes.value.ok) setGames((await gameRes.value.json()).games || []);
       if (nodeRes.status === "fulfilled" && nodeRes.value.ok) setNodeList((await nodeRes.value.json()).nodes || []);
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
     } catch (e) {
       console.error("OverviewPanel load error:", e);
     } finally {
@@ -75,11 +97,41 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
     return () => window.clearTimeout(timer);
   }, [loadData]);
 
+  useEffect(() => {
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch("/api/audit-log?limit=5");
+        if (res.ok) {
+          const data = await res.json();
+          setRecentActivity(data.entries || []);
+        }
+      } catch {
+        setRecentActivity([]);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   const onlineServers = servers.filter((s) => s.status === "running").length;
   const onlineNodes = nodeList.filter((n) => n.status === "online").length;
   const hasNodes = nodeList.length > 0;
   const hasGames = games.length > 0;
   const hasServers = servers.length > 0;
+  const offlineNodes = nodeList.filter((n) => n.status !== "online").length;
+  const failedInstalls = servers.filter((s) => s.status === "install_failed").length;
+  const attentionItems = [
+    ...(offlineNodes > 0 ? [`${offlineNodes} node${offlineNodes === 1 ? "" : "s"} ${offlineNodes === 1 ? "is" : "are"} offline.`] : []),
+    ...(failedInstalls > 0 ? [`${failedInstalls} server${failedInstalls === 1 ? "" : "s"} ${failedInstalls === 1 ? "has" : "have"} an install failure.`] : []),
+    ...(hasServers && onlineServers === 0 ? ["No servers are currently running."] : []),
+  ];
+
+  const togglePanel = (panelId: DashboardPanelId) => {
+    setCollapsedPanels((prev) => ({ ...prev, [panelId]: !prev[panelId] }));
+  };
+
+  const movePanel = (panelId: DashboardPanelId, direction: -1 | 1) => {
+    setPanelOrder((prev) => movePanelInOrder(prev, panelId, direction));
+  };
 
   async function quickAction(id: number, action: "start" | "stop") {
     try {
@@ -94,24 +146,9 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
     { done: hasServers, title: "Create a server", detail: hasServers ? `${servers.length} server${servers.length !== 1 ? "s" : ""} created` : "Run the guided create-server wizard.", action: "servers" as OverviewTab, cta: "Open Servers" },
   ];
 
-  return (
-    <div className="animate-fade-in space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold">Welcome back, {user.username} 👋</h2>
-        <p className="text-text-secondary text-sm mt-1">Everything important is summarized here so you can jump straight into the next task.</p>
-      </div>
-
-      {/* Quick start */}
-      <div className="bg-bg-card border border-border rounded-xl p-6">
-        <div className="flex items-center justify-between gap-3 mb-4">
-          <div>
-            <h3 className="text-lg font-semibold">🚀 Quick Start Checklist</h3>
-            <p className="text-text-secondary text-sm">New to the panel? Follow these steps in order.</p>
-          </div>
-          <span className="text-xs text-text-muted bg-bg-secondary px-3 py-1 rounded-full">
-            {setupSteps.filter((s) => s.done).length}/{setupSteps.length} complete
-          </span>
-        </div>
+  const panelSections: Record<DashboardPanelId, React.ReactElement> = {
+    "quick-start": (
+      <DashboardSection key="quick-start" title="🚀 Quick Start Checklist" description="New to the panel? Follow these steps in order." onToggle={() => togglePanel("quick-start")} collapsed={collapsedPanels["quick-start"]} onMove={(direction) => movePanel("quick-start", direction)}>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {setupSteps.map((step, idx) => (
             <div key={step.title} className={`rounded-xl border p-4 ${step.done ? "border-success/30 bg-success/5" : "border-border bg-bg-secondary/40"}`}>
@@ -132,34 +169,38 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
             </div>
           ))}
         </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon="🖥️" label="Nodes" value={`${onlineNodes}/${nodeList.length}`} sub="Online nodes" color="text-accent" />
-        <StatCard icon="🎮" label="Servers" value={`${onlineServers}/${servers.length}`} sub="Running" color="text-success" />
-        <StatCard icon="📦" label="Games" value={games.length.toString()} sub="Installed" color="text-purple" />
-        <StatCard icon="💾" label="RAM" value={monitor ? `${monitor.memory.usedPercent}%` : "..."} sub={monitor ? `${monitor.memory.usedMb}/${monitor.memory.totalMb} MB` : "Loading..."} color={monitor && monitor.memory.usedPercent > 80 ? "text-danger" : "text-success"} />
-      </div>
-
-      {/* Quick actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <QuickAction icon="+" title="Create Server" desc="Launch the guided setup wizard." onClick={() => onNavigate?.("servers")} />
-        <QuickAction icon="📂" title="Open Files" desc="Edit configs, worlds, mods, and plugins." onClick={() => onNavigate?.("files")} />
-        <QuickAction icon="🖥️" title="Open Console" desc="Watch startup logs and runtime output." onClick={() => onNavigate?.("servers")} />
-        <QuickAction icon="🔍" title="Run Audit" desc="Verify templates, binaries, and live installs." onClick={() => onNavigate?.("audit")} />
-      </div>
-
-      {/* Health bars */}
-      {monitor && (
-        <div className="bg-bg-card border border-border rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4 gap-3">
-            <div>
-              <h3 className="text-lg font-semibold">System Health</h3>
-              <p className="text-text-secondary text-sm">Use this to spot overloaded nodes or high cache usage at a glance.</p>
-            </div>
-            {onNavigate && <button onClick={() => onNavigate("monitor")} className="text-accent text-sm hover:underline">Open Monitor →</button>}
-          </div>
+      </DashboardSection>
+    ),
+    stats: (
+      <DashboardSection key="stats" title="📊 Snapshot" description="The current health of your infrastructure at a glance." onToggle={() => togglePanel("stats")} collapsed={collapsedPanels.stats} onMove={(direction) => movePanel("stats", direction)}>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard icon="🖥️" label="Nodes" value={`${onlineNodes}/${nodeList.length}`} sub="Online nodes" color="text-accent" />
+          <StatCard icon="🎮" label="Servers" value={`${onlineServers}/${servers.length}`} sub="Running" color="text-success" />
+          <StatCard icon="📦" label="Games" value={games.length.toString()} sub="Installed" color="text-purple" />
+          <StatCard icon="💾" label="RAM" value={monitor ? `${monitor.memory.usedPercent}%` : "..."} sub={monitor ? `${monitor.memory.usedMb}/${monitor.memory.totalMb} MB` : "Loading..."} color={monitor && monitor.memory.usedPercent > 80 ? "text-danger" : "text-success"} />
+        </div>
+      </DashboardSection>
+    ),
+    actions: (
+      <DashboardSection key="actions" title="⚡ Quick Actions" description="Jump to the tasks that matter most." onToggle={() => togglePanel("actions")} collapsed={collapsedPanels.actions} onMove={(direction) => movePanel("actions", direction)}>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <QuickAction icon="+" title="Create Server" desc="Launch the guided setup wizard." onClick={() => onNavigate?.("servers")} />
+          <QuickAction icon="📂" title="Open Files" desc="Edit configs, worlds, mods, and plugins." onClick={() => onNavigate?.("files")} />
+          <QuickAction icon="🖥️" title="Open Console" desc="Watch startup logs and runtime output." onClick={() => onNavigate?.("servers")} />
+          <QuickAction icon="🔍" title="Run Audit" desc="Verify templates, binaries, and live installs." onClick={() => onNavigate?.("audit")} />
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <ShortcutButton label="Nodes" icon="🖥️" onClick={() => onNavigate?.("nodes")} />
+          <ShortcutButton label="Games" icon="📦" onClick={() => onNavigate?.("games")} />
+          <ShortcutButton label="Monitor" icon="📈" onClick={() => onNavigate?.("monitor")} />
+          <ShortcutButton label="Users" icon="👥" onClick={() => onNavigate?.("users")} />
+          <ShortcutButton label="Roles" icon="🔑" onClick={() => onNavigate?.("roles")} />
+        </div>
+      </DashboardSection>
+    ),
+    health: (
+      <DashboardSection key="health" title="🩺 System Health" description="Use this to spot overloaded nodes or high cache usage at a glance." onToggle={() => togglePanel("health")} collapsed={collapsedPanels.health} onMove={(direction) => movePanel("health", direction)}>
+        {monitor ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
               <ProgressBar label="CPU Load" value={Math.min(monitor.cpu.load1 * 25, 100)} suffix={monitor.cpu.load1.toFixed(2)} />
@@ -179,19 +220,12 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
               </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Nodes */}
-      {nodeList.length > 0 && (
-        <div className="bg-bg-card border border-border rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4 gap-3">
-            <div>
-              <h3 className="text-lg font-semibold">🖥️ Nodes</h3>
-              <p className="text-text-secondary text-sm">Where your game servers run.</p>
-            </div>
-            {onNavigate && <button onClick={() => onNavigate("nodes")} className="text-accent text-sm hover:underline">Manage Nodes →</button>}
-          </div>
+        ) : <div className="text-sm text-text-secondary">Monitoring data is still loading.</div>}
+      </DashboardSection>
+    ),
+    nodes: (
+      <DashboardSection key="nodes" title="🖥️ Nodes" description="Where your game servers run." onToggle={() => togglePanel("nodes")} collapsed={collapsedPanels.nodes} onMove={(direction) => movePanel("nodes", direction)}>
+        {nodeList.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {nodeList.map((node) => (
               <div key={node.id} className="bg-bg-secondary rounded-lg p-3 flex items-center justify-between">
@@ -206,22 +240,12 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {!hasNodes && loaded && (
-        <FriendlyEmpty icon="🖥️" title="No nodes configured" text="Add a Local Node first so the panel has somewhere to install and run game servers." buttonLabel="Open Nodes" onClick={() => onNavigate?.("nodes")} />
-      )}
-
-      {hasGames && (
-        <div className="bg-bg-card border border-border rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4 gap-3">
-            <div>
-              <h3 className="text-lg font-semibold">📦 Installed Games ({games.length})</h3>
-              <p className="text-text-secondary text-sm">Templates currently available in the create-server wizard.</p>
-            </div>
-            {onNavigate && <button onClick={() => onNavigate("games")} className="text-accent text-sm hover:underline">Manage Games →</button>}
-          </div>
+        ) : <FriendlyEmpty icon="🖥️" title="No nodes configured" text="Add a Local Node first so the panel has somewhere to install and run game servers." buttonLabel="Open Nodes" onClick={() => onNavigate?.("nodes")} />}
+      </DashboardSection>
+    ),
+    games: (
+      <DashboardSection key="games" title="📦 Installed Games" description="Templates currently available in the create-server wizard." onToggle={() => togglePanel("games")} collapsed={collapsedPanels.games} onMove={(direction) => movePanel("games", direction)}>
+        {hasGames ? (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
             {games.map((game) => (
               <div key={game.id} className="bg-bg-secondary rounded-lg p-3 flex items-center gap-2">
@@ -230,44 +254,93 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {!hasGames && loaded && (
-        <FriendlyEmpty icon="📦" title="No game templates installed" text="Install one or import your own template before creating servers." buttonLabel="Open Games" onClick={() => onNavigate?.("games")} />
-      )}
-
-      {hasServers && (
-        <div className="bg-bg-card border border-border rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4 gap-3">
-            <div>
-              <h3 className="text-lg font-semibold">🎮 Your Servers ({servers.length})</h3>
-              <p className="text-text-secondary text-sm">Quick actions — start, stop, or jump to full management.</p>
-            </div>
-            {onNavigate && <button onClick={() => onNavigate("servers")} className="text-accent text-sm hover:underline">Manage Servers →</button>}
-          </div>
-          <div className="space-y-2">
+        ) : <FriendlyEmpty icon="📦" title="No game templates installed" text="Install one or import your own template before creating servers." buttonLabel="Open Games" onClick={() => onNavigate?.("games")} />}
+      </DashboardSection>
+    ),
+    servers: (
+      <DashboardSection key="servers" title="🎮 Server Health" description="Quickly see which servers need attention and which are healthy." onToggle={() => togglePanel("servers")} collapsed={collapsedPanels.servers} onMove={(direction) => movePanel("servers", direction)}>
+        {hasServers ? (
+          <div className="space-y-3">
             {servers.slice(0, 6).map((s) => (
-              <div key={s.id} className="flex items-center justify-between bg-bg-secondary rounded-lg p-3 group">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="text-lg">{s.gameIcon || "🎮"}</span>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{s.name}</p>
-                    <p className="text-xs text-text-muted truncate">{s.gameName} {s.nodeName ? `on ${s.nodeName}` : ""}</p>
+              <div key={s.id} className="rounded-xl border border-border bg-bg-secondary/70 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="text-lg">{s.gameIcon || "🎮"}</span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{s.name}</p>
+                      <p className="text-xs text-text-muted truncate">{s.gameName} {s.nodeName ? `on ${s.nodeName}` : ""}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.status === "running" ? "bg-success/15 text-success" : s.status === "install_failed" ? "bg-danger/15 text-danger" : "bg-bg-tertiary text-text-muted"}`}>{s.status}</span>
+                    <div className="flex gap-1">
+                      {s.status === "running" ? (
+                        <button onClick={() => quickAction(s.id, "stop")} className="px-2 py-1 bg-danger/15 text-danger rounded text-[10px] font-medium">⏹</button>
+                      ) : (
+                        <button onClick={() => quickAction(s.id, "start")} className="px-2 py-1 bg-success/15 text-success rounded text-[10px] font-medium">▶</button>
+                      )}
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.status === "running" ? "bg-success/15 text-success" : "bg-bg-tertiary text-text-muted"}`}>{s.status}</span>
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {s.status === "running" ? (
-                      <button onClick={() => quickAction(s.id, "stop")} className="px-2 py-1 bg-danger/15 text-danger rounded text-[10px] font-medium">⏹</button>
-                    ) : (
-                      <button onClick={() => quickAction(s.id, "start")} className="px-2 py-1 bg-success/15 text-success rounded text-[10px] font-medium">▶</button>
-                    )}
-                  </div>
+                <div className="mt-3 grid gap-2 text-xs text-text-secondary sm:grid-cols-3">
+                  <div className="rounded-lg bg-bg-card px-2 py-2">Status: <span className="font-medium text-text-primary">{s.status}</span></div>
+                  <div className="rounded-lg bg-bg-card px-2 py-2">Node: <span className="font-medium text-text-primary">{s.nodeName || "—"}</span></div>
+                  <div className="rounded-lg bg-bg-card px-2 py-2">Game: <span className="font-medium text-text-primary">{s.gameName || "—"}</span></div>
                 </div>
               </div>
             ))}
+          </div>
+        ) : <FriendlyEmpty icon="🎮" title="No servers created yet" text="You already have nodes and game templates ready. The next step is creating your first server." buttonLabel="Open Servers" onClick={() => onNavigate?.("servers")} />}
+      </DashboardSection>
+    ),
+  };
+
+  return (
+    <div className="animate-fade-in space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-2xl font-bold">Welcome back, {user.username} 👋</h2>
+          <p className="text-text-secondary text-sm mt-1">Everything important is summarized here so you can jump straight into the next task.</p>
+        </div>
+        <button onClick={() => { setLoaded(false); void loadData(); }} className="inline-flex items-center gap-2 self-start rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-secondary transition-colors hover:border-accent/30 hover:text-accent">
+          <span>↻</span>
+          <span>{lastUpdated ? `Updated ${lastUpdated}` : "Refresh"}</span>
+        </button>
+      </div>
+
+      {panelOrder.map((panelId) => panelSections[panelId])}
+
+      {(attentionItems.length > 0 || recentActivity.length > 0) && (
+        <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="rounded-xl border border-border bg-bg-card p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold">⚠️ Needs attention</h3>
+                <p className="text-sm text-text-secondary">Issues that are worth checking before the next deployment window.</p>
+              </div>
+            </div>
+            <ul className="mt-4 space-y-2 text-sm text-text-secondary">
+              {attentionItems.length > 0 ? attentionItems.map((item) => <li key={item} className="rounded-lg bg-bg-secondary px-3 py-2">{item}</li>) : <li className="rounded-lg bg-bg-secondary px-3 py-2">Everything looks healthy right now.</li>}
+            </ul>
+          </div>
+          <div className="rounded-xl border border-border bg-bg-card p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold">🕒 Recent activity</h3>
+                <p className="text-sm text-text-secondary">The latest admin and server actions from the panel.</p>
+              </div>
+            </div>
+            <div className="mt-4 space-y-2">
+              {recentActivity.length > 0 ? recentActivity.map((entry) => (
+                <div key={entry.id} className="rounded-lg border border-border bg-bg-secondary/70 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-text-primary">{entry.action}</p>
+                    <span className="text-[11px] text-text-muted">{formatRelativeTime(entry.createdAt)}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-text-muted">{entry.details || (entry.username ? `By ${entry.username}` : "Panel activity")}</p>
+                </div>
+              )) : <p className="rounded-lg bg-bg-secondary px-3 py-2 text-sm text-text-secondary">No recent activity yet.</p>}
+            </div>
           </div>
         </div>
       )}
@@ -286,6 +359,16 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
   );
 }
 
+function formatRelativeTime(value: string) {
+  const diffMs = Date.now() - new Date(value).getTime();
+  const diffMins = Math.max(1, Math.floor(diffMs / 60000));
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
 function StatCard({ icon, label, value, sub, color }: { icon: string; label: string; value: string; sub: string; color: string }) {
   return (
     <div className="bg-bg-card border border-border rounded-xl p-5">
@@ -298,6 +381,34 @@ function StatCard({ icon, label, value, sub, color }: { icon: string; label: str
         <span className="text-2xl">{icon}</span>
       </div>
     </div>
+  );
+}
+
+function DashboardSection({ title, description, children, collapsed, onToggle, onMove }: { title: string; description: string; children: React.ReactNode; collapsed?: boolean; onToggle: () => void; onMove: (direction: -1 | 1) => void }) {
+  return (
+    <div className="rounded-xl border border-border bg-bg-card p-6">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-semibold">{title}</h3>
+          <p className="text-sm text-text-secondary">{description}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={() => onMove(-1)} className="rounded-lg border border-border bg-bg-secondary px-2 py-1 text-xs text-text-secondary">↑</button>
+          <button onClick={() => onMove(1)} className="rounded-lg border border-border bg-bg-secondary px-2 py-1 text-xs text-text-secondary">↓</button>
+          <button onClick={onToggle} className="rounded-lg border border-border bg-bg-secondary px-2 py-1 text-xs text-text-secondary">{collapsed ? "Expand" : "Collapse"}</button>
+        </div>
+      </div>
+      {!collapsed && children}
+    </div>
+  );
+}
+
+function ShortcutButton({ icon, label, onClick }: { icon: string; label: string; onClick?: () => void }) {
+  return (
+    <button onClick={onClick} className="inline-flex items-center gap-2 rounded-full border border-border bg-bg-secondary px-3 py-1.5 text-sm text-text-secondary transition-colors hover:border-accent/30 hover:text-accent">
+      <span>{icon}</span>
+      <span>{label}</span>
+    </button>
   );
 }
 

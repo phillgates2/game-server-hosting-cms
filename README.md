@@ -32,12 +32,14 @@ GameServer Manager provides:
 - Start, stop, restart, backup, clone, and update servers
 - Monitor process health and stream console output
 - Install game files from built-in templates
+- Review server health cards and status summaries directly from the dashboard
 
 ### Operations and infrastructure
 - Multi-node support for local and remote hosts
 - Built-in monitoring for CPU, RAM, disk, and network
 - Scheduled tasks and Discord webhook notifications
 - File editor, RCON console, and database browser
+- Dashboard-style overview with collapsible panels, per-server health summaries, and quick admin shortcuts
 
 ### Security and access
 - JWT-based authentication and bcrypt password hashing
