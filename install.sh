@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export DEBIAN_FRONTEND=noninteractive
+
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/install.sh | bash
 #
@@ -20,6 +22,17 @@ REPO_URL="https://github.com/phillgates2/game-server-hosting-cms.git"
 INSTALL_DIR="/opt/gsm-panel"
 APP_PORT="3000"
 DB_PASS="GsmPanelDbPass2026!"
+DRY_RUN="${INSTALLER_DRY_RUN:-${DRY_RUN:-0}}"
+
+if [ "${DRY_RUN}" = "1" ]; then
+  echo "Dry run enabled; skipping package installs and system changes."
+  echo "Installer running as: ${ORIG_USER}"
+  echo "Install directory: ${INSTALL_DIR}"
+  echo "Using fixed app port: ${APP_PORT}"
+  echo "Using fixed database password: ${DB_PASS}"
+  echo "Would install Node.js, PostgreSQL, SteamCMD, PM2, Caddy, and configure the panel."
+  exit 0
+fi
 
  echo "Installer running as: ${ORIG_USER}"
 echo "Install directory: ${INSTALL_DIR}"
@@ -29,7 +42,11 @@ echo "Using fixed database password: ${DB_PASS}"
 # Prompt for port forwarding rules if not supplied via environment
 PF_RULES_RAW="${PF_RULES:-}"
 if [ -z "${PF_RULES_RAW:-}" ]; then
-  read -rp "Enter port forwarding rules (external:internal[,external2:internal2,...]) [leave blank to skip]: " PF_RULES_RAW
+  if [ -t 0 ]; then
+    read -rp "Enter port forwarding rules (external:internal[,external2:internal2,...]) [leave blank to skip]: " PF_RULES_RAW
+  else
+    echo "Non-interactive shell detected; skipping port-forward prompt."
+  fi
 fi
 PF_RULES_RAW="$(echo "$PF_RULES_RAW" | tr -d '[:space:]')"
 
