@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Usage:
-#   sudo ./install-gsm-panel-full.sh
+#   curl -fsSL https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/install.sh | bash
 #
 # Prompts:
 #   - DB password (required)
