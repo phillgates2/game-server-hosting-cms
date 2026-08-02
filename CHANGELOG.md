@@ -4,6 +4,17 @@ All notable changes to GameServer Manager are documented in this file.
 
 ---
 
+## [2.3.0] — 2026-08-02
+
+### Added
+- Server installs now attempt to configure host port forwarding for the server's main port, plus query and RCON ports when present
+- Installer and install wizard now support a user-supplied PostgreSQL password end to end
+
+### Changed
+- README updated with the configurable installer flow, custom DB password support, and automatic server-port forwarding behavior
+
+---
+
 ## [2.1.0] — 2026-07-21
 
 ### Changed

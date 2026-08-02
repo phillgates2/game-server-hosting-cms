@@ -58,10 +58,11 @@ curl -fsSL https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms
 The installer will:
 
 - install system dependencies
-- configure PostgreSQL
+- configure PostgreSQL with a user-supplied password
 - install SteamCMD
 - build and start the panel with PM2
 - set up Caddy as a reverse proxy
+- apply optional port-forwarding rules for the panel and each game server port
 
 > For a non-destructive validation run, use:
 >
@@ -200,9 +201,10 @@ sudo systemctl status caddy
 
 ### Default ports
 
-- App runs on port 3000 internally
+- App runs on port 3000 internally by default
 - Caddy serves traffic on port 80
 - Optional port forwarding can be configured during installation
+- When a local game server is installed, its main port (and query/rcon ports when present) is also forwarded automatically on the host
 
 ### Email notifications
 

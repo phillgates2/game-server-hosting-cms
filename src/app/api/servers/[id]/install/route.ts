@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { mkdtemp, writeFile, chmod, rm, mkdir, access, constants, stat, readdir } from "fs/promises";
 import { tmpdir, homedir } from "os";
 import { basename, dirname, join } from "path";
-import { spawn, type ChildProcess } from "child_process";
+import { execFile, spawn, type ChildProcess } from "child_process";
 import { getTemplateBySlug, getExpectedArtifactsBySlug } from "@/db/seeds";
 
 export const runtime = "nodejs";
@@ -96,6 +96,52 @@ function asRecord(value: unknown): Record<string, unknown> {
     return value as Record<string, unknown>;
   }
   return {};
+}
+
+async function ensurePortForwardRule(port: number, targetIp: string) {
+  if (!port || port < 1 || port > 65535) return false;
+
+  const protocols: Array<"tcp" | "udp"> = ["tcp", "udp"];
+  for (const protocol of protocols) {
+    try {
+      await execFile("iptables", ["-t", "nat", "-C", "PREROUTING", "-p", protocol, "--dport", String(port), "-j", "DNAT", "--to-destination", `${targetIp}:${port}`]);
+      continue;
+    } catch {
+      // Rule does not exist yet.
+    }
+
+    try {
+      await execFile("iptables", ["-t", "nat", "-A", "PREROUTING", "-p", protocol, "--dport", String(port), "-j", "DNAT", "--to-destination", `${targetIp}:${port}`]);
+      await execFile("iptables", ["-t", "nat", "-A", "POSTROUTING", "-p", protocol, "-d", targetIp, "--dport", String(port), "-j", "MASQUERADE"]);
+      await execFile("iptables", ["-A", "FORWARD", "-p", protocol, "-d", targetIp, "--dport", String(port), "-m", "state", "--state", "NEW,ESTABLISHED,RELATED", "-j", "ACCEPT"]);
+    } catch {
+      // Ignore failures when iptables is unavailable or the host does not permit the change.
+    }
+  }
+
+  try {
+    await execFile("netfilter-persistent", ["save"]);
+  } catch {
+    // Ignore if persistence tooling is unavailable.
+  }
+
+  return true;
+}
+
+async function applyServerPortForwarding(server: { nodeIsLocal?: boolean | null; port: number; queryPort: number | null; rconPort: number | null }) {
+  if (!server.nodeIsLocal) return [];
+
+  const targetIp = "127.0.0.1";
+  const ports = Array.from(new Set([server.port, server.queryPort, server.rconPort].filter((port): port is number => typeof port === "number" && port > 0 && port <= 65535)));
+  const applied: number[] = [];
+
+  for (const port of ports) {
+    if (await ensurePortForwardRule(port, targetIp)) {
+      applied.push(port);
+    }
+  }
+
+  return applied;
 }
 
 function replaceTemplateVariables(input: string, variables: Record<string, unknown>) {
@@ -496,6 +542,7 @@ echo "=== Installation Complete ==="
         variables,
       });
 
+      const forwardedPorts = await applyServerPortForwarding(server);
       const renderedStartCommand = startCommandSource ? replaceTemplateVariables(startCommandSource, variables) : "";
       const explicitArtifacts = server.gameSlug ? getExpectedArtifactsBySlug(server.gameSlug) : [];
       const verification = await verifyInstalledArtifacts(effectiveInstallPath, renderedStartCommand, explicitArtifacts);
@@ -520,8 +567,8 @@ echo "=== Installation Complete ==="
 
       return NextResponse.json({
         ok: true,
-        message: `${server.gameName || "Game"} files installed for ${server.name}`,
-        output: `${stdout}\n\nGenerated files:\n${generatedFiles.map((f) => `- ${f}`).join("\n")}\n\nVerified runtime files:\n${verification.checks.map((c) => `- ${c}`).join("\n")}`.slice(-8000),
+        message: `${server.gameName || "Game"} files installed for ${server.name}${forwardedPorts.length ? ` and forwarded ports ${forwardedPorts.join(", ")}` : ""}`,
+        output: `${stdout}\n\nGenerated files:\n${generatedFiles.map((f) => `- ${f}`).join("\n")}\n\nVerified runtime files:\n${verification.checks.map((c) => `- ${c}`).join("\n")}${forwardedPorts.length ? `\n\nForwarded ports: ${forwardedPorts.join(", ")}` : ""}`.slice(-8000),
         errorOutput: stderr.slice(-8000),
       });
     } catch (e: unknown) {
