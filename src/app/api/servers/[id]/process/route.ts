@@ -4,14 +4,13 @@ import { gameServers, gameDefinitions, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { sendDiscordWebhook } from "@/lib/discord";
 import { eq } from "drizzle-orm";
-import { access, constants, readFile } from "fs/promises";
-import { join } from "path";
-import { spawn } from "child_process";
+import { spawn } from "node:child_process";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 async function findBash(): Promise<string> {
+  const { access, constants } = await import("node:fs/promises");
   for (const p of ["/usr/bin/bash", "/bin/bash", "/usr/local/bin/bash"]) {
     try { await access(p, constants.X_OK); return p; } catch { /* next */ }
   }
@@ -19,13 +18,25 @@ async function findBash(): Promise<string> {
 }
 
 function killProcess(pid: number): Promise<boolean> {
-  try {
-    process.kill(pid, 0); // check if alive
-  } catch {
+  if (!isProcessAlive(pid)) {
     return Promise.resolve(false);
   }
 
-  process.kill(pid, "SIGTERM");
+  const terminateProcessGroup = (signal: NodeJS.Signals | number) => {
+    try {
+      process.kill(-pid, signal);
+      return true;
+    } catch {
+      try {
+        process.kill(pid, signal);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  };
+
+  terminateProcessGroup("SIGTERM");
 
   return new Promise((resolve) => {
     const deadline = Date.now() + 10000; // 10s total deadline
@@ -35,9 +46,7 @@ function killProcess(pid: number): Promise<boolean> {
         return;
       }
       if (Date.now() >= deadline) {
-        // Force kill after deadline
-        try { process.kill(pid, "SIGKILL"); } catch { /* already dead */ }
-        // Wait a moment for SIGKILL to take effect
+        terminateProcessGroup("SIGKILL");
         setTimeout(() => resolve(true), 500);
         return;
       }
@@ -49,10 +58,15 @@ function killProcess(pid: number): Promise<boolean> {
 
 function isProcessAlive(pid: number): boolean {
   try {
-    process.kill(pid, 0);
+    process.kill(-pid, 0);
     return true;
   } catch {
-    return false;
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -150,6 +164,9 @@ export async function POST(
         await new Promise((r) => setTimeout(r, 500));
       }
 
+      const { access, constants, readFile } = await import("node:fs/promises");
+      const { createWriteStream } = await import("node:fs");
+      const { join } = await import("node:path");
       const startScript = join(server.installPath, "gsm-start.sh");
 
       try {
@@ -181,7 +198,6 @@ export async function POST(
       });
 
       // Write stdout/stderr to log file
-      const { createWriteStream } = await import("fs");
       const logStream = createWriteStream(logPath, { flags: "a" });
       logStream.write(`\n=== GSM Server Start — ${new Date().toISOString()} ===\n`);
       child.stdout?.pipe(logStream);
