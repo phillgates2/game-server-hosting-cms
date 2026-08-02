@@ -55,7 +55,12 @@ export default function RconPanel({ user }: { user: AuthUser }) {
     } catch { /* ignore */ } finally { setLoaded(true); }
   }, []);
 
-  useEffect(() => { loadServers(); }, [loadServers]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadServers();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadServers]);
 
   // Auto-scroll terminal
   useEffect(() => {

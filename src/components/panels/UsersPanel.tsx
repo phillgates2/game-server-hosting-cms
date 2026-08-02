@@ -37,7 +37,12 @@ export default function UsersPanel() {
     } catch { /* ignore */ } finally { setLoaded(true); }
   }, [search]);
 
-  useEffect(() => { loadUsers(); }, [loadUsers]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadUsers();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadUsers]);
 
   function startEdit(u: UserRow) {
     setEditing(u);

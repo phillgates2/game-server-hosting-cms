@@ -27,7 +27,12 @@ export default function ApiKeysPanel() {
     } catch { /**/ } finally { setLoaded(true); }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void load();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
 
   async function createKey(e: React.FormEvent) {
     e.preventDefault();
@@ -76,7 +81,7 @@ export default function ApiKeysPanel() {
             <code className="flex-1 px-4 py-3 bg-[#0d1117] border border-border rounded-lg text-sm font-mono text-success break-all">{newKey}</code>
             <button onClick={copyKey} className="px-4 py-3 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium flex-shrink-0">{copied ? "✓ Copied" : "📋 Copy"}</button>
           </div>
-          <button onClick={() => setNewKey(null)} className="text-xs text-text-muted hover:text-text-primary">I've saved it — dismiss</button>
+          <button onClick={() => setNewKey(null)} className="text-xs text-text-muted hover:text-text-primary">I&apos;ve saved it — dismiss</button>
         </div>
       )}
 

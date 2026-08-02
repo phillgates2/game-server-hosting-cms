@@ -46,7 +46,12 @@ export default function CmsPanel() {
     }
   }, []);
 
-  useEffect(() => { loadPosts(); }, [loadPosts]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadPosts();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadPosts]);
 
   function resetForm() {
     setForm({ title: "", content: "", type: "blog", excerpt: "", tags: "", published: true, pinned: false });

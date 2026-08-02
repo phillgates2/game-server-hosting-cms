@@ -8,8 +8,11 @@ export function useTheme() {
   useEffect(() => {
     const saved = localStorage.getItem("gsm-theme") as "dark" | "light" | null;
     if (saved) {
-      setThemeState(saved);
-      document.documentElement.classList.toggle("light", saved === "light");
+      const timer = window.setTimeout(() => {
+        setThemeState(saved);
+        document.documentElement.classList.toggle("light", saved === "light");
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
   }, []);
 

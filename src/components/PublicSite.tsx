@@ -39,7 +39,12 @@ export default function PublicSite({ onLoginClick }: Props) {
     } catch { /* ignore */ } finally { setLoaded(true); }
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadData();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadData]);
 
   function openPost(post: CmsPost) { setSelectedPost(post); setTab("post"); }
   function fmt(d: string) { return new Date(d).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }); }

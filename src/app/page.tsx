@@ -47,7 +47,12 @@ export default function Home() {
     }
   }, []);
 
-  useEffect(() => { checkStatus(); }, [checkStatus]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void checkStatus();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [checkStatus]);
 
   async function handleLogin(u: AuthUser) {
     try {

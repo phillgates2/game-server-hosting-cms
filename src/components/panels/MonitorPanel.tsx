@@ -72,11 +72,22 @@ export default function MonitorPanel({ user }: { user: AuthUser }) {
   }, [bufferThreshold]);
 
   useEffect(() => {
-    fetchData();
-    if (autoRefresh) {
-      const interval = setInterval(fetchData, 5000);
-      return () => clearInterval(interval);
+    const timer = window.setTimeout(() => {
+      void fetchData();
+    }, 0);
+
+    if (!autoRefresh) {
+      return () => window.clearTimeout(timer);
     }
+
+    const interval = window.setInterval(() => {
+      void fetchData();
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+    };
   }, [autoRefresh, fetchData]);
 
   async function clearBuffers() {

@@ -93,18 +93,28 @@ export default function Dashboard({ user, onLogout }: Props) {
   const loadPerms = useCallback(async () => {
     try { const res = await fetch("/api/auth/permissions"); if (res.ok) setPerms((await res.json()).permissions || {}); } catch { /**/ }
   }, []);
-  useEffect(() => { loadPerms(); }, [loadPerms]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadPerms();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadPerms]);
 
   // Global search — debounced API call when palette query is 2+ chars
   useEffect(() => {
-    if (!paletteOpen || paletteQuery.trim().length < 2) { setSearchResults([]); return; }
-    const timer = setTimeout(async () => {
+    const trimmed = paletteQuery.trim();
+    const timer = window.setTimeout(async () => {
+      if (!paletteOpen || trimmed.length < 2) {
+        setSearchResults([]);
+        return;
+      }
+
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(paletteQuery.trim())}`);
+        const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}`);
         if (res.ok) { const data = await res.json(); setSearchResults(data.results || []); }
       } catch { setSearchResults([]); }
     }, 300);
-    return () => clearTimeout(timer);
+    return () => window.clearTimeout(timer);
   }, [paletteQuery, paletteOpen]);
 
   async function handleLogout() {

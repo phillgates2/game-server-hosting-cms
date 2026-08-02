@@ -62,7 +62,10 @@ export default function DatabasePanel() {
   }, []);
 
   useEffect(() => {
-    loadTables();
+    const timer = window.setTimeout(() => {
+      void loadTables();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [loadTables]);
 
   const browseTable = useCallback(async (tableName: string, p: number = 1) => {

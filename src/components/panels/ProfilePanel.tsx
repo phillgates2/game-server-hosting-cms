@@ -56,7 +56,12 @@ export default function ProfilePanel() {
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => { loadProfile(); }, [loadProfile]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadProfile();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadProfile]);
 
   async function saveProfile(e: React.FormEvent) {
     e.preventDefault();

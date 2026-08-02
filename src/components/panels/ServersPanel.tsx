@@ -90,7 +90,12 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
     } catch { /**/ } finally { setLoaded(true); }
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadData();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadData]);
 
   // Auto-refresh: poll running servers every 15s to detect crashes
   useEffect(() => {
@@ -308,11 +313,23 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   }
 
   // ── Console ──
-  async function openConsole(id: number) { setConsoleId(id); fetchLog(id); }
-  async function fetchLog(id: number) {
-    try { const d = await (await fetch(`/api/servers/${id}/log?tail=300`)).json(); setConsoleLog(d.log || d.message || ""); setConsoleInfo({ status: d.status, pid: d.pid, lines: d.lines || 0, fileSizeKb: d.fileSizeKb || 0 }); setTimeout(() => { consoleRef.current && (consoleRef.current.scrollTop = consoleRef.current.scrollHeight); }, 50); } catch { /**/ }
-  }
-  useEffect(() => { if (consoleId === null) return; const i = setInterval(() => fetchLog(consoleId), 3000); return () => clearInterval(i); }, [consoleId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fetchLog = useCallback(async (id: number) => {
+    try {
+      const d = await (await fetch(`/api/servers/${id}/log?tail=300`)).json();
+      setConsoleLog(d.log || d.message || "");
+      setConsoleInfo({ status: d.status, pid: d.pid, lines: d.lines || 0, fileSizeKb: d.fileSizeKb || 0 });
+      setTimeout(() => { consoleRef.current && (consoleRef.current.scrollTop = consoleRef.current.scrollHeight); }, 50);
+    } catch { /**/ }
+  }, []);
+
+  async function openConsole(id: number) { setConsoleId(id); await fetchLog(id); }
+  useEffect(() => {
+    if (consoleId === null) return;
+    const i = window.setInterval(() => {
+      void fetchLog(consoleId);
+    }, 3000);
+    return () => window.clearInterval(i);
+  }, [consoleId, fetchLog]);
 
   const selectedGame = games.find((g) => g.id === Number(form.gameId));
   const selectedNode = nodeList.find((n) => n.id === Number(form.nodeId));

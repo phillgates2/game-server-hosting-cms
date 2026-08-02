@@ -44,7 +44,12 @@ export default function SchedulerPanel() {
     } catch { /**/ } finally { setLoaded(true); }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void load();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
 
   async function createTask(e: React.FormEvent) {
     e.preventDefault();

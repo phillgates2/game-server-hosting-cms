@@ -43,12 +43,12 @@ export async function POST(
     if (auth.role !== "admin" && server.userId !== auth.userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     if (server.status === "running") return NextResponse.json({ error: "Stop the server before updating" }, { status: 400 });
 
-    // Check for steamcmd in the install path
-    const steamcmdPath = join(server.installPath, "steamcmd", "steamcmd.sh");
+    // Check for the shared system SteamCMD install
+    const steamcmdPath = "/opt/steamcmd/steamcmd.sh";
     const hasSteamcmd = await access(steamcmdPath, constants.X_OK).then(() => true).catch(() => false);
 
     if (!hasSteamcmd || !server.steamAppId) {
-      return NextResponse.json({ error: "This server does not use SteamCMD or steamcmd is not installed. Use Install Files instead." }, { status: 400 });
+      return NextResponse.json({ error: "This server does not use SteamCMD or SteamCMD is not installed on the host. Use Install Files instead." }, { status: 400 });
     }
 
     await db.update(gameServers).set({ status: "installing", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
@@ -56,10 +56,14 @@ export async function POST(
     const bashPath = await findBash();
     const script = `#!/usr/bin/env bash
 set -e
-cd "${server.installPath}/steamcmd"
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
 export HOME="${server.installPath}"
 echo "Updating ${server.gameName || "game"} (AppID: ${server.steamAppId})..."
-./steamcmd.sh +force_install_dir "${server.installPath}" +login anonymous +app_update ${server.steamAppId} validate +quit
+"$STEAMCMD_BIN" +force_install_dir "${server.installPath}" +login anonymous +app_update ${server.steamAppId} validate +quit
 echo "Update complete"
 `;
 

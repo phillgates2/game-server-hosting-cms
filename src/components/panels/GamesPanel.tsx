@@ -38,6 +38,50 @@ const EMPTY_FORM = {
   configFiles: "{}", defaultConfig: "{}",
 };
 
+function ScriptEditor({ label, value, onChange, rows }: { label: string; value: string; onChange: (v: string) => void; rows?: number }) {
+  return (
+    <div>
+      <label className="block text-xs text-text-muted mb-1">{label}</label>
+      <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={rows || 8}
+        className="w-full px-3 py-2 bg-[#0d1117] border border-border rounded-lg text-xs font-mono text-text-primary resize-y focus:outline-none focus:ring-2 focus:ring-accent" spellCheck={false} />
+    </div>
+  );
+}
+
+function GameForm({ form, setForm, onSave, onCancel, saveLabel, title }: {
+  form: typeof EMPTY_FORM; setForm: (f: typeof EMPTY_FORM) => void;
+  onSave: (e?: React.FormEvent) => Promise<void> | void; onCancel: () => void; saveLabel: string; title: string;
+}) {
+  return (
+    <div className="bg-bg-card border border-accent/30 rounded-xl p-6 space-y-4">
+      <div className="flex items-center justify-between"><h3 className="font-semibold">{title}</h3><button onClick={onCancel} className="text-text-muted text-xs">Cancel</button></div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div><label className="block text-xs text-text-muted mb-1">Name *</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" required /></div>
+        <div><label className="block text-xs text-text-muted mb-1">Slug *</label><input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm font-mono" required placeholder="my-game" /></div>
+        <div><label className="block text-xs text-text-muted mb-1">Engine</label><input value={form.engine} onChange={(e) => setForm({ ...form, engine: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" placeholder="Unity, UE5, Source..." /></div>
+        <div><label className="block text-xs text-text-muted mb-1">Default Port *</label><input type="number" value={form.defaultPort} onChange={(e) => setForm({ ...form, defaultPort: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" required /></div>
+        <div><label className="block text-xs text-text-muted mb-1">Steam App ID</label><input value={form.steamAppId} onChange={(e) => setForm({ ...form, steamAppId: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" placeholder="Optional" /></div>
+        <div><label className="block text-xs text-text-muted mb-1">Icon Emoji</label><input value={form.iconEmoji} onChange={(e) => setForm({ ...form, iconEmoji: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
+      </div>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.supportsIpv6} onChange={(e) => setForm({ ...form, supportsIpv6: e.target.checked })} className="rounded" /> Supports IPv6</label>
+      <ScriptEditor label="Install Script *" value={form.installScript} onChange={(v) => setForm({ ...form, installScript: v })} rows={12} />
+      <div className="bg-bg-secondary rounded-lg p-3 text-xs text-text-muted space-y-1">
+        <p className="font-medium text-text-secondary">Available variables:</p>
+        <p><code className="text-accent">{"{{INSTALL_PATH}}"}</code> — Server install directory &nbsp; <code className="text-accent">{"{{PORT}}"}</code> — Main port &nbsp; <code className="text-accent">{"{{QUERY_PORT}}"}</code> — Query port</p>
+        <p><code className="text-accent">{"{{SERVER_NAME}}"}</code> — Server name &nbsp; <code className="text-accent">{"{{MAX_PLAYERS}}"}</code> — Max players &nbsp; <code className="text-accent">{"{{MAX_RAM}}"}</code> — Max RAM (GB)</p>
+        <p><code className="text-accent">{"{{RCON_PASSWORD}}"}</code> — RCON password &nbsp; <code className="text-accent">{"{{RCON_PORT}}"}</code> — RCON port</p>
+      </div>
+      <ScriptEditor label="Start Command *" value={form.startCommand} onChange={(v) => setForm({ ...form, startCommand: v })} rows={3} />
+      <ScriptEditor label="Stop Command (optional)" value={form.stopCommand} onChange={(v) => setForm({ ...form, stopCommand: v })} rows={2} />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <ScriptEditor label="Config Files (JSON: path → name)" value={form.configFiles} onChange={(v) => setForm({ ...form, configFiles: v })} rows={4} />
+        <ScriptEditor label="Default Config (JSON: key → value)" value={form.defaultConfig} onChange={(v) => setForm({ ...form, defaultConfig: v })} rows={4} />
+      </div>
+      <button onClick={(e) => onSave(e)} className="px-6 py-2 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium">{saveLabel}</button>
+    </div>
+  );
+}
+
 export default function GamesPanel() {
   const [tab, setTab] = useState<Tab>("installed");
   const [installedGames, setInstalledGames] = useState<InstalledGame[]>([]);
@@ -63,7 +107,13 @@ export default function GamesPanel() {
     setTemplates(data.templates || []); setTemplatesByCategory(data.byCategory || {});
   }, []);
 
-  useEffect(() => { loadInstalledGames(); loadTemplates(); }, [loadInstalledGames, loadTemplates]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadInstalledGames();
+      void loadTemplates();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadInstalledGames, loadTemplates]);
 
   async function loadTemplateDetail(slug: string) {
     const res = await fetch(`/api/templates/${slug}`); const data = await res.json();
@@ -148,50 +198,6 @@ export default function GamesPanel() {
   }
 
   const installedSlugs = new Set(installedGames.map((g) => g.slug));
-
-  function ScriptEditor({ label, value, onChange, rows }: { label: string; value: string; onChange: (v: string) => void; rows?: number }) {
-    return (
-      <div>
-        <label className="block text-xs text-text-muted mb-1">{label}</label>
-        <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={rows || 8}
-          className="w-full px-3 py-2 bg-[#0d1117] border border-border rounded-lg text-xs font-mono text-text-primary resize-y focus:outline-none focus:ring-2 focus:ring-accent" spellCheck={false} />
-      </div>
-    );
-  }
-
-  function GameForm({ form, setForm, onSave, onCancel, saveLabel, title }: {
-    form: typeof EMPTY_FORM; setForm: (f: typeof EMPTY_FORM) => void;
-    onSave: (e?: React.FormEvent) => Promise<void> | void; onCancel: () => void; saveLabel: string; title: string;
-  }) {
-    return (
-      <div className="bg-bg-card border border-accent/30 rounded-xl p-6 space-y-4">
-        <div className="flex items-center justify-between"><h3 className="font-semibold">{title}</h3><button onClick={onCancel} className="text-text-muted text-xs">Cancel</button></div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div><label className="block text-xs text-text-muted mb-1">Name *</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" required /></div>
-          <div><label className="block text-xs text-text-muted mb-1">Slug *</label><input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm font-mono" required placeholder="my-game" /></div>
-          <div><label className="block text-xs text-text-muted mb-1">Engine</label><input value={form.engine} onChange={(e) => setForm({ ...form, engine: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" placeholder="Unity, UE5, Source..." /></div>
-          <div><label className="block text-xs text-text-muted mb-1">Default Port *</label><input type="number" value={form.defaultPort} onChange={(e) => setForm({ ...form, defaultPort: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" required /></div>
-          <div><label className="block text-xs text-text-muted mb-1">Steam App ID</label><input value={form.steamAppId} onChange={(e) => setForm({ ...form, steamAppId: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" placeholder="Optional" /></div>
-          <div><label className="block text-xs text-text-muted mb-1">Icon Emoji</label><input value={form.iconEmoji} onChange={(e) => setForm({ ...form, iconEmoji: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
-        </div>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.supportsIpv6} onChange={(e) => setForm({ ...form, supportsIpv6: e.target.checked })} className="rounded" /> Supports IPv6</label>
-        <ScriptEditor label="Install Script *" value={form.installScript} onChange={(v) => setForm({ ...form, installScript: v })} rows={12} />
-        <div className="bg-bg-secondary rounded-lg p-3 text-xs text-text-muted space-y-1">
-          <p className="font-medium text-text-secondary">Available variables:</p>
-          <p><code className="text-accent">{"{{INSTALL_PATH}}"}</code> — Server install directory &nbsp; <code className="text-accent">{"{{PORT}}"}</code> — Main port &nbsp; <code className="text-accent">{"{{QUERY_PORT}}"}</code> — Query port</p>
-          <p><code className="text-accent">{"{{SERVER_NAME}}"}</code> — Server name &nbsp; <code className="text-accent">{"{{MAX_PLAYERS}}"}</code> — Max players &nbsp; <code className="text-accent">{"{{MAX_RAM}}"}</code> — Max RAM (GB)</p>
-          <p><code className="text-accent">{"{{RCON_PASSWORD}}"}</code> — RCON password &nbsp; <code className="text-accent">{"{{RCON_PORT}}"}</code> — RCON port</p>
-        </div>
-        <ScriptEditor label="Start Command *" value={form.startCommand} onChange={(v) => setForm({ ...form, startCommand: v })} rows={3} />
-        <ScriptEditor label="Stop Command (optional)" value={form.stopCommand} onChange={(v) => setForm({ ...form, stopCommand: v })} rows={2} />
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <ScriptEditor label="Config Files (JSON: path → name)" value={form.configFiles} onChange={(v) => setForm({ ...form, configFiles: v })} rows={4} />
-          <ScriptEditor label="Default Config (JSON: key → value)" value={form.defaultConfig} onChange={(v) => setForm({ ...form, defaultConfig: v })} rows={4} />
-        </div>
-        <button onClick={(e) => onSave(e)} className="px-6 py-2 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium">{saveLabel}</button>
-      </div>
-    );
-  }
 
   return (
     <div className="animate-fade-in space-y-6">

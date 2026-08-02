@@ -36,7 +36,12 @@ export default function ActivityPanel() {
     finally { setLoaded(true); }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void load();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
 
   return (
     <div className="animate-fade-in space-y-6">

@@ -79,10 +79,18 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
   }, []);
 
   useEffect(() => {
-    loadNodes();
-    // Auto-refresh every 30 seconds
-    const interval = setInterval(loadNodes, 30000);
-    return () => clearInterval(interval);
+    const timer = window.setTimeout(() => {
+      void loadNodes();
+    }, 0);
+
+    const interval = window.setInterval(() => {
+      void loadNodes();
+    }, 30000);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+    };
   }, [loadNodes]);
 
   async function createLocalNode() {

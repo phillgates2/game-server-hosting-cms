@@ -12,6 +12,41 @@ interface PermCategory {
   permissions: Record<string, string>;
 }
 
+function PermGrid({ perms, onChange, categories: permCategories }: { perms: Record<string, boolean>; onChange: (p: Record<string, boolean>) => void; categories: Record<string, PermCategory> }) {
+  function toggleAll(catPerms: string[], val: boolean) {
+    const next = { ...perms };
+    catPerms.forEach((p) => { next[p] = val; });
+    onChange(next);
+  }
+  return (
+    <div className="space-y-4">
+      {Object.entries(permCategories).map(([catKey, cat]) => {
+        const permKeys = Object.keys(cat.permissions);
+        const allChecked = permKeys.every((p) => perms[p]);
+        return (
+          <div key={catKey} className="bg-bg-secondary rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-medium">{cat.label}</h4>
+              <button type="button" onClick={() => toggleAll(permKeys, !allChecked)} className="text-[10px] text-accent hover:underline">
+                {allChecked ? "Deselect all" : "Select all"}
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+              {Object.entries(cat.permissions).map(([perm, desc]) => (
+                <label key={perm} className="flex items-center gap-2 text-xs py-1 px-2 rounded hover:bg-bg-hover cursor-pointer">
+                  <input type="checkbox" checked={!!perms[perm]} onChange={(e) => onChange({ ...perms, [perm]: e.target.checked })} className="rounded" />
+                  <span className="text-text-secondary">{desc}</span>
+                  <span className="text-[9px] text-text-muted font-mono ml-auto">{perm}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function RolesPanel() {
   const [rolesList, setRolesList] = useState<Role[]>([]);
   const [categories, setCategories] = useState<Record<string, PermCategory>>({});
@@ -32,7 +67,12 @@ export default function RolesPanel() {
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => { loadRoles(); }, [loadRoles]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadRoles();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadRoles]);
 
   function startEdit(role: Role) {
     setEditing(role);
@@ -77,41 +117,6 @@ export default function RolesPanel() {
     setMessage({ type: "success", text: "Role deleted" }); loadRoles();
   }
 
-  function PermGrid({ perms, onChange }: { perms: Record<string, boolean>; onChange: (p: Record<string, boolean>) => void }) {
-    function toggleAll(catPerms: string[], val: boolean) {
-      const next = { ...perms };
-      catPerms.forEach((p) => { next[p] = val; });
-      onChange(next);
-    }
-    return (
-      <div className="space-y-4">
-        {Object.entries(categories).map(([catKey, cat]) => {
-          const permKeys = Object.keys(cat.permissions);
-          const allChecked = permKeys.every((p) => perms[p]);
-          return (
-            <div key={catKey} className="bg-bg-secondary rounded-lg p-4">
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="text-sm font-medium">{cat.label}</h4>
-                <button type="button" onClick={() => toggleAll(permKeys, !allChecked)} className="text-[10px] text-accent hover:underline">
-                  {allChecked ? "Deselect all" : "Select all"}
-                </button>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
-                {Object.entries(cat.permissions).map(([perm, desc]) => (
-                  <label key={perm} className="flex items-center gap-2 text-xs py-1 px-2 rounded hover:bg-bg-hover cursor-pointer">
-                    <input type="checkbox" checked={!!perms[perm]} onChange={(e) => onChange({ ...perms, [perm]: e.target.checked })} className="rounded" />
-                    <span className="text-text-secondary">{desc}</span>
-                    <span className="text-[9px] text-text-muted font-mono ml-auto">{perm}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
   return (
     <div className="animate-fade-in space-y-6">
       <div className="flex items-center justify-between">
@@ -137,7 +142,7 @@ export default function RolesPanel() {
             <div><label className="block text-xs text-text-muted mb-1">Priority</label><input type="number" value={createForm.priority} onChange={(e) => setCreateForm({ ...createForm, priority: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
           </div>
           <h4 className="font-medium text-sm pt-2">Permissions</h4>
-          <PermGrid perms={createPerms} onChange={setCreatePerms} />
+          <PermGrid perms={createPerms} onChange={setCreatePerms} categories={categories} />
           <button type="submit" className="px-6 py-2 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium">Create Role</button>
         </form>
       )}
@@ -156,7 +161,7 @@ export default function RolesPanel() {
             <div><label className="block text-xs text-text-muted mb-1">Priority</label><input type="number" value={editFields.priority} onChange={(e) => setEditFields({ ...editFields, priority: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
           </div>
           <h4 className="font-medium text-sm pt-2">Permissions</h4>
-          <PermGrid perms={editPerms} onChange={setEditPerms} />
+          <PermGrid perms={editPerms} onChange={setEditPerms} categories={categories} />
           <button onClick={saveEdit} className="px-6 py-2 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium">Save Changes</button>
         </div>
       )}

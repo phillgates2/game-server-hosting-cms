@@ -297,27 +297,24 @@ set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="730"
 
-## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
+## Use system SteamCMD install (shared across servers)
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
 
-cd "$INSTALL_DIR/steamcmd"
-
-# SteamCMD workaround
+mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
 chown -R $(whoami) "$INSTALL_DIR"
 export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Counter-Strike 2 (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
 
 ## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Counter-Strike 2 server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./game/bin/linuxsteamrt64/cs2 -dedicated -ip 0.0.0.0 -port {{PORT}} -tv_port {{QUERY_PORT}} +game_type {{GAME_TYPE}} +game_mode {{GAME_MODE}} +map {{MAP}} +hostname "{{SERVER_NAME}}" +sv_setsteamaccount {{GSLT_TOKEN}} +rcon_password "{{RCON_PASSWORD}}"`,
@@ -350,27 +347,24 @@ set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="232250"
 
-## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
+## Use system SteamCMD install (shared across servers)
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
 
-cd "$INSTALL_DIR/steamcmd"
-
-# SteamCMD workaround
+mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
 chown -R $(whoami) "$INSTALL_DIR"
 export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Team Fortress 2 (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
 
 ## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Team Fortress 2 server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./srcds_run -game tf -console -port {{PORT}} +maxplayers {{MAX_PLAYERS}} +map {{MAP}}`,
@@ -405,27 +399,24 @@ set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="4020"
 
-## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
+## Use system SteamCMD install (shared across servers)
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
 
-cd "$INSTALL_DIR/steamcmd"
-
-# SteamCMD workaround
+mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
 chown -R $(whoami) "$INSTALL_DIR"
 export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Garry's Mod (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
 
 ## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Garry's Mod server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./srcds_run -game garrysmod -console -port {{PORT}} +maxplayers {{MAX_PLAYERS}} +map {{MAP}} +gamemode {{GAMEMODE}}`,
@@ -458,27 +449,24 @@ set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="222860"
 
-## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
+## Use system SteamCMD install (shared across servers)
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
 
-cd "$INSTALL_DIR/steamcmd"
-
-# SteamCMD workaround
+mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
 chown -R $(whoami) "$INSTALL_DIR"
 export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Left 4 Dead 2 (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
 
 ## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Left 4 Dead 2 server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./srcds_run -game left4dead2 -console -port {{PORT}} +map {{MAP}}`,
@@ -516,27 +504,24 @@ set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="258550"
 
-## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
+## Use system SteamCMD install (shared across servers)
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
 
-cd "$INSTALL_DIR/steamcmd"
-
-# SteamCMD workaround
+mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
 chown -R $(whoami) "$INSTALL_DIR"
 export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Rust (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
 
 ## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Rust server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./RustDedicated -batchmode +server.port {{PORT}} +server.level "Procedural Map" +server.seed {{WORLD_SEED}} +server.worldsize {{WORLD_SIZE}} +server.maxplayers {{MAX_PLAYERS}} +server.hostname "{{SERVER_NAME}}" +rcon.port {{RCON_PORT}} +rcon.password "{{RCON_PASSWORD}}" +rcon.web 1`,
@@ -566,27 +551,24 @@ set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="376030"
 
-## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
+## Use system SteamCMD install (shared across servers)
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
 
-cd "$INSTALL_DIR/steamcmd"
-
-# SteamCMD workaround
+mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
 chown -R $(whoami) "$INSTALL_DIR"
 export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing ARK: Survival Evolved (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
 
 ## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "ARK: Survival Evolved server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}}/ShooterGame/Binaries/Linux && ./ShooterGameServer {{MAP}}?listen?SessionName={{SERVER_NAME}}?Port={{PORT}}?QueryPort={{QUERY_PORT}}?ServerPassword={{SERVER_PASSWORD}}?ServerAdminPassword={{ADMIN_PASSWORD}}?MaxPlayers={{MAX_PLAYERS}} -server -log`,
@@ -616,27 +598,24 @@ set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="896660"
 
-## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
+## Use system SteamCMD install (shared across servers)
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
 
-cd "$INSTALL_DIR/steamcmd"
-
-# SteamCMD workaround
+mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
 chown -R $(whoami) "$INSTALL_DIR"
 export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Valheim (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
 
 ## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Valheim server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./valheim_server.x86_64 -name "{{SERVER_NAME}}" -port {{PORT}} -world "{{WORLD_NAME}}" -password "{{PASSWORD}}" -public {{PUBLIC}}`,
@@ -665,27 +644,24 @@ set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="294420"
 
-## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
+## Use system SteamCMD install (shared across servers)
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
 
-cd "$INSTALL_DIR/steamcmd"
-
-# SteamCMD workaround
+mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
 chown -R $(whoami) "$INSTALL_DIR"
 export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing 7 Days to Die (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
 
 ## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "7 Days to Die server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./7DaysToDieServer.x86_64 -configfile=serverconfig.xml -logfile logs/output_log.txt -quit -batchmode -nographics -dedicated`,
@@ -719,27 +695,24 @@ set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="2394010"
 
-## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
+## Use system SteamCMD install (shared across servers)
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
 
-cd "$INSTALL_DIR/steamcmd"
-
-# SteamCMD workaround
+mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
 chown -R $(whoami) "$INSTALL_DIR"
 export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Palworld (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
 
 ## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Palworld server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./PalServer.sh -port={{PORT}} -players={{MAX_PLAYERS}} -useperfthreads -NoAsyncLoadingThread -UseMultithreadForDS`,
@@ -771,27 +744,24 @@ set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="1690800"
 
-## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
+## Use system SteamCMD install (shared across servers)
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
 
-cd "$INSTALL_DIR/steamcmd"
-
-# SteamCMD workaround
+mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
 chown -R $(whoami) "$INSTALL_DIR"
 export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Satisfactory (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
 
 ## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Satisfactory server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./Engine/Binaries/Linux/*-Linux-Shipping FactoryGame ?listen -Port={{PORT}} -ServerQueryPort={{QUERY_PORT}} -BeaconPort={{BEACON_PORT}} -multihome=0.0.0.0 -log -unattended`,
@@ -867,27 +837,24 @@ set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="2278520"
 
-## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
+## Use system SteamCMD install (shared across servers)
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
 
-cd "$INSTALL_DIR/steamcmd"
-
-# SteamCMD workaround
+mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
 chown -R $(whoami) "$INSTALL_DIR"
 export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Enshrouded (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
 
 ## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Enshrouded server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./enshrouded_server -batchmode -nographics`,
@@ -925,27 +892,24 @@ set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="581330"
 
-## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
+## Use system SteamCMD install (shared across servers)
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
 
-cd "$INSTALL_DIR/steamcmd"
-
-# SteamCMD workaround
+mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
 chown -R $(whoami) "$INSTALL_DIR"
 export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Insurgency: Sandstorm (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
 
 ## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Insurgency: Sandstorm server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./Insurgency/Binaries/Linux/InsurgencyServer-Linux-Shipping {{MAP}}?Scenario={{SCENARIO}}?MaxPlayers={{MAX_PLAYERS}} -Port={{PORT}} -QueryPort={{QUERY_PORT}} -log`,
@@ -973,27 +937,24 @@ set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="403240"
 
-## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
+## Use system SteamCMD install (shared across servers)
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
 
-cd "$INSTALL_DIR/steamcmd"
-
-# SteamCMD workaround
+mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
 chown -R $(whoami) "$INSTALL_DIR"
 export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Squad (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
 
 ## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Squad server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./SquadGame/Binaries/Linux/SquadGameServer SquadGame Port={{PORT}} QueryPort={{QUERY_PORT}} -beaconport={{RCON_PORT}}`,
@@ -1022,27 +983,24 @@ set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="233780"
 
-## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
+## Use system SteamCMD install (shared across servers)
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
 
-cd "$INSTALL_DIR/steamcmd"
-
-# SteamCMD workaround
+mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
 chown -R $(whoami) "$INSTALL_DIR"
 export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Arma 3 (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
 
 ## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Arma 3 server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./arma3server_x64 -port={{PORT}} -config=server.cfg -profiles=profiles`,
@@ -1401,27 +1359,24 @@ set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="349090"
 
-## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
+## Use system SteamCMD install (shared across servers)
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
 
-cd "$INSTALL_DIR/steamcmd"
-
-# SteamCMD workaround
+mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
 chown -R $(whoami) "$INSTALL_DIR"
 export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Quake Live (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
 
 ## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Quake Live server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./run_server_x64.sh +set net_port {{PORT}} +set sv_hostname "{{SERVER_NAME}}" +set g_gametype {{GAMETYPE}}`,
@@ -1491,23 +1446,23 @@ STEAM_APPID="1829350"
 
 apt-get update -qq && apt-get install -y -qq dos2unix 2>/dev/null || true
 
-## Download and install SteamCMD
+## Use system SteamCMD install (shared across servers)
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
+
 export HOME="$INSTALL_DIR"
-cd /tmp
-mkdir -p "$HOME/steamcmd" "$HOME/steamapps"
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-tar -xzf steamcmd.tar.gz -C "$HOME/steamcmd"
-rm steamcmd.tar.gz
-cd "$HOME/steamcmd"
+mkdir -p "$HOME/steamapps" "$HOME/.steam/sdk32" "$HOME/.steam/sdk64"
 chown -R $(whoami) "$INSTALL_DIR"
 
 ## V Rising uses the Windows dedicated server under wine/proton in upstream eggs
 echo "Installing V Rising Windows dedicated server (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$HOME" +login anonymous +@sSteamCmdForcePlatformType windows +app_update $STEAM_APPID validate +quit
+"$STEAMCMD_BIN" +force_install_dir "$HOME" +login anonymous +@sSteamCmdForcePlatformType windows +app_update $STEAM_APPID validate +quit
 
-mkdir -p "$HOME/.steam/sdk32" "$HOME/.steam/sdk64"
-cp -v linux32/steamclient.so "$HOME/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v linux64/steamclient.so "$HOME/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux32/steamclient.so" "$HOME/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux64/steamclient.so" "$HOME/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 mkdir -p "$HOME/save-data/Settings"
 if [ -f "$HOME/VRisingServer_Data/StreamingAssets/Settings/ServerHostSettings.json" ]; then
@@ -1547,27 +1502,24 @@ set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="380870"
 
-## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
+## Use system SteamCMD install (shared across servers)
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
 
-cd "$INSTALL_DIR/steamcmd"
-
-# SteamCMD workaround
+mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
 chown -R $(whoami) "$INSTALL_DIR"
 export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Project Zomboid (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
 
 ## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Project Zomboid server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./start-server.sh -servername {{SERVER_NAME}}`,
@@ -1641,27 +1593,24 @@ set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="343050"
 
-## Download and install SteamCMD
-cd /tmp
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-mkdir -p "$INSTALL_DIR/steamcmd"
-tar -xzf steamcmd.tar.gz -C "$INSTALL_DIR/steamcmd"
-rm steamcmd.tar.gz
+## Use system SteamCMD install (shared across servers)
+STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+if [ ! -x "$STEAMCMD_BIN" ]; then
+  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  exit 1
+fi
 
-cd "$INSTALL_DIR/steamcmd"
-
-# SteamCMD workaround
+mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
 chown -R $(whoami) "$INSTALL_DIR"
 export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Don't Starve Together (AppID: $STEAM_APPID)..."
-./steamcmd.sh +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
 
 ## Set up Steam SDK libraries
-mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"
-cp -v "$INSTALL_DIR/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "$INSTALL_DIR/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Don't Starve Together server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}}/bin64 && ./dontstarve_dedicated_server_nullrenderer_x64 -console -cluster {{CLUSTER_NAME}} -shard Master`,
