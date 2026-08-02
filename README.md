@@ -40,6 +40,7 @@ GameServer Manager provides:
 - Scheduled tasks and Discord webhook notifications
 - File editor, RCON console, and database browser
 - Dashboard-style overview with collapsible panels, per-server health summaries, and quick admin shortcuts
+- Clear refresh/error handling so the overview and server panels surface failed data loads and provide retry actions
 
 ### Security and access
 - JWT-based authentication and bcrypt password hashing

@@ -14,7 +14,8 @@ All notable changes to GameServer Manager are documented in this file.
 
 ### Changed
 - Server management and overview screens now prioritize active and attention-needed servers for faster triage
-- README updated to reflect the new dashboard experience and panel shortcuts
+- Overview and server panels now show explicit refresh/load errors with retry actions so admin issues are easier to spot
+- README updated to reflect the new dashboard experience, panel shortcuts, and reliability behavior
 
 ---
 

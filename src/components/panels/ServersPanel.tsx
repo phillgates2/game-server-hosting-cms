@@ -63,6 +63,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   const [loading, setLoading] = useState(false);
   const [installingId, setInstallingId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | "running" | "stopped" | "installing" | "install_failed">("all");
   const [installLog, setInstallLog] = useState<{ output: string; error: string; success: boolean } | null>(null);
   const [error, setError] = useState("");
@@ -80,17 +81,35 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   const [, setTick] = useState(0);
 
   const loadData = useCallback(async () => {
+    setLoadError(null);
     try {
       const [srvR, gameR, nodeR] = await Promise.allSettled([fetch("/api/servers"), fetch("/api/games"), fetch("/api/nodes")]);
-      if (srvR.status === "fulfilled" && srvR.value.ok) setServers((await srvR.value.json()).servers || []);
-      if (gameR.status === "fulfilled" && gameR.value.ok) setGames((await gameR.value.json()).games || []);
-      if (nodeR.status === "fulfilled" && nodeR.value.ok) {
-        const online = ((await nodeR.value.json()).nodes || []).filter((n: NodeInfo) => n.status === "online");
-        setNodeList(online);
-        const def = online.find((n: NodeInfo) => n.isDefault);
-        if (def) setForm((f) => ({ ...f, nodeId: String(def.id) }));
+      const failures: string[] = [];
+      if (srvR.status === "fulfilled" && srvR.value.ok) {
+        setServers((await srvR.value.json()).servers || []);
+      } else {
+        failures.push("servers");
       }
-    } catch { /**/ } finally { setLoaded(true); }
+      if (gameR.status === "fulfilled" && gameR.value.ok) {
+        setGames((await gameR.value.json()).games || []);
+      } else {
+        failures.push("games");
+      }
+      if (nodeR.status === "fulfilled" && nodeR.value.ok) {
+        const nodes = ((await nodeR.value.json()).nodes || []) as NodeInfo[];
+        const online = nodes.filter((n) => n.status === "online");
+        setNodeList(online);
+        const def = online.find((n) => n.isDefault);
+        if (def) setForm((f) => ({ ...f, nodeId: String(def.id) }));
+      } else {
+        failures.push("nodes");
+      }
+      if (failures.length > 0) {
+        setLoadError("Some server data could not be refreshed. Check your connection or permissions and try again.");
+      }
+    } catch {
+      setLoadError("The server list could not be refreshed. Please try again in a moment.");
+    } finally { setLoaded(true); }
   }, []);
 
   useEffect(() => {
@@ -401,6 +420,12 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
       )}
 
       {/* Warnings */}
+      {loadError && (
+        <div className="rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm text-warning flex flex-wrap items-center justify-between gap-3">
+          <p>{loadError}</p>
+          <button onClick={() => { setLoaded(false); void loadData(); }} className="rounded-lg border border-warning/30 bg-bg-card px-3 py-1.5 text-xs font-medium text-warning">Retry</button>
+        </div>
+      )}
       {onlineNodes.length === 0 && loaded && <Notice icon="🖥️" text="No online nodes. Go to Nodes and add a Local Node first." />}
       {games.length === 0 && loaded && <Notice icon="📦" text="No games installed. Go to Games → Templates to install one." />}
 

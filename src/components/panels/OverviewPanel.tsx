@@ -58,6 +58,7 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
   const [recentActivity, setRecentActivity] = useState<ActivityEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>("");
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [panelOrder, setPanelOrder] = useState<DashboardPanelId[]>(["quick-start", "stats", "actions", "health", "nodes", "games", "servers"]);
   const [collapsedPanels, setCollapsedPanels] = useState<Record<DashboardPanelId, boolean>>({
     "quick-start": false,
@@ -70,6 +71,7 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
   });
 
   const loadData = useCallback(async () => {
+    setLoadError(null);
     try {
       const [monRes, srvRes, gameRes, nodeRes] = await Promise.allSettled([
         fetch("/api/monitor"),
@@ -78,13 +80,44 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
         fetch("/api/nodes"),
       ]);
 
-      if (monRes.status === "fulfilled" && monRes.value.ok) setMonitor(await monRes.value.json());
-      if (srvRes.status === "fulfilled" && srvRes.value.ok) setServers((await srvRes.value.json()).servers || []);
-      if (gameRes.status === "fulfilled" && gameRes.value.ok) setGames((await gameRes.value.json()).games || []);
-      if (nodeRes.status === "fulfilled" && nodeRes.value.ok) setNodeList((await nodeRes.value.json()).nodes || []);
+      const failures: string[] = [];
+
+      if (monRes.status === "fulfilled" && monRes.value.ok) {
+        setMonitor(await monRes.value.json());
+      } else if (monRes.status === "fulfilled") {
+        failures.push("monitor");
+      } else {
+        failures.push("monitor");
+      }
+
+      if (srvRes.status === "fulfilled" && srvRes.value.ok) {
+        setServers((await srvRes.value.json()).servers || []);
+      } else {
+        failures.push("servers");
+      }
+
+      if (gameRes.status === "fulfilled" && gameRes.value.ok) {
+        setGames((await gameRes.value.json()).games || []);
+      } else {
+        failures.push("games");
+      }
+
+      if (nodeRes.status === "fulfilled" && nodeRes.value.ok) {
+        setNodeList((await nodeRes.value.json()).nodes || []);
+      } else {
+        failures.push("nodes");
+      }
+
+      if (failures.length > 0) {
+        setLoadError("Some dashboard data could not be refreshed. Check your connection or permissions and try again.");
+      } else {
+        setLoadError(null);
+      }
+
       setLastUpdated(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
     } catch (e) {
       console.error("OverviewPanel load error:", e);
+      setLoadError("The overview could not be refreshed. Please try again in a moment.");
     } finally {
       setLoaded(true);
     }
@@ -307,6 +340,15 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
           <span>{lastUpdated ? `Updated ${lastUpdated}` : "Refresh"}</span>
         </button>
       </div>
+
+      {loadError && (
+        <div className="rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm text-warning">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p>{loadError}</p>
+            <button onClick={() => { setLoaded(false); void loadData(); }} className="rounded-lg border border-warning/30 bg-bg-card px-3 py-1.5 text-xs font-medium text-warning">Retry</button>
+          </div>
+        </div>
+      )}
 
       {panelOrder.map((panelId) => panelSections[panelId])}
 
