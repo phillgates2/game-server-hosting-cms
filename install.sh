@@ -20,15 +20,61 @@ ORIG_USER="${SUDO_USER:-${USER}}"
 ORIG_HOME="$(eval echo ~${ORIG_USER})"
 REPO_URL="https://github.com/phillgates2/game-server-hosting-cms.git"
 INSTALL_DIR="/opt/gsm-panel"
-APP_PORT="3000"
 DB_PASS="GsmPanelDbPass2026!"
 DRY_RUN="${INSTALLER_DRY_RUN:-${DRY_RUN:-0}}"
+
+validate_app_port() {
+  local port="$1"
+  if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
+    echo "Invalid port '$port'. Please choose a number between 1 and 65535." >&2
+    return 1
+  fi
+
+  local reserved_ports=(22 80 443 5432 3306 27017 25565)
+  local reserved_port
+  for reserved_port in "${reserved_ports[@]}"; do
+    if [ "$port" = "$reserved_port" ]; then
+      echo "Port $port is reserved for common system services and should not be used for the panel." >&2
+      return 1
+    fi
+  done
+
+  if command -v ss >/dev/null 2>&1; then
+    if ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq ":${port}(\$|\s)"; then
+      echo "Port $port is already in use on this server. Choose a different one." >&2
+      return 1
+    fi
+  fi
+
+  return 0
+}
+
+APP_PORT_INPUT="${APP_PORT:-}"
+if [ -z "$APP_PORT_INPUT" ]; then
+  APP_PORT_INPUT="3000"
+fi
+
+echo "Panel internal port selection"
+echo "Avoid common reserved ports: 22 (SSH), 80/443 (web), 5432 (PostgreSQL), 3306, 27017, 25565."
+while ! validate_app_port "$APP_PORT_INPUT"; do
+  if [ -t 0 ]; then
+    read -rp "Choose the internal panel port [3000]: " APP_PORT_INPUT
+    if [ -z "$APP_PORT_INPUT" ]; then
+      APP_PORT_INPUT="3000"
+    fi
+  else
+    echo "No valid port was supplied. Falling back to 3000." >&2
+    APP_PORT_INPUT="3000"
+    break
+  fi
+done
+APP_PORT="$APP_PORT_INPUT"
 
 if [ "${DRY_RUN}" = "1" ]; then
   echo "Dry run enabled; skipping package installs and system changes."
   echo "Installer running as: ${ORIG_USER}"
   echo "Install directory: ${INSTALL_DIR}"
-  echo "Using fixed app port: ${APP_PORT}"
+  echo "Using panel port: ${APP_PORT}"
   echo "Using fixed database password: ${DB_PASS}"
   echo "Would install Node.js, PostgreSQL, SteamCMD, PM2, Caddy, and configure the panel."
   exit 0
@@ -36,7 +82,7 @@ fi
 
  echo "Installer running as: ${ORIG_USER}"
 echo "Install directory: ${INSTALL_DIR}"
-echo "Using fixed app port: ${APP_PORT}"
+echo "Using panel port: ${APP_PORT}"
 echo "Using fixed database password: ${DB_PASS}"
 
 # Prompt for port forwarding rules if not supplied via environment
@@ -49,6 +95,10 @@ if [ -z "${PF_RULES_RAW:-}" ]; then
   fi
 fi
 PF_RULES_RAW="$(echo "$PF_RULES_RAW" | tr -d '[:space:]')"
+
+if [ -n "$PF_RULES_RAW" ]; then
+  echo "Port forwarding rules to apply: ${PF_RULES_RAW}"
+fi
 
 # Determine server IP (first non-loopback IPv4)
 SERVER_IP=""
@@ -174,7 +224,7 @@ EOF
 sudo chown "${ORIG_USER}:${ORIG_USER}" .env
 chmod 600 .env
 echo ".env created (PORT=${APP_PORT}, PF_RULES=${PF_ENV_VALUE:-<none>})."
-
+  echo "Panel will listen on port ${APP_PORT} and use Caddy/PM2 accordingly."
 # Step 7: Build
 echo "Step 7: Building the project..."
 sudo -u "${ORIG_USER}" npm run build
