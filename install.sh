@@ -4,9 +4,9 @@ set -euo pipefail
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/install.sh | bash
 #
-# Prompts:
-#   - DB password (required)
-#   - Port forwarding rules (optional, format: external:internal[,external2:internal2,...])
+# Notes:
+#   - The installer uses a fixed database password and fixed app port for a simple fresh-server setup.
+#   - Port forwarding rules are optional, format: external:internal[,external2:internal2,...]
 #     Example: 80:3000,25565:25565
 #
 # Notes:
@@ -18,22 +18,19 @@ ORIG_USER="${SUDO_USER:-${USER}}"
 ORIG_HOME="$(eval echo ~${ORIG_USER})"
 REPO_URL="https://github.com/phillgates2/game-server-hosting-cms.git"
 INSTALL_DIR="/opt/gsm-panel"
+APP_PORT="3000"
+DB_PASS="GsmPanelDbPass2026!"
 
-echo "Installer running as: ${ORIG_USER}"
+ echo "Installer running as: ${ORIG_USER}"
 echo "Install directory: ${INSTALL_DIR}"
+echo "Using fixed app port: ${APP_PORT}"
+echo "Using fixed database password: ${DB_PASS}"
 
-# Prompt for DB password if not set in environment
-if [ -z "${DB_PASS:-}" ]; then
-  read -rsp "Enter a password to use for the PostgreSQL gsmadmin user: " DB_PASS
-  echo
-  if [ -z "$DB_PASS" ]; then
-    echo "Error: DB password cannot be empty." >&2
-    exit 1
-  fi
+# Prompt for port forwarding rules if not supplied via environment
+PF_RULES_RAW="${PF_RULES:-}"
+if [ -z "${PF_RULES_RAW:-}" ]; then
+  read -rp "Enter port forwarding rules (external:internal[,external2:internal2,...]) [leave blank to skip]: " PF_RULES_RAW
 fi
-
-# Prompt for port forwarding rules
-read -rp "Enter port forwarding rules (external:internal[,external2:internal2,...]) [leave blank to skip]: " PF_RULES_RAW
 PF_RULES_RAW="$(echo "$PF_RULES_RAW" | tr -d '[:space:]')"
 
 # Determine server IP (first non-loopback IPv4)
@@ -150,43 +147,27 @@ cat > .env <<EOF
 DATABASE_URL=postgresql://gsmadmin:${DB_PASS}@127.0.0.1:5432/gameserver_db
 JWT_SECRET=${JWT_SECRET}
 NODE_ENV=production
-PORT=3000
+PORT=${APP_PORT}
 EOF
 sudo chown "${ORIG_USER}:${ORIG_USER}" .env
 chmod 600 .env
-echo ".env created (PORT=3000)."
+echo ".env created (PORT=${APP_PORT})."
 
 # Step 7: Build
 echo "Step 7: Building the project..."
 sudo -u "${ORIG_USER}" npm run build
 
-# Step 8: Create systemd service
-echo "Step 8: Creating systemd service for gsm-panel..."
-SERVICE_FILE="/etc/systemd/system/gsm-panel.service"
-sudo bash -c "cat > ${SERVICE_FILE}" <<SERVICE
-[Unit]
-Description=GSM Panel Node Service
-After=network.target
-
-[Service]
-Type=simple
-User=${ORIG_USER}
-Group=${ORIG_USER}
-WorkingDirectory=${INSTALL_DIR}
-EnvironmentFile=${INSTALL_DIR}/.env
-ExecStart=/usr/bin/npm run start --prefix ${INSTALL_DIR}
-Restart=always
-RestartSec=5
-LimitNOFILE=65536
-
-[Install]
-WantedBy=multi-user.target
-SERVICE
-
-sudo systemctl daemon-reload
-sudo systemctl enable gsm-panel.service
-sudo systemctl start gsm-panel.service
-echo "gsm-panel.service created and started."
+# Step 8: Start the panel with PM2
+echo "Step 8: Starting the panel with PM2..."
+echo "+ sudo npm install -g pm2"
+sudo npm install -g pm2
+echo "+ sudo -u \"${ORIG_USER}\" bash -lc \"cd '${INSTALL_DIR}' && export PATH=\\$PATH:/usr/bin:/bin && (pm2 delete gsm-panel >/dev/null 2>&1 || true) && pm2 start npm --name 'gsm-panel' -- start\""
+sudo -u "${ORIG_USER}" bash -lc "cd '${INSTALL_DIR}' && export PATH=\$PATH:/usr/bin:/bin && (pm2 delete gsm-panel >/dev/null 2>&1 || true) && pm2 start npm --name 'gsm-panel' -- start"
+echo "+ sudo -u \"${ORIG_USER}\" bash -lc \"export PATH=\\$PATH:/usr/bin:/bin && pm2 save\""
+sudo -u "${ORIG_USER}" bash -lc "export PATH=\$PATH:/usr/bin:/bin && pm2 save"
+echo "+ sudo -u \"${ORIG_USER}\" bash -lc \"export PATH=\\$PATH:/usr/bin:/bin && pm2 startup systemd -u '${ORIG_USER}' --hp '${ORIG_HOME}' || true\""
+sudo -u "${ORIG_USER}" bash -lc "export PATH=\$PATH:/usr/bin:/bin && pm2 startup systemd -u '${ORIG_USER}' --hp '${ORIG_HOME}' || true"
+echo "PM2 process started and configured."
 
 # Step 9: Port forwarding (optional)
 if [ -n "$PF_RULES_RAW" ]; then
@@ -229,10 +210,15 @@ fi
 
 # Step 10: Install Caddy and write Caddyfile bound to server IP (HTTP)
 echo "Step 10: Installing Caddy and writing Caddyfile bound to ${SERVER_IP} (HTTP only)..."
+echo "+ sudo apt install -y debian-keyring debian-archive-keyring"
 sudo apt install -y debian-keyring debian-archive-keyring
+echo "+ curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg"
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+echo "+ curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list"
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+echo "+ sudo apt update"
 sudo apt update
+echo "+ sudo apt install -y caddy"
 sudo apt install -y caddy
 
 sudo mkdir -p /var/log/caddy
@@ -247,7 +233,7 @@ fi
 sudo bash -c "cat > ${CADDYFILE_PATH}" <<CADDY
 http://${SERVER_IP} {
   encode gzip zstd
-  reverse_proxy 127.0.0.1:3000
+  reverse_proxy 127.0.0.1:${APP_PORT}
   log {
     output file /var/log/caddy/gsm-panel.access.log
     format single_field common_log
@@ -308,8 +294,8 @@ echo "Installation finished."
 echo "Access the panel at http://${SERVER_IP} (port 80)."
 echo
 echo "Useful commands:"
-echo "  Check panel service: sudo systemctl status gsm-panel.service"
-echo "  View panel logs: sudo journalctl -u gsm-panel.service -f"
+echo "  Check PM2 status: pm2 status"
+echo "  View PM2 logs: pm2 logs gsm-panel"
 echo "  Check Caddy: sudo systemctl status caddy"
 echo "  View Caddy logs: sudo journalctl -u caddy -f"
 echo "  Check iptables NAT: sudo iptables -t nat -L -n -v"
