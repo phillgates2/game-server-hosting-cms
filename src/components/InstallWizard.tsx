@@ -12,6 +12,7 @@ export default function InstallWizard({ onComplete }: Props) {
     adminUsername: "admin",
     adminEmail: "admin@localhost",
     adminPassword: "",
+    databasePassword: "",
     panelName: "GameServer Manager",
   });
   const [installing, setInstalling] = useState(false);
@@ -160,6 +161,16 @@ export default function InstallWizard({ onComplete }: Props) {
                     placeholder="Enter a strong password"
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-text-secondary mb-1">Database Password</label>
+                  <input
+                    type="password"
+                    value={form.databasePassword}
+                    onChange={(e) => setForm({ ...form, databasePassword: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
+                    placeholder="Optional; leave blank to keep the current database password"
+                  />
+                </div>
               </div>
               <div className="flex gap-3">
                 <button
@@ -196,6 +207,7 @@ export default function InstallWizard({ onComplete }: Props) {
                   <div className="bg-bg-secondary rounded-lg p-4 text-sm text-text-secondary space-y-1">
                     <p><strong>Panel:</strong> {form.panelName}</p>
                     <p><strong>Admin:</strong> {form.adminUsername} ({form.adminEmail})</p>
+                    <p><strong>Database:</strong> {form.databasePassword ? "A new database password will be applied" : "Current database password will be kept"}</p>
                     <p><strong>Games:</strong> ET:Legacy, OpenRA, Palworld, Satisfactory, Terraria</p>
                   </div>
                   <div className="flex gap-3">

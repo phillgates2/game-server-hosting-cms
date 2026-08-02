@@ -4,20 +4,30 @@ import { Pool } from "pg";
 const globalForDb = globalThis as typeof globalThis & {
   __arenaNextJsPostgresqlPool?: Pool;
   __arenaNextJsDb?: ReturnType<typeof drizzle>;
+  __arenaNextJsDatabaseUrl?: string;
 };
 
 function getPool() {
-  if (globalForDb.__arenaNextJsPostgresqlPool) return globalForDb.__arenaNextJsPostgresqlPool;
-
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is required");
   }
 
-  const pool = new Pool({ connectionString: databaseUrl });
-  if (process.env.NODE_ENV !== "production") {
-    globalForDb.__arenaNextJsPostgresqlPool = pool;
+  if (
+    globalForDb.__arenaNextJsPostgresqlPool &&
+    globalForDb.__arenaNextJsDatabaseUrl === databaseUrl
+  ) {
+    return globalForDb.__arenaNextJsPostgresqlPool;
   }
+
+  if (globalForDb.__arenaNextJsPostgresqlPool) {
+    void globalForDb.__arenaNextJsPostgresqlPool.end().catch(() => undefined);
+  }
+
+  const pool = new Pool({ connectionString: databaseUrl });
+  globalForDb.__arenaNextJsPostgresqlPool = pool;
+  globalForDb.__arenaNextJsDatabaseUrl = databaseUrl;
+  globalForDb.__arenaNextJsDb = undefined;
 
   return pool;
 }

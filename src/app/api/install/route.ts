@@ -1,10 +1,51 @@
 import { NextRequest, NextResponse } from "next/server";
+import { promises as fs } from "fs";
+import path from "path";
+import { execFile } from "child_process";
 import { db, pool } from "@/db";
 import { installLog, settings, users, forumCategories, roles } from "@/db/schema";
 import { hashPassword } from "@/lib/auth";
 import { gameTemplates } from "@/db/seeds";
 import { DEFAULT_ROLES } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
+
+function buildDatabaseUrlWithPassword(databaseUrl: string, password: string) {
+  try {
+    const parsed = new URL(databaseUrl);
+    parsed.password = password;
+    return parsed.toString();
+  } catch {
+    return `postgresql://gsmadmin:${encodeURIComponent(password)}@127.0.0.1:5432/gameserver_db`;
+  }
+}
+
+async function writeDatabaseUrlToEnv(databaseUrl: string) {
+  const envPath = path.join(process.cwd(), ".env");
+  let contents = "";
+  try {
+    contents = await fs.readFile(envPath, "utf8");
+  } catch {
+    // .env may not exist yet; create it from scratch.
+  }
+
+  const lines = contents
+    .split(/\r?\n/)
+    .filter((line) => line.trim() && !line.startsWith("DATABASE_URL="));
+  lines.push(`DATABASE_URL=${databaseUrl}`);
+  await fs.writeFile(envPath, `${lines.join("\n")}\n`, "utf8");
+}
+
+async function restartPanelProcess() {
+  await new Promise<void>((resolve) => {
+    execFile("pm2", ["restart", "gsm-panel"], (error: Error | null) => {
+      if (error) {
+        resolve();
+        return;
+      }
+      resolve();
+    });
+  });
+}
 
 export async function GET() {
   try {
@@ -27,10 +68,20 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { adminUsername, adminEmail, adminPassword, panelName } = body;
+    const { adminUsername, adminEmail, adminPassword, panelName, databasePassword } = body;
 
     if (!adminUsername || !adminEmail || !adminPassword) {
       return NextResponse.json({ error: "Admin credentials required" }, { status: 400 });
+    }
+
+    if (databasePassword) {
+      const currentDatabaseUrl = process.env.DATABASE_URL || "";
+      await pool.query("ALTER ROLE gsmadmin WITH PASSWORD $1", [databasePassword]);
+      const nextDatabaseUrl = buildDatabaseUrlWithPassword(currentDatabaseUrl, databasePassword);
+      process.env.DATABASE_URL = nextDatabaseUrl;
+      await writeDatabaseUrlToEnv(nextDatabaseUrl);
+      await restartPanelProcess();
+      await logStep("database", "running", "Updated the database password for the panel and restarted the process...");
     }
 
     // Step 1: Create database schema with multi-node support

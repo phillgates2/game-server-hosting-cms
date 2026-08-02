@@ -7,7 +7,7 @@ export DEBIAN_FRONTEND=noninteractive
 #   curl -fsSL https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/install.sh | bash
 #
 # Notes:
-#   - The installer uses a fixed database password and fixed app port for a simple fresh-server setup.
+#   - The installer uses a configurable PostgreSQL password and a configurable app port for a simple fresh-server setup.
 #   - Port forwarding rules are optional, format: external:internal[,external2:internal2,...]
 #     Example: 80:3000,25565:25565
 #
@@ -20,7 +20,8 @@ ORIG_USER="${SUDO_USER:-${USER}}"
 ORIG_HOME="$(eval echo ~${ORIG_USER})"
 REPO_URL="https://github.com/phillgates2/game-server-hosting-cms.git"
 INSTALL_DIR="/opt/gsm-panel"
-DB_PASS="GsmPanelDbPass2026!"
+DEFAULT_DB_PASS="GsmPanelDbPass2026!"
+DB_PASS_INPUT="${DB_PASSWORD:-}"
 DRY_RUN="${INSTALLER_DRY_RUN:-${DRY_RUN:-0}}"
 
 validate_app_port() {
@@ -54,6 +55,16 @@ if [ -z "$APP_PORT_INPUT" ]; then
   APP_PORT_INPUT="3000"
 fi
 
+if [ -z "$DB_PASS_INPUT" ]; then
+  if [ -t 0 ]; then
+    read -rp "Enter the PostgreSQL password [$DEFAULT_DB_PASS]: " DB_PASS_INPUT
+  fi
+fi
+if [ -z "$DB_PASS_INPUT" ]; then
+  DB_PASS_INPUT="$DEFAULT_DB_PASS"
+fi
+DB_PASS="$DB_PASS_INPUT"
+
 echo "Panel internal port selection"
 echo "Avoid common reserved ports: 22 (SSH), 80/443 (web), 5432 (PostgreSQL), 3306, 27017, 25565."
 while ! validate_app_port "$APP_PORT_INPUT"; do
@@ -75,7 +86,7 @@ if [ "${DRY_RUN}" = "1" ]; then
   echo "Installer running as: ${ORIG_USER}"
   echo "Install directory: ${INSTALL_DIR}"
   echo "Using panel port: ${APP_PORT}"
-  echo "Using fixed database password: ${DB_PASS}"
+  echo "Using database password supplied for PostgreSQL and the panel."
   echo "Would install Node.js, PostgreSQL, SteamCMD, PM2, Caddy, and configure the panel."
   exit 0
 fi
@@ -83,7 +94,7 @@ fi
  echo "Installer running as: ${ORIG_USER}"
 echo "Install directory: ${INSTALL_DIR}"
 echo "Using panel port: ${APP_PORT}"
-echo "Using fixed database password: ${DB_PASS}"
+echo "Using database password supplied for PostgreSQL and the panel."
 
 # Prompt for port forwarding rules if not supplied via environment
 PF_RULES_RAW="${PF_RULES:-}"
@@ -214,17 +225,32 @@ PF_ENV_VALUE=""
 if [ -n "${PF_RULES_RAW}" ]; then
   PF_ENV_VALUE="${PF_RULES_RAW}"
 fi
-cat > .env <<EOF
-DATABASE_URL=postgresql://gsmadmin:${DB_PASS}@127.0.0.1:5432/gameserver_db
-JWT_SECRET=${JWT_SECRET}
-NODE_ENV=production
-PORT=${APP_PORT}
-PF_RULES=${PF_ENV_VALUE}
-EOF
+python3 - <<'PY' "$DB_PASS" "$JWT_SECRET" "$APP_PORT" "$PF_ENV_VALUE"
+import os
+import sys
+import urllib.parse
+from pathlib import Path
+
+db_pass = sys.argv[1]
+jwt_secret = sys.argv[2]
+app_port = sys.argv[3]
+pf_rules = sys.argv[4]
+
+encoded_password = urllib.parse.quote(db_pass, safe="")
+database_url = f"postgresql://gsmadmin:{encoded_password}@127.0.0.1:5432/gameserver_db"
+env_lines = [
+    f"DATABASE_URL={database_url}",
+    f"JWT_SECRET={jwt_secret}",
+    "NODE_ENV=production",
+    f"PORT={app_port}",
+    f"PF_RULES={pf_rules}",
+]
+Path(".env").write_text("\n".join(env_lines) + "\n", encoding="utf-8")
+PY
 sudo chown "${ORIG_USER}:${ORIG_USER}" .env
 chmod 600 .env
 echo ".env created (PORT=${APP_PORT}, PF_RULES=${PF_ENV_VALUE:-<none>})."
-  echo "Panel will listen on port ${APP_PORT} and use Caddy/PM2 accordingly."
+echo "Panel will listen on port ${APP_PORT} and use Caddy/PM2 accordingly."
 # Step 7: Build
 echo "Step 7: Building the project..."
 sudo -u "${ORIG_USER}" npm run build
