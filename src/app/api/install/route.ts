@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { promises as fs } from "fs";
-import path from "path";
-import { execFile } from "child_process";
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import { execFile } from "node:child_process";
 import { db, pool } from "@/db";
 import { installLog, settings, users, forumCategories, roles } from "@/db/schema";
 import { hashPassword } from "@/lib/auth";

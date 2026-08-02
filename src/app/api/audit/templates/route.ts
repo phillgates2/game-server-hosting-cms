@@ -5,8 +5,8 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { gameTemplates, EXPECTED_ARTIFACTS_BY_SLUG } from "@/db/seeds";
 import { eq, sql } from "drizzle-orm";
-import { access, constants, readdir, stat } from "fs/promises";
-import { join, dirname, basename } from "path";
+import { access, constants, readdir, stat } from "node:fs/promises";
+import { join, dirname, basename } from "node:path";
 
 interface AuditResult {
   slug: string;

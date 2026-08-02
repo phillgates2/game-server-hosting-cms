@@ -22,31 +22,30 @@ export interface GameTemplate {
   expectedArtifacts?: string[]; // explicit runtime files to verify after install
 }
 
-// Unified variable format compatible with both Pterodactyl eggs and AMP templates
+// Unified variable format used by the built-in server templates
 export interface TemplateVariable {
   // Core (required)
-  name: string;                    // Pterodactyl: name, AMP: DisplayName
-  description: string;             // Pterodactyl: description, AMP: Description
-  env_variable: string;            // Pterodactyl: env_variable, AMP: FieldName
-  default_value: string;           // Pterodactyl: default_value, AMP: DefaultValue
+  name: string;
+  description: string;
+  env_variable: string;
+  default_value: string;
   // Access control
-  user_viewable: boolean;          // Pterodactyl: user_viewable, AMP: !Hidden
-  user_editable: boolean;          // Pterodactyl: user_editable
+  user_viewable: boolean;
+  user_editable: boolean;
   // Validation
-  rules: string;                   // Pterodactyl: rules (Laravel-style: "required|integer|between:1,65535")
+  rules: string;
   field_type: "text" | "number" | "password" | "select" | "checkbox" | "hidden";
-  // AMP-specific extensions
-  category?: string;               // AMP: Category (e.g., "Server Settings")
-  subcategory?: string;            // AMP: Subcategory
-  keywords?: string;               // AMP: Keywords (comma-separated for search)
-  enum_values?: Record<string, string>; // AMP: EnumValues (value → label for select dropdowns)
-  min_value?: number;              // AMP: MinValue
-  max_value?: number;              // AMP: MaxValue
-  // Config file binding (AMP-style)
-  param_field_name?: string;       // AMP: ParamFieldName (key in config file)
+  // Optional metadata used by the UI
+  category?: string;
+  subcategory?: string;
+  keywords?: string;
+  enum_values?: Record<string, string>;
+  min_value?: number;
+  max_value?: number;
+  param_field_name?: string;
 }
 
-// Helper to define variables — supports both Pterodactyl and AMP styles
+// Helper to define variables for the built-in template library
 function V(
   name: string,
   env_variable: string,

@@ -3,8 +3,8 @@ import { db } from "@/db";
 import { gameServers } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { eq } from "drizzle-orm";
-import { readFile, stat } from "fs/promises";
-import { join } from "path";
+import { readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

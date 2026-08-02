@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { exec } from "child_process";
-import { promisify } from "util";
-import { readFile, writeFile } from "fs/promises";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
+import { readFile, writeFile } from "node:fs/promises";
 
 const execAsync = promisify(exec);
 

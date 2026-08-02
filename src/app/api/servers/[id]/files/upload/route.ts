@@ -4,8 +4,8 @@ import { gameServers } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
-import { writeFile, mkdir } from "fs/promises";
-import { join, resolve, dirname } from "path";
+import { writeFile, mkdir } from "node:fs/promises";
+import { join, resolve, dirname } from "node:path";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

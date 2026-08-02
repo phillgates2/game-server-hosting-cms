@@ -3,9 +3,9 @@ import { db } from "@/db";
 import { gameServers, gameDefinitions, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { eq } from "drizzle-orm";
-import { homedir } from "os";
-import { basename, join } from "path";
-import { mkdir } from "fs/promises";
+import { homedir } from "node:os";
+import { basename, join } from "node:path";
+import { mkdir } from "node:fs/promises";
 import { buildUniqueServerPath } from "@/lib/server-path";
 
 export async function GET(req: NextRequest) {

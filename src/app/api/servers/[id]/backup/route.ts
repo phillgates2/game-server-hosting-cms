@@ -3,9 +3,9 @@ import { db } from "@/db";
 import { gameServers } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { eq } from "drizzle-orm";
-import { mkdir, readdir, stat } from "fs/promises";
-import { join } from "path";
-import { spawn, type ChildProcess } from "child_process";
+import { mkdir, readdir, stat } from "node:fs/promises";
+import { join } from "node:path";
+import { spawn, type ChildProcess } from "node:child_process";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

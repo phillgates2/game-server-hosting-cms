@@ -3,10 +3,10 @@ import { db } from "@/db";
 import { gameDefinitions, gameServers, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { eq } from "drizzle-orm";
-import { mkdtemp, writeFile, chmod, rm, mkdir, access, constants, stat, readdir } from "fs/promises";
-import { tmpdir, homedir } from "os";
-import { basename, dirname, join } from "path";
-import { execFile, spawn, type ChildProcess } from "child_process";
+import { mkdtemp, writeFile, chmod, rm, mkdir, access, constants, stat, readdir } from "node:fs/promises";
+import { tmpdir, homedir } from "node:os";
+import { basename, dirname, join } from "node:path";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { getTemplateBySlug, getExpectedArtifactsBySlug } from "@/db/seeds";
 
 export const runtime = "nodejs";

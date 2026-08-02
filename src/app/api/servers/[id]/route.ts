@@ -4,8 +4,8 @@ import { gameServers, gameDefinitions, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { sendDiscordWebhook } from "@/lib/discord";
 import { eq } from "drizzle-orm";
-import { rm } from "fs/promises";
-import { resolve, relative } from "path";
+import { rm } from "node:fs/promises";
+import { resolve, relative } from "node:path";
 
 function isProcessAlive(pid: number): boolean {
   try {
