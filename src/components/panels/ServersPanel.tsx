@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useToast } from "@/components/ToastProvider";
 import { useConfirm, useConfirmChoice } from "@/components/ConfirmDialog";
-import { sortServersForPanel, summarizeServerStatus } from "./serverPanelUtils";
+import { groupServersByNode, sortServersForPanel, summarizeServerStatus } from "./serverPanelUtils";
 
 interface AuthUser { id: number; username: string; role: string }
 interface GameDef { id: number; name: string; slug: string; defaultPort: number; iconEmoji: string | null }
@@ -365,9 +365,11 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
       return matchesQuery && matchesStatus;
     })
   );
+  const groupedServers = groupServersByNode(filteredServers);
   const serverSummary = summarizeServerStatus(servers);
   const visibleVars = gameVars.filter((v) => !["SERVER_NAME","PORT","INSTALL_PATH","QUERY_PORT"].includes(v.env_variable));
   const inputCls = "w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/50 transition-colors";
+  const hasActiveFilters = Boolean(searchQuery.trim()) || statusFilter !== "all";
   const installPathPreview = selectedNode && selectedGame && form.name
     ? `${selectedNode.gameServerPath || "/home/gameservers"}/${slugify(selectedGame.slug)}/${slugify(form.name)}`
     : (selectedNode?.gameServerPath || form.installPath || "");
@@ -383,6 +385,23 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
       return (<div className="flex items-start gap-3 py-1"><input type="checkbox" checked={["true","1","True"].includes(val)} onChange={(e) => set(e.target.checked ? "true" : "false")} className="rounded mt-0.5 w-4 h-4 accent-accent" /><div><p className="text-sm font-medium">{v.name}</p>{v.description && <p className="text-[10px] text-text-muted">{v.description}</p>}</div></div>);
     }
     return (<div><label className="block text-xs font-medium text-text-secondary mb-1.5">{v.name} {req && <span className="text-warning">*</span>}</label><input type={v.field_type === "password" ? "password" : v.field_type === "number" ? "number" : "text"} value={val} onChange={(e) => set(e.target.value)} className={inputCls} placeholder={v.default_value || v.description || v.name} required={req} />{v.description && <p className="text-[10px] text-text-muted mt-1">{v.description}</p>}</div>);
+  }
+
+  function clearFilters() {
+    setSearchQuery("");
+    setStatusFilter("all");
+  }
+
+  function setStatusQuickFilter(status: typeof statusFilter) {
+    setStatusFilter((current) => current === status ? "all" : status);
+  }
+
+  function formatLastSeen(server: Server) {
+    if (server.status === "running") {
+      const uptime = formatUptime(server.lastStarted);
+      return uptime ? `Up ${uptime}` : "Running";
+    }
+    return "Stopped";
   }
 
   return (
@@ -524,10 +543,21 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
         <div className="space-y-4">
           <div className="flex flex-col gap-3 rounded-xl border border-border bg-bg-card p-4 md:flex-row md:items-center md:justify-between">
             <div className="flex flex-wrap gap-2 text-sm">
-              <span className="rounded-full bg-success/10 px-3 py-1 text-success">Running: {serverSummary.running}</span>
-              <span className="rounded-full bg-accent/10 px-3 py-1 text-accent">Installing: {serverSummary.installing}</span>
-              <span className="rounded-full bg-danger/10 px-3 py-1 text-danger">Failed: {serverSummary.install_failed}</span>
-              <span className="rounded-full bg-bg-secondary px-3 py-1 text-text-secondary">Stopped: {serverSummary.stopped}</span>
+              <button onClick={clearFilters} className={`rounded-full px-3 py-1 transition-colors ${statusFilter === "all" ? "bg-accent text-white" : "bg-bg-secondary text-text-secondary hover:bg-bg-hover"}`}>
+                All: {servers.length}
+              </button>
+              <button onClick={() => setStatusQuickFilter("running")} className={`rounded-full px-3 py-1 transition-colors ${statusFilter === "running" ? "bg-success text-white" : "bg-success/10 text-success hover:bg-success/20"}`}>
+                Running: {serverSummary.running}
+              </button>
+              <button onClick={() => setStatusQuickFilter("installing")} className={`rounded-full px-3 py-1 transition-colors ${statusFilter === "installing" ? "bg-accent text-white" : "bg-accent/10 text-accent hover:bg-accent/20"}`}>
+                Installing: {serverSummary.installing}
+              </button>
+              <button onClick={() => setStatusQuickFilter("install_failed")} className={`rounded-full px-3 py-1 transition-colors ${statusFilter === "install_failed" ? "bg-danger text-white" : "bg-danger/10 text-danger hover:bg-danger/20"}`}>
+                Failed: {serverSummary.install_failed}
+              </button>
+              <button onClick={() => setStatusQuickFilter("stopped")} className={`rounded-full px-3 py-1 transition-colors ${statusFilter === "stopped" ? "bg-text-primary text-bg-card" : "bg-bg-secondary text-text-secondary hover:bg-bg-hover"}`}>
+                Stopped: {serverSummary.stopped}
+              </button>
             </div>
             <div className="flex-1">
               <label className="text-xs font-medium uppercase tracking-wider text-text-muted">Search servers</label>
@@ -543,64 +573,95 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                 <option value="install_failed">Install failed</option>
               </select>
             </div>
-            <div className="text-sm text-text-secondary">
-              <p className="font-medium">{filteredServers.length} shown</p>
-              <p className="text-xs text-text-muted">out of {servers.length} total</p>
+            <div className="flex items-end gap-3 text-sm text-text-secondary">
+              <div>
+                <p className="font-medium">{filteredServers.length} shown</p>
+                <p className="text-xs text-text-muted">out of {servers.length} total</p>
+              </div>
+              {hasActiveFilters && (
+                <button onClick={clearFilters} className="rounded-lg border border-border bg-bg-secondary px-3 py-2 text-xs font-medium text-text-secondary hover:border-accent/30 hover:text-accent transition-colors">
+                  Clear filters
+                </button>
+              )}
             </div>
           </div>
           {filteredServers.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-bg-card p-8 text-center text-sm text-text-muted">
-              No servers match the current search or status filter.
+              <p>No servers match the current search or status filter.</p>
+              {hasActiveFilters && (
+                <button onClick={clearFilters} className="mt-3 rounded-lg bg-accent px-4 py-2 text-xs font-medium text-white hover:bg-accent-hover transition-colors">
+                  Show all servers
+                </button>
+              )}
             </div>
-          ) : filteredServers.map((server) => {
-            const st = STATUS_MAP[server.status] || STATUS_MAP.stopped;
-            const isInstalling = installingId === server.id || server.status === "installing";
-            const uptime = server.status === "running" ? formatUptime(server.lastStarted) : "";
-            const isSelected = selected.has(server.id);
-            return (
-              <div key={server.id} className={`bg-bg-card border rounded-xl overflow-hidden transition-all hover:shadow-md ${isSelected ? "border-accent/40 ring-1 ring-accent/20" : server.status === "running" ? "border-success/20" : "border-border"}`}>
-                <div className="p-5">
-                  <div className="flex items-start gap-4">
-                    {/* Checkbox */}
-                    <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(server.id)} className="rounded w-4 h-4 accent-accent mt-2 flex-shrink-0" />
-                    {/* Icon with status dot */}
-                    <div className="relative flex-shrink-0">
-                      <span className="text-4xl block">{server.gameIcon || "🎮"}</span>
-                      <span className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-bg-card ${st.dot}`} title={st.label} />
-                    </div>
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-bold text-lg leading-tight truncate">{server.name}</h3>
-                      <p className="text-text-secondary text-sm">{server.gameName}</p>
-                      <div className="flex items-center gap-3 mt-2 flex-wrap">
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${st.bg}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`} />{st.label}
-                        </span>
-                        {uptime && <span className="text-xs text-success font-mono">⏱ {uptime}</span>}
-                        {server.pid && server.status === "running" && <span className="text-xs text-text-muted font-mono">PID {server.pid}</span>}
-                        {server.nodeName && <span className="text-xs text-text-muted">🖥️ {server.nodeName}</span>}
-                        {server.ipv4 && server.ipv4 !== "0.0.0.0" && <span className="text-xs text-text-muted font-mono">{server.ipv4}:{server.port}</span>}
-                        {server.ipv4 === "0.0.0.0" && <span className="text-xs text-text-muted font-mono">Port {server.port}</span>}
-                        {server.discordWebhook && <span className="text-xs text-[#5865F2]">🔔</span>}
-                      </div>
-                    </div>
-                  </div>
+          ) : groupedServers.map((group) => (
+            <div key={`${group.nodeId ?? "none"}-${group.nodeName}`} className="space-y-3">
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-bg-secondary px-4 py-3">
+                <div>
+                  <p className="text-sm font-semibold">{group.nodeName}</p>
+                  <p className="text-xs text-text-muted">{group.servers.length} server{group.servers.length !== 1 ? "s" : ""}</p>
                 </div>
-                {/* Action bar */}
-                <div className="px-5 py-3 bg-bg-secondary/50 border-t border-border flex items-center gap-2 flex-wrap">
-                  {server.status === "running" ? (<><Btn onClick={() => controlProcess(server.id, "stop")} color="danger" icon="⏹" label="Stop" /><Btn onClick={() => controlProcess(server.id, "restart")} color="warning" icon="🔄" label="Restart" /></>) : (<Btn onClick={() => controlProcess(server.id, "start")} color="success" icon="▶" label="Start" />)}
-                  <div className="w-px h-5 bg-border mx-1" />
-                  <Btn onClick={() => installServerFiles(server.id)} color="accent" icon="📥" label={isInstalling ? "Installing..." : "Install"} disabled={isInstalling} />
-                  <Btn onClick={() => updateServer(server.id)} color="accent" icon="🔄" label="Update" />
-                  <Btn onClick={() => backupServer(server.id)} color="muted" icon="💾" label="Backup" />
-                  <Btn onClick={() => openConsole(server.id)} color="muted" icon="📋" label="Console" />
-                  <Btn onClick={() => cloneServer(server.id)} color="muted" icon="📑" label="Clone" />
-                  <div className="ml-auto" />
-                  {user.role === "admin" && <Btn onClick={() => deleteServer(server.id)} color="danger" icon="🗑️" label="" small />}
+                <div className="text-xs text-text-muted">
+                  {group.nodeName === "Unassigned" ? "No node assigned" : "Grouped by hosting node"}
                 </div>
               </div>
-            );
-          })}
+              <div className="space-y-4">
+                {group.servers.map((server) => {
+                  const st = STATUS_MAP[server.status] || STATUS_MAP.stopped;
+                  const isInstalling = installingId === server.id || server.status === "installing";
+                  const uptime = server.status === "running" ? formatUptime(server.lastStarted) : "";
+                  const isSelected = selected.has(server.id);
+                  return (
+                    <div key={server.id} className={`bg-bg-card border rounded-xl overflow-hidden transition-all hover:shadow-md ${isSelected ? "border-accent/40 ring-1 ring-accent/20" : server.status === "running" ? "border-success/20" : "border-border"}`}>
+                      <div className="p-5">
+                        <div className="flex items-start gap-4">
+                          {/* Checkbox */}
+                          <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(server.id)} className="rounded w-4 h-4 accent-accent mt-2 flex-shrink-0" />
+                          {/* Icon with status dot */}
+                          <div className="relative flex-shrink-0">
+                            <span className="text-4xl block">{server.gameIcon || "🎮"}</span>
+                            <span className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-bg-card ${st.dot}`} title={st.label} />
+                          </div>
+                          {/* Info */}
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-bold text-lg leading-tight truncate">{server.name}</h3>
+                            <p className="text-text-secondary text-sm">{server.gameName}</p>
+                            <div className="flex items-center gap-3 mt-2 flex-wrap">
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${st.bg}`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`} />{st.label}
+                              </span>
+                              {server.discordWebhook && <span className="text-xs text-[#5865F2]">🔔 Discord</span>}
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2 rounded-lg border border-border bg-bg-secondary/70 p-3 text-[11px] text-text-secondary">
+                              <span className="rounded-full bg-bg-card px-2.5 py-1 font-medium text-text-primary">{formatLastSeen(server)}</span>
+                              <span className="rounded-full bg-bg-card px-2.5 py-1">{server.pid && server.status === "running" ? `PID ${server.pid}` : "No PID"}</span>
+                              <span className={`rounded-full px-2.5 py-1 font-medium ${server.autoRestart ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}>
+                                Auto-restart {server.autoRestart ? "on" : "off"}
+                              </span>
+                              <span className="rounded-full bg-bg-card px-2.5 py-1">Port {server.ipv4 && server.ipv4 !== "0.0.0.0" ? `${server.ipv4}:${server.port}` : server.port}</span>
+                              <span className="rounded-full bg-bg-card px-2.5 py-1">{server.lastStarted ? `Started ${new Date(server.lastStarted).toLocaleDateString()}` : "Never started"}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      {/* Action bar */}
+                      <div className="px-5 py-3 bg-bg-secondary/50 border-t border-border flex items-center gap-2 flex-wrap">
+                        {server.status === "running" ? (<><Btn onClick={() => controlProcess(server.id, "stop")} color="danger" icon="⏹" label="Stop" /><Btn onClick={() => controlProcess(server.id, "restart")} color="warning" icon="🔄" label="Restart" /></>) : (<Btn onClick={() => controlProcess(server.id, "start")} color="success" icon="▶" label="Start" />)}
+                        <div className="w-px h-5 bg-border mx-1" />
+                        <Btn onClick={() => installServerFiles(server.id)} color="accent" icon="📥" label={isInstalling ? "Installing..." : "Install"} disabled={isInstalling} />
+                        <Btn onClick={() => updateServer(server.id)} color="accent" icon="🔄" label="Update" />
+                        <Btn onClick={() => backupServer(server.id)} color="muted" icon="💾" label="Backup" />
+                        <Btn onClick={() => openConsole(server.id)} color="muted" icon="📋" label="Console" />
+                        <Btn onClick={() => cloneServer(server.id)} color="muted" icon="📑" label="Clone" />
+                        <div className="ml-auto" />
+                        {user.role === "admin" && <Btn onClick={() => deleteServer(server.id)} color="danger" icon="🗑️" label="" small />}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

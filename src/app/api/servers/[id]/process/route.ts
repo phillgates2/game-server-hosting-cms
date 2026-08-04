@@ -164,44 +164,20 @@ export async function POST(
         await new Promise((r) => setTimeout(r, 500));
       }
 
-      const { access, constants, readFile } = await import("node:fs/promises");
-      const { createWriteStream } = await import("node:fs");
-      const { join } = await import("node:path");
-      const startScript = join(server.installPath, "gsm-start.sh");
-
-      try {
-        await access(startScript, constants.X_OK);
-      } catch {
-        return NextResponse.json({
-          error: `Start script not found at ${startScript}. Run "Install Files" first to generate it.`,
-        }, { status: 400 });
-      }
+      const installPath = String(server.installPath);
+      const startScript = `${installPath}/gsm-start.sh`;
 
       const bashPath = await findBash();
 
-      // Read the start script to log what we're running
-      let scriptContent = "";
-      try { scriptContent = await readFile(startScript, "utf8"); } catch { /* ignore */ }
-
-      // Spawn the game server as a detached background process
-      const logPath = join(server.installPath, "gsm-server.log");
-
       const child = spawn(bashPath, [startScript], {
-        cwd: server.installPath,
         detached: true,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["ignore", "ignore", "ignore"],
         env: {
           ...(process.env as NodeJS.ProcessEnv),
           HOME: process.env.HOME || "/root",
           PATH: process.env.PATH || "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         },
       });
-
-      // Write stdout/stderr to log file
-      const logStream = createWriteStream(logPath, { flags: "a" });
-      logStream.write(`\n=== GSM Server Start — ${new Date().toISOString()} ===\n`);
-      child.stdout?.pipe(logStream);
-      child.stderr?.pipe(logStream);
 
       child.unref(); // Let the panel process exit without killing the game server
 
@@ -233,8 +209,6 @@ export async function POST(
         status: alive ? "running" : "crashed",
         pid,
         alive,
-        script: scriptContent.slice(0, 500),
-        logPath,
       });
     }
 

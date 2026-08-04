@@ -227,7 +227,7 @@ async function materializeServerFiles(options: {
   // Start script
   if (options.startCommand) {
     const startPath = join(options.installPath, "gsm-start.sh");
-    const startBody = `#!/usr/bin/env bash\nset -e\ncd ${JSON.stringify(options.installPath)}\n${replaceTemplateVariables(options.startCommand, options.variables)}\n`;
+    const startBody = `#!/usr/bin/env bash\nset -e\ncd ${JSON.stringify(options.installPath)}\nexec >> ${JSON.stringify(join(options.installPath, "gsm-server.log"))} 2>&1\necho "\\n=== GSM Server Start — $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="\n${replaceTemplateVariables(options.startCommand, options.variables)}\n`;
     await writeFile(startPath, startBody, "utf8");
     await chmod(startPath, 0o755);
     generated.push("gsm-start.sh");

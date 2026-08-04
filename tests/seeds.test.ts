@@ -5,13 +5,12 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const seedModulePath = resolve(process.cwd(), "src/db/seeds.ts");
-const seedModuleUrl = pathToFileURL(seedModulePath).href;
-const seedModule = await import(seedModuleUrl);
-const { gameTemplates } = seedModule;
-
 const seedSource = readFileSync(seedModulePath, "utf8");
 
-test("every built-in template has a usable install path and start command", () => {
+test("every built-in template has a usable install path and start command", async () => {
+  const seedModuleUrl = pathToFileURL(seedModulePath).href;
+  const { gameTemplates } = await import(seedModuleUrl);
+
   assert.ok(gameTemplates.length > 0, "expected at least one built-in template");
 
   for (const template of gameTemplates) {
