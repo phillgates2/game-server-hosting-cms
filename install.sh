@@ -8,7 +8,7 @@ export DEBIAN_FRONTEND=noninteractive
 #
 # Notes:
 #   - The installer uses a configurable PostgreSQL password and a configurable app port for a simple fresh-server setup.
-#   - Port forwarding rules are optional, format: external:internal[,external2:internal2,...]
+#   - Port forwarding rules are required, format: external:internal[,external2:internal2,...]
 #     Example: 80:3000,25565:25565
 #
 # Notes:
@@ -96,20 +96,23 @@ echo "Install directory: ${INSTALL_DIR}"
 echo "Using panel port: ${APP_PORT}"
 echo "Using database password supplied for PostgreSQL and the panel."
 
-# Prompt for port forwarding rules if not supplied via environment
 PF_RULES_RAW="${PF_RULES:-}"
 if [ -z "${PF_RULES_RAW:-}" ]; then
   if [ -t 0 ]; then
-    read -rp "Enter port forwarding rules (external:internal[,external2:internal2,...]) [leave blank to skip]: " PF_RULES_RAW
+    read -rp "Enter port forwarding rules (external:internal[,external2:internal2,...]): " PF_RULES_RAW
   else
-    echo "Non-interactive shell detected; skipping port-forward prompt."
+    echo "Port forwarding rules are required. Set PF_RULES or run interactively." >&2
+    exit 1
   fi
 fi
 PF_RULES_RAW="$(echo "$PF_RULES_RAW" | tr -d '[:space:]')"
 
-if [ -n "$PF_RULES_RAW" ]; then
-  echo "Port forwarding rules to apply: ${PF_RULES_RAW}"
+if [ -z "$PF_RULES_RAW" ]; then
+  echo "Port forwarding rules are required. Provide at least one external:internal mapping." >&2
+  exit 1
 fi
+
+echo "Port forwarding rules to apply: ${PF_RULES_RAW}"
 
 # Determine server IP (first non-loopback IPv4)
 SERVER_IP=""
@@ -267,44 +270,40 @@ echo "+ sudo -u \"${ORIG_USER}\" bash -lc \"export PATH=\\$PATH:/usr/bin:/bin &&
 sudo -u "${ORIG_USER}" bash -lc "export PATH=\$PATH:/usr/bin:/bin && pm2 startup systemd -u '${ORIG_USER}' --hp '${ORIG_HOME}' || true"
 echo "PM2 process started and configured."
 
-# Step 9: Port forwarding (optional)
-if [ -n "$PF_RULES_RAW" ]; then
-  echo "Step 9: Configuring port forwarding..."
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent netfilter-persistent
+# Step 9: Port forwarding
+echo "Step 9: Configuring port forwarding..."
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent netfilter-persistent
 
-  # Enable IPv4 forwarding
-  sudo sysctl -w net.ipv4.ip_forward=1
-  if ! grep -q '^net.ipv4.ip_forward=1' /etc/sysctl.conf 2>/dev/null; then
-    echo 'net.ipv4.ip_forward=1' | sudo tee -a /etc/sysctl.conf >/dev/null
+# Enable IPv4 forwarding
+sudo sysctl -w net.ipv4.ip_forward=1
+if ! grep -q '^net.ipv4.ip_forward=1' /etc/sysctl.conf 2>/dev/null; then
+  echo 'net.ipv4.ip_forward=1' | sudo tee -a /etc/sysctl.conf >/dev/null
+fi
+
+IFS=',' read -ra RULES <<< "$PF_RULES_RAW"
+for r in "${RULES[@]}"; do
+  if [[ "$r" =~ ^([0-9]{1,5}):([0-9]{1,5})(:([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+))?$ ]]; then
+    EXT_PORT="${BASH_REMATCH[1]}"
+    INT_PORT="${BASH_REMATCH[2]}"
+    TARGET_IP="${BASH_REMATCH[4]:-127.0.0.1}"
+  else
+    echo "Invalid port forwarding rule: $r" >&2
+    exit 1
   fi
 
-  IFS=',' read -ra RULES <<< "$PF_RULES_RAW"
-  for r in "${RULES[@]}"; do
-    if [[ "$r" =~ ^([0-9]{1,5}):([0-9]{1,5})(:([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+))?$ ]]; then
-      EXT_PORT="${BASH_REMATCH[1]}"
-      INT_PORT="${BASH_REMATCH[2]}"
-      TARGET_IP="${BASH_REMATCH[4]:-127.0.0.1}"
-    else
-      echo "Skipping invalid rule: $r" >&2
-      continue
-    fi
+  echo "Adding forwarding: ${EXT_PORT} -> ${TARGET_IP}:${INT_PORT} (tcp/udp)"
+  sudo iptables -t nat -A PREROUTING -p tcp --dport "${EXT_PORT}" -j DNAT --to-destination "${TARGET_IP}:${INT_PORT}"
+  sudo iptables -t nat -A POSTROUTING -p tcp -d "${TARGET_IP}" --dport "${INT_PORT}" -j MASQUERADE || true
+  sudo iptables -t nat -A PREROUTING -p udp --dport "${EXT_PORT}" -j DNAT --to-destination "${TARGET_IP}:${INT_PORT}"
+  sudo iptables -t nat -A POSTROUTING -p udp -d "${TARGET_IP}" --dport "${INT_PORT}" -j MASQUERADE || true
 
-    echo "Adding forwarding: ${EXT_PORT} -> ${TARGET_IP}:${INT_PORT} (tcp/udp)"
-    sudo iptables -t nat -A PREROUTING -p tcp --dport "${EXT_PORT}" -j DNAT --to-destination "${TARGET_IP}:${INT_PORT}"
-    sudo iptables -t nat -A POSTROUTING -p tcp -d "${TARGET_IP}" --dport "${INT_PORT}" -j MASQUERADE || true
-    sudo iptables -t nat -A PREROUTING -p udp --dport "${EXT_PORT}" -j DNAT --to-destination "${TARGET_IP}:${INT_PORT}"
-    sudo iptables -t nat -A POSTROUTING -p udp -d "${TARGET_IP}" --dport "${INT_PORT}" -j MASQUERADE || true
+  sudo iptables -A FORWARD -p tcp -d "${TARGET_IP}" --dport "${INT_PORT}" -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT || true
+  sudo iptables -A FORWARD -p udp -d "${TARGET_IP}" --dport "${INT_PORT}" -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT || true
+done
 
-    sudo iptables -A FORWARD -p tcp -d "${TARGET_IP}" --dport "${INT_PORT}" -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT || true
-    sudo iptables -A FORWARD -p udp -d "${TARGET_IP}" --dport "${INT_PORT}" -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT || true
-  done
-
-  echo "Saving iptables rules..."
-  sudo netfilter-persistent save || true
-  echo "Port forwarding rules applied."
-else
-  echo "No port forwarding rules provided; skipping."
-fi
+echo "Saving iptables rules..."
+sudo netfilter-persistent save || true
+echo "Port forwarding rules applied."
 
 # Step 10: Install Caddy and write Caddyfile bound to server IP (HTTP)
 echo "Step 10: Installing Caddy and writing Caddyfile bound to ${SERVER_IP} (HTTP only)..."
