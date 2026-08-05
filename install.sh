@@ -24,6 +24,18 @@ DEFAULT_DB_PASS="GsmPanelDbPass2026!"
 DB_PASS_INPUT="${DB_PASSWORD:-}"
 DRY_RUN="${INSTALLER_DRY_RUN:-${DRY_RUN:-0}}"
 
+# Allow script to run on minimal images where sudo is not installed.
+if ! command -v sudo >/dev/null 2>&1; then
+  if [ "$(id -u)" -eq 0 ]; then
+    sudo() {
+      "$@"
+    }
+  else
+    echo "This installer requires sudo (or root). Install sudo or run as root." >&2
+    exit 1
+  fi
+fi
+
 validate_app_port() {
   local port="$1"
   if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
@@ -46,6 +58,51 @@ validate_app_port() {
       return 1
     fi
   fi
+
+  return 0
+}
+
+validate_port_forwarding_rules() {
+  local rules_raw="$1"
+  local IFS=','
+  local rules_arr=()
+  local rule ext_port int_port target_ip
+  local part
+
+  read -ra rules_arr <<< "$rules_raw"
+  if [ "${#rules_arr[@]}" -eq 0 ]; then
+    echo "Port forwarding rules are required. Provide at least one external:internal mapping." >&2
+    return 1
+  fi
+
+  for rule in "${rules_arr[@]}"; do
+    if ! [[ "$rule" =~ ^([0-9]{1,5}):([0-9]{1,5})(:([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+))?$ ]]; then
+      echo "Invalid port forwarding rule: $rule" >&2
+      echo "Expected format: external:internal or external:internal:target_ip" >&2
+      return 1
+    fi
+
+    ext_port="${BASH_REMATCH[1]}"
+    int_port="${BASH_REMATCH[2]}"
+    target_ip="${BASH_REMATCH[4]:-127.0.0.1}"
+
+    if (( ext_port < 1 || ext_port > 65535 || int_port < 1 || int_port > 65535 )); then
+      echo "Invalid port range in rule '$rule'. Ports must be between 1 and 65535." >&2
+      return 1
+    fi
+
+    IFS='.' read -ra octets <<< "$target_ip"
+    if [ "${#octets[@]}" -ne 4 ]; then
+      echo "Invalid target IP in rule '$rule': $target_ip" >&2
+      return 1
+    fi
+    for part in "${octets[@]}"; do
+      if ! [[ "$part" =~ ^[0-9]+$ ]] || (( part < 0 || part > 255 )); then
+        echo "Invalid target IP in rule '$rule': $target_ip" >&2
+        return 1
+      fi
+    done
+  done
 
   return 0
 }
@@ -112,6 +169,10 @@ if [ -z "$PF_RULES_RAW" ]; then
   exit 1
 fi
 
+if ! validate_port_forwarding_rules "$PF_RULES_RAW"; then
+  exit 1
+fi
+
 echo "Port forwarding rules to apply: ${PF_RULES_RAW}"
 
 # Determine server IP (first non-loopback IPv4)
@@ -133,7 +194,7 @@ echo "Detected server IP: ${SERVER_IP}"
 echo "Step 1: Updating system and installing base packages..."
 sudo apt update
 sudo apt upgrade -y
-sudo apt install -y curl git build-essential unzip wget gnupg ca-certificates openssl apt-transport-https
+sudo apt install -y curl git build-essential unzip wget gnupg ca-certificates openssl apt-transport-https python3
 
 # Step 2: Node.js 22 LTS
 echo "Step 2: Installing Node.js 22 LTS..."
@@ -160,8 +221,9 @@ END
 \$do\$;
 PSQL
 
+DB_PASS_SQL_ESCAPED="$(printf '%s' "$DB_PASS" | sed "s/'/''/g")"
 sudo -u postgres psql -v ON_ERROR_STOP=1 <<SQL
-ALTER ROLE gsmadmin WITH PASSWORD '${DB_PASS}';
+ALTER ROLE gsmadmin WITH PASSWORD '${DB_PASS_SQL_ESCAPED}';
 SQL
 
 if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='gameserver_db'" | grep -q 1; then
@@ -333,7 +395,6 @@ http://${SERVER_IP} {
   reverse_proxy 127.0.0.1:${APP_PORT}
   log {
     output file /var/log/caddy/gsm-panel.access.log
-    format single_field common_log
   }
 }
 CADDY
