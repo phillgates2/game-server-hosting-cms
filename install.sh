@@ -24,6 +24,11 @@ DEFAULT_DB_PASS="GsmPanelDbPass2026!"
 DB_PASS_INPUT="${DB_PASSWORD:-}"
 DRY_RUN="${INSTALLER_DRY_RUN:-${DRY_RUN:-0}}"
 
+TTY_DEVICE=""
+if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+  TTY_DEVICE="/dev/tty"
+fi
+
 # Allow script to run on minimal images where sudo is not installed.
 if ! command -v sudo >/dev/null 2>&1; then
   if [ "$(id -u)" -eq 0 ]; then
@@ -107,14 +112,34 @@ validate_port_forwarding_rules() {
   return 0
 }
 
+prompt_read() {
+  local prompt_text="$1"
+  local out_var_name="$2"
+  local value=""
+
+  if [ -n "$TTY_DEVICE" ]; then
+    read -r -p "$prompt_text" value < "$TTY_DEVICE"
+    printf -v "$out_var_name" '%s' "$value"
+    return 0
+  fi
+
+  if [ -t 0 ]; then
+    read -r -p "$prompt_text" value
+    printf -v "$out_var_name" '%s' "$value"
+    return 0
+  fi
+
+  return 1
+}
+
 APP_PORT_INPUT="${APP_PORT:-}"
 if [ -z "$APP_PORT_INPUT" ]; then
   APP_PORT_INPUT="3000"
 fi
 
 if [ -z "$DB_PASS_INPUT" ]; then
-  if [ -t 0 ]; then
-    read -rp "Enter the PostgreSQL password [$DEFAULT_DB_PASS]: " DB_PASS_INPUT
+  if prompt_read "Enter the PostgreSQL password [$DEFAULT_DB_PASS]: " DB_PASS_INPUT; then
+    :
   fi
 fi
 if [ -z "$DB_PASS_INPUT" ]; then
@@ -125,8 +150,7 @@ DB_PASS="$DB_PASS_INPUT"
 echo "Panel internal port selection"
 echo "Avoid common reserved ports: 22 (SSH), 80/443 (web), 5432 (PostgreSQL), 3306, 27017, 25565."
 while ! validate_app_port "$APP_PORT_INPUT"; do
-  if [ -t 0 ]; then
-    read -rp "Choose the internal panel port [3000]: " APP_PORT_INPUT
+  if prompt_read "Choose the internal panel port [3000]: " APP_PORT_INPUT; then
     if [ -z "$APP_PORT_INPUT" ]; then
       APP_PORT_INPUT="3000"
     fi
@@ -155,8 +179,8 @@ echo "Using database password supplied for PostgreSQL and the panel."
 
 PF_RULES_RAW="${PF_RULES:-}"
 if [ -z "${PF_RULES_RAW:-}" ]; then
-  if [ -t 0 ]; then
-    read -rp "Enter port forwarding rules (external:internal[,external2:internal2,...]): " PF_RULES_RAW
+  if prompt_read "Enter port forwarding rules (external:internal[,external2:internal2,...]): " PF_RULES_RAW; then
+    :
   else
     echo "Port forwarding rules are required. Set PF_RULES or run interactively." >&2
     exit 1
