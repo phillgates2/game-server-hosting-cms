@@ -24,11 +24,6 @@ DEFAULT_DB_PASS="GsmPanelDbPass2026!"
 DB_PASS_INPUT="${DB_PASSWORD:-}"
 DRY_RUN="${INSTALLER_DRY_RUN:-${DRY_RUN:-0}}"
 
-TTY_DEVICE=""
-if [ -r /dev/tty ] && [ -w /dev/tty ]; then
-  TTY_DEVICE="/dev/tty"
-fi
-
 # Allow script to run on minimal images where sudo is not installed.
 if ! command -v sudo >/dev/null 2>&1; then
   if [ "$(id -u)" -eq 0 ]; then
@@ -117,8 +112,8 @@ prompt_read() {
   local out_var_name="$2"
   local value=""
 
-  if [ -n "$TTY_DEVICE" ]; then
-    read -r -p "$prompt_text" value < "$TTY_DEVICE"
+  # curl | bash consumes stdin; read from /dev/tty when available.
+  if read -r -p "$prompt_text" value < /dev/tty 2>/dev/null; then
     printf -v "$out_var_name" '%s' "$value"
     return 0
   fi
