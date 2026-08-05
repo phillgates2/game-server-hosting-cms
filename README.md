@@ -52,7 +52,7 @@ GameServer Manager provides:
 
 ### One-line installer
 
-Run this on a fresh Ubuntu or Debian server as a regular user with sudo access:
+Run this on a fresh Ubuntu or Debian server as a regular user with sudo access (or as root):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/install.sh | bash
@@ -67,11 +67,29 @@ The installer will:
 - set up Caddy as a reverse proxy
 - apply optional port-forwarding rules for the panel and each game server port
 
+When running non-interactively, provide these environment variables:
+
+- `PF_RULES` (required): comma-separated forwarding rules in `external:internal` or `external:internal:target_ip` format
+- `DB_PASSWORD` (optional): PostgreSQL password for `gsmadmin`
+- `APP_PORT` (optional): internal panel port (default `3000`)
+
+Example:
+
+```bash
+DB_PASSWORD='ChangeThisNow' APP_PORT=3000 PF_RULES='80:3000,25565:25565:127.0.0.1' \
+bash install.sh
+```
+
 > For a non-destructive validation run, use:
 >
 > ```bash
-> INSTALLER_DRY_RUN=1 bash install.sh
+> INSTALLER_DRY_RUN=1 APP_PORT=3000 PF_RULES='80:3000' bash install.sh
 > ```
+
+> Notes:
+>
+> - `PF_RULES` is validated before any install steps run.
+> - Password values containing `'` are handled safely during PostgreSQL role updates.
 
 ### Manual install
 

@@ -4,6 +4,20 @@ All notable changes to GameServer Manager are documented in this file.
 
 ---
 
+## [2.4.1] — 2026-08-05
+
+### Fixed
+- Installer now works on minimal root-only systems that do not include `sudo` by using a safe in-script fallback when already running as root
+- Added early `PF_RULES` validation for format, port range, and target IPv4 values to fail fast before package installation
+- Escaped PostgreSQL password values before `ALTER ROLE` so passwords containing `'` no longer break SQL execution
+- Added `python3` to base package dependencies because `.env` generation relies on Python URL encoding
+- Simplified Caddy access log block for broader compatibility during `caddy validate`
+
+### Changed
+- README installer examples now document required non-interactive `PF_RULES` usage and include a complete environment-variable example
+
+---
+
 ## [2.4.0] — 2026-08-02
 
 ### Added
