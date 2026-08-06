@@ -23,6 +23,7 @@ INSTALL_DIR="/opt/gsm-panel"
 DEFAULT_DB_PASS="GsmPanelDbPass2026!"
 DB_PASS_INPUT="${DB_PASSWORD:-}"
 DRY_RUN="${INSTALLER_DRY_RUN:-${DRY_RUN:-0}}"
+NON_INTERACTIVE="${INSTALLER_NON_INTERACTIVE:-0}"
 
 # Allow script to run on minimal images where sudo is not installed.
 if ! command -v sudo >/dev/null 2>&1; then
@@ -118,18 +119,27 @@ prompt_read() {
   local value=""
 
   # curl | bash consumes stdin; read from /dev/tty when available.
-  if read -r -p "$prompt_text" value < /dev/tty 2>/dev/null; then
-    printf -v "$out_var_name" '%s' "$value"
-    return 0
+  if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    printf '%s' "$prompt_text" > /dev/tty
+    if read -r value < /dev/tty; then
+      printf -v "$out_var_name" '%s' "$value"
+      return 0
+    fi
   fi
 
   if [ -t 0 ]; then
-    read -r -p "$prompt_text" value
-    printf -v "$out_var_name" '%s' "$value"
-    return 0
+    printf '%s' "$prompt_text" >&2
+    if read -r value; then
+      printf -v "$out_var_name" '%s' "$value"
+      return 0
+    fi
   fi
 
   return 1
+}
+
+can_prompt() {
+  [ "${NON_INTERACTIVE}" != "1" ] && [ -r /dev/tty ] && [ -w /dev/tty ]
 }
 
 APP_PORT_INPUT="${APP_PORT:-}"
@@ -142,7 +152,7 @@ ADMIN_EMAIL="${ADMIN_EMAIL:-admin@localhost}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
 PANEL_NAME="${PANEL_NAME:-GameServer Manager}"
 
-if [ -z "$DB_PASS_INPUT" ]; then
+if [ -z "$DB_PASS_INPUT" ] && can_prompt; then
   if prompt_read "Enter the PostgreSQL password [$DEFAULT_DB_PASS]: " DB_PASS_INPUT; then
     :
   fi
@@ -155,7 +165,7 @@ DB_PASS="$DB_PASS_INPUT"
 echo "Panel internal port selection"
 echo "Avoid common reserved ports: 22 (SSH), 80/443 (web), 5432 (PostgreSQL), 3306, 27017, 25565."
 while ! validate_app_port "$APP_PORT_INPUT"; do
-  if prompt_read "Choose the internal panel port [3000]: " APP_PORT_INPUT; then
+  if can_prompt && prompt_read "Choose the internal panel port [3000]: " APP_PORT_INPUT; then
     if [ -z "$APP_PORT_INPUT" ]; then
       APP_PORT_INPUT="3000"
     fi
@@ -184,7 +194,7 @@ echo "Using database password supplied for PostgreSQL and the panel."
 
 PF_RULES_RAW="${PF_RULES:-}"
 if [ -z "${PF_RULES_RAW:-}" ]; then
-  if prompt_read "Enter port forwarding rules (external:internal[,external2:internal2,...]): " PF_RULES_RAW; then
+  if can_prompt && prompt_read "Enter port forwarding rules (external:internal[,external2:internal2,...]): " PF_RULES_RAW; then
     :
   else
     echo "Port forwarding rules are required. Set PF_RULES or run interactively." >&2
@@ -370,7 +380,7 @@ for attempt in $(seq 1 30); do
 done
 
 if [ -z "$ADMIN_PASSWORD" ]; then
-  if prompt_read "Choose an admin password [ChangeThisNow!]: " ADMIN_PASSWORD; then
+  if can_prompt && prompt_read "Choose an admin password [ChangeThisNow!]: " ADMIN_PASSWORD; then
     :
   fi
 fi
