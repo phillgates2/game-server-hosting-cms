@@ -1,157 +1,135 @@
 # GameServer Manager
 
-Modern, open-source game server hosting panel built with Next.js, PostgreSQL, and Tailwind CSS.
+Production-ready game server control panel with Next.js, PostgreSQL, and a practical installer for fresh Linux hosts.
 
-A full-featured alternative to TCAdmin and Pterodactyl for managing game servers, nodes, templates, users, roles, and monitoring from one dashboard.
+Built for teams who want one place to manage game servers, nodes, templates, users, permissions, monitoring, and CMS content.
 
-## Table of contents
+---
 
-- [Overview](#overview)
-- [Features](#features)
-- [Quick start](#quick-start)
-- [Production deployment](#production-deployment)
-- [Configuration](#configuration)
-- [Troubleshooting](#troubleshooting)
-- [Project structure](#project-structure)
-- [Tech stack](#tech-stack)
+## Why This Project
 
-## Overview
+GameServer Manager focuses on three priorities:
 
-GameServer Manager provides:
+- Fast server operations: install, start, stop, restart, monitor, and automate
+- Clear ownership and security: role-based access, API keys, 2FA, audit trails
+- Simple deployment: one-line installer with PM2 + Caddy + PostgreSQL setup
 
-- A web-based control panel for game servers and nodes
-- Steam and non-Steam game template support
-- File management, RCON, monitoring, and backup tools
-- Role-based permissions and user management
-- A built-in CMS, forum, activity log, and scheduler
+---
 
-## Features
+## Feature Highlights
 
-### Server management
-- Create and manage servers with guided setup
-- Start, stop, restart, backup, clone, and update servers
-- Monitor process health and stream console output
-- Install game files from built-in templates
-- Review server health cards and status summaries directly from the dashboard
+| Area | What You Get |
+| --- | --- |
+| Server lifecycle | Create, install, start/stop/restart, clone, backup workflows |
+| Game templates | Built-in templates, custom templates, external import support |
+| Node operations | Local and remote node management patterns |
+| File tooling | Browser file management and editing for server assets |
+| Console access | RCON workflows for supported games |
+| Monitoring | CPU/RAM/Disk/Network visibility in dashboard panels |
+| Automation | Scheduler, Discord notifications, and API key access |
+| Access control | Roles, granular permissions, JWT auth, optional TOTP 2FA |
+| Platform extras | Built-in CMS and forum modules |
 
-### Operations and infrastructure
-- Multi-node support for local and remote hosts
-- Built-in monitoring for CPU, RAM, disk, and network
-- Scheduled tasks and Discord webhook notifications
-- File editor, RCON console, and database browser
-- Dashboard-style overview with collapsible panels, per-server health summaries, and quick admin shortcuts
-- Clear refresh/error handling so the overview and server panels surface failed data loads and provide retry actions
+---
 
-### Security and access
-- JWT-based authentication and bcrypt password hashing
-- Two-factor authentication with TOTP
-- Granular role and permission management
-- API key support for automation and integrations
+## Quick Start
 
-## Quick start
+### One-line installer (interactive)
 
-### One-line installer
-
-Run this on a fresh Ubuntu or Debian server as a regular user with sudo access (or as root):
+Run on a fresh Ubuntu or Debian server with sudo access (or as root):
 
 ```bash
-curl --fail --location --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/install.sh | bash
+curl --fail --location --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors \
+  https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/install.sh | bash
 ```
 
 The installer will:
 
-- install system dependencies
-- configure PostgreSQL with a user-supplied password
-- install SteamCMD
-- build and start the panel with PM2
-- set up Caddy as a reverse proxy
-- apply optional port-forwarding rules for the panel and each game server port
+- install system packages
+- install Node.js 22, PostgreSQL, SteamCMD, PM2, and Caddy
+- create and configure the panel database
+- build and start the panel
+- configure reverse proxy and firewall rules
+- apply port forwarding mappings from `PF_RULES`
 
-When running non-interactively, provide these environment variables:
+### One-line installer (non-interactive / automation)
 
-- `PF_RULES` (required): comma-separated forwarding rules in `external:internal` or `external:internal:target_ip` format
-- `DB_PASSWORD` (optional): PostgreSQL password for `gsmadmin`
-- `APP_PORT` (optional): internal panel port (default `3000`)
-
-Example:
+Set required values up front so the installer never waits for prompts:
 
 ```bash
-DB_PASSWORD='ChangeThisNow' APP_PORT=3000 PF_RULES='80:3000,25565:25565:127.0.0.1' \
-bash install.sh
+curl --fail --location --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors \
+  https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/install.sh | \
+  INSTALLER_NON_INTERACTIVE=1 \
+  PF_RULES='80:3000,25565:25565:127.0.0.1' \
+  DB_PASSWORD='ChangeThisNow' \
+  APP_PORT=3000 \
+  ADMIN_USERNAME='admin' \
+  ADMIN_EMAIL='admin@localhost' \
+  ADMIN_PASSWORD='ChangeThisNowToo' \
+  PANEL_NAME='GameServer Manager' \
+  bash
 ```
 
-> For a non-destructive validation run, use:
->
-> ```bash
-> INSTALLER_DRY_RUN=1 APP_PORT=3000 PF_RULES='80:3000' bash install.sh
-> ```
+Dry run mode (safe validation, no system changes):
 
-> Notes:
->
-> - `PF_RULES` is validated before any install steps run.
-> - Password values containing `'` are handled safely during PostgreSQL role updates.
+```bash
+INSTALLER_DRY_RUN=1 APP_PORT=3000 PF_RULES='80:3000' bash install.sh
+```
 
-### Manual install
+---
 
-If you prefer to install everything yourself, follow the steps below.
+## Installer Inputs
 
-#### 1. Install system dependencies
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `PF_RULES` | Yes (non-interactive) | none | Port forwarding list: `external:internal` or `external:internal:target_ip` |
+| `DB_PASSWORD` | No | auto fallback value | PostgreSQL password used for `gsmadmin` |
+| `APP_PORT` | No | `3000` | Internal panel port |
+| `ADMIN_USERNAME` | No | `admin` | Bootstrap admin username |
+| `ADMIN_EMAIL` | No | `admin@localhost` | Bootstrap admin email |
+| `ADMIN_PASSWORD` | No | prompt or fallback | Bootstrap admin password |
+| `PANEL_NAME` | No | `GameServer Manager` | Display name used during install bootstrap |
+| `INSTALLER_NON_INTERACTIVE` | No | `0` | Set to `1` to disable interactive prompts |
+| `INSTALLER_DRY_RUN` | No | `0` | Set to `1` to print plan and exit |
+
+Notes:
+
+- `PF_RULES` is validated before heavy install work starts.
+- Password values with special characters are handled during database role updates.
+- `APP_PORT` is validated and guarded against commonly reserved ports.
+
+---
+
+## Manual Installation
+
+### 1. Install base dependencies
 
 ```bash
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y curl git build-essential unzip wget gnupg ca-certificates
+sudo apt install -y curl git build-essential unzip wget gnupg ca-certificates openssl python3
 ```
 
-#### 2. Install Node.js 22 LTS
+### 2. Install Node.js 22 LTS
 
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
 ```
 
-#### 3. Install PostgreSQL
+### 3. Install PostgreSQL and create database
 
 ```bash
 sudo apt install -y postgresql postgresql-contrib
 sudo systemctl enable postgresql
 sudo systemctl start postgresql
-```
 
-Create the database and user:
-
-```bash
 export DB_PASS='CHANGE_THIS_PASSWORD'
-
 sudo -u postgres psql -c "CREATE USER gsmadmin WITH PASSWORD '${DB_PASS}';"
 sudo -u postgres psql -c "CREATE DATABASE gameserver_db OWNER gsmadmin;"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE gameserver_db TO gsmadmin;"
 ```
 
-#### 4. Install SteamCMD (optional for Steam games)
-
-```bash
-sudo dpkg --add-architecture i386
-sudo apt update
-sudo apt install -y lib32gcc-s1 lib32stdc++6 ca-certificates
-
-sudo mkdir -p /opt/steamcmd
-cd /opt/steamcmd
-sudo curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | sudo tar xzf -
-sudo chown -R $USER:$USER /opt/steamcmd
-chmod +x /opt/steamcmd/steamcmd.sh
-chmod +x /opt/steamcmd/linux32/steamcmd
-
-sudo bash -c 'cat > /usr/local/bin/steamcmd << "WRAPPER"
-#!/bin/bash
-cd /opt/steamcmd && exec ./steamcmd.sh "$@"
-WRAPPER'
-sudo chmod +x /usr/local/bin/steamcmd
-
-cd /opt/steamcmd
-./steamcmd.sh +quit
-```
-
-#### 5. Clone and install the app
+### 4. Clone and install app
 
 ```bash
 cd /opt
@@ -160,40 +138,30 @@ cd gsm-panel
 npm install
 ```
 
-#### 6. Create the environment file
+### 5. Create `.env`
 
 ```bash
 JWT_SECRET=$(openssl rand -hex 32)
 
-cat > .env <<EOF
+cat > .env <<EOF_ENV
 DATABASE_URL=postgresql://gsmadmin:${DB_PASS}@127.0.0.1:5432/gameserver_db
 JWT_SECRET=${JWT_SECRET}
 NODE_ENV=production
 PORT=3000
-EOF
+EOF_ENV
 ```
 
-#### 7. Build the app
+### 6. Build and run
 
 ```bash
 npm run build
-```
-
-## Production deployment
-
-### Run with PM2
-
-```bash
 sudo npm install -g pm2
-cd /opt/gsm-panel
 pm2 start npm --name "gsm-panel" -- start
 pm2 save
 pm2 startup
 ```
 
-> Run the sudo command printed by pm2 startup if prompted.
-
-### Put Caddy in front of the app
+### 7. Put Caddy in front
 
 ```bash
 sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
@@ -203,116 +171,91 @@ sudo apt update
 sudo apt install -y caddy
 ```
 
-Create a Caddyfile:
+Example Caddyfile:
 
 ```caddyfile
-YOUR_SERVER_IP {
-    reverse_proxy 127.0.0.1:3000
+http://YOUR_SERVER_IP {
+  encode gzip zstd
+  reverse_proxy 127.0.0.1:3000
 }
 ```
 
-Reload Caddy:
+---
+
+## Runtime Commands
 
 ```bash
-sudo systemctl reload caddy
+pm2 status
+pm2 logs gsm-panel
 sudo systemctl status caddy
+sudo journalctl -u caddy -f
+sudo iptables -t nat -L -n -v
+sudo iptables -L FORWARD -n -v
 ```
 
-## Configuration
-
-### Default ports
-
-- App runs on port 3000 internally by default
-- Caddy serves traffic on port 80
-- Optional port forwarding can be configured during installation
-- When a local game server is installed, its main port (and query/rcon ports when present) is also forwarded automatically on the host
-
-### Email notifications
-
-```bash
-SMTP_HOST=smtp.example.com
-SMTP_PORT=587
-SMTP_USER=noreply@example.com
-SMTP_PASS=your_password
-SMTP_FROM=noreply@example.com
-```
-
-### Discord webhooks
-
-When creating or editing a server, expand the Discord notifications section and add a webhook URL.
+---
 
 ## Troubleshooting
 
-### Panel shows a blank page
+| Issue | Check |
+| --- | --- |
+| Installer appears stuck | Ensure prompts are visible in your terminal; use non-interactive mode for CI/cloud-init |
+| App unavailable | Verify PM2 process and health endpoint `http://127.0.0.1:<PORT>/api/health` |
+| Database failures | Confirm PostgreSQL is running and `DATABASE_URL` credentials are valid |
+| Reverse proxy issues | Validate Caddy config and check `journalctl -u caddy` |
+| Port forwarding not working | Inspect NAT/FORWARD rules and firewall allowances for forwarded ports |
 
-- Clear browser cookies and refresh
-- Ensure the app is reachable over HTTP/HTTPS correctly
-- Verify that the PM2 process is running
+---
 
-### PostgreSQL connection issues
+## Environment Variables (App)
 
-```bash
-sudo systemctl status postgresql
-sudo systemctl start postgresql
-```
+| Key | Purpose |
+| --- | --- |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `JWT_SECRET` | JWT signing secret |
+| `NODE_ENV` | Runtime mode (`production`/`development`) |
+| `PORT` | Internal panel listen port |
+| `PF_RULES` | Optional persisted forwarding rules |
+| `SMTP_HOST` | SMTP host |
+| `SMTP_PORT` | SMTP port |
+| `SMTP_USER` | SMTP auth username |
+| `SMTP_PASS` | SMTP auth password |
+| `SMTP_FROM` | Default sender address |
 
-### PM2 issues
+---
 
-```bash
-sudo npm install -g pm2
-pm2 status
-pm2 logs gsm-panel
-```
-
-### SteamCMD issues
-
-```bash
-sudo rm -f /usr/local/bin/steamcmd
-sudo bash -c 'cat > /usr/local/bin/steamcmd << "WRAPPER"
-#!/bin/bash
-cd /opt/steamcmd && exec ./steamcmd.sh "$@"
-WRAPPER'
-sudo chmod +x /usr/local/bin/steamcmd
-```
-
-### Port 80 permission errors
-
-If Node needs to bind directly to port 80, use:
-
-```bash
-sudo setcap 'cap_net_bind_service=+ep' $(which node)
-```
-
-Otherwise, keep the app on port 3000 and let Caddy handle port 80.
-
-## Project structure
+## Project Structure
 
 ```text
-gsm-panel/
+game-server-hosting-cms/
 ├── src/
-│   ├── app/
-│   │   ├── api/          # API routes for auth, servers, nodes, games, forum, CMS, users, and more
-│   │   └── page.tsx     # Main app shell
-│   ├── components/      # Dashboard and panel UI components
-│   ├── db/              # Database schema and connection setup
-│   └── lib/             # Auth, permissions, RCON, Discord, email helpers
-├── install.sh           # One-line installer
-├── package.json         # Scripts and dependencies
-└── README.md            # Project documentation
+│   ├── app/                  # App routes and API endpoints
+│   ├── components/           # Dashboard and panel UI
+│   ├── db/                   # Drizzle schema and DB wiring
+│   └── lib/                  # Auth, permissions, RCON, Discord, email helpers
+├── tests/                    # Test suites
+├── install.sh                # Fresh-host installer
+├── CHANGELOG.md              # Release history
+└── README.md                 # This file
 ```
 
-## Tech stack
+---
 
-| Technology | Purpose |
-| --- | --- |
-| Next.js | Full-stack React application framework |
-| React | UI components and dashboard experience |
-| TypeScript | Type-safe application logic |
-| PostgreSQL | Primary relational database |
-| Drizzle ORM | Database access layer |
-| Tailwind CSS | Styling and responsive UI |
-| bcryptjs | Password hashing |
-| jsonwebtoken | JWT authentication |
-| otpauth | TOTP 2FA flows |
-| nodemailer | Email notifications |
-| qrcode | QR code generation for 2FA |
+## Tech Stack
+
+- Next.js
+- React
+- TypeScript
+- PostgreSQL
+- Drizzle ORM
+- Tailwind CSS
+
+---
+
+## Contributing
+
+1. Fork the repository.
+2. Create a feature branch.
+3. Make focused changes with tests where possible.
+4. Open a pull request with clear context and rollout notes.
+

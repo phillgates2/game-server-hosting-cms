@@ -4,6 +4,20 @@ All notable changes to GameServer Manager are documented in this file.
 
 ---
 
+## [2.4.2] — 2026-08-06
+
+### Added
+- Installer now supports explicit non-interactive mode via `INSTALLER_NON_INTERACTIVE=1` to prevent any prompt waits in automation flows
+
+### Fixed
+- Prompt handling in `curl | bash` installs now writes prompt text directly to the terminal before reading, so the installer no longer appears to hang while waiting for input
+- Prompt-based inputs now consistently honor interactive availability checks to avoid blocking behavior when no usable TTY is present
+
+### Changed
+- Installer input flow now gates DB password, panel port retry, port-forwarding rules, and admin password prompts behind a shared prompt-availability check
+
+---
+
 ## [2.4.1] — 2026-08-05
 
 ### Fixed
