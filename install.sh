@@ -107,6 +107,11 @@ validate_port_forwarding_rules() {
   return 0
 }
 
+curl_with_retry() {
+  curl --fail --location --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors "$@"
+}
+export -f curl_with_retry
+
 prompt_read() {
   local prompt_text="$1"
   local out_var_name="$2"
@@ -131,6 +136,11 @@ APP_PORT_INPUT="${APP_PORT:-}"
 if [ -z "$APP_PORT_INPUT" ]; then
   APP_PORT_INPUT="3000"
 fi
+
+ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@localhost}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
+PANEL_NAME="${PANEL_NAME:-GameServer Manager}"
 
 if [ -z "$DB_PASS_INPUT" ]; then
   if prompt_read "Enter the PostgreSQL password [$DEFAULT_DB_PASS]: " DB_PASS_INPUT; then
@@ -201,7 +211,7 @@ if [ -z "$SERVER_IP" ]; then
   SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
 fi
 if [ -z "$SERVER_IP" ]; then
-  SERVER_IP="$(curl -s --max-time 5 https://ifconfig.me || true)"
+  SERVER_IP="$(curl_with_retry --max-time 5 https://ifconfig.me || true)"
 fi
 if [ -z "$SERVER_IP" ]; then
   echo "Warning: Could not detect server IP automatically. Caddyfile will use placeholder 'your.server.ip'." >&2
@@ -217,7 +227,7 @@ sudo apt install -y curl git build-essential unzip wget gnupg ca-certificates op
 
 # Step 2: Node.js 22 LTS
 echo "Step 2: Installing Node.js 22 LTS..."
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+curl_with_retry https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
 echo "Node: $(node --version || true)  NPM: $(npm --version || true)"
 
@@ -268,7 +278,7 @@ sudo chown -R "${ORIG_USER}:${ORIG_USER}" /opt/steamcmd
 cd /opt/steamcmd
 
 # Download and extract as the non-root user
-sudo -u "${ORIG_USER}" bash -c 'curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -'
+sudo -u "${ORIG_USER}" bash -c 'curl_with_retry "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -'
 sudo chown -R "${ORIG_USER}:${ORIG_USER}" /opt/steamcmd
 sudo chmod +x /opt/steamcmd/steamcmd.sh || true
 sudo chmod +x /opt/steamcmd/linux32/steamcmd || true
@@ -351,6 +361,52 @@ echo "+ sudo -u \"${ORIG_USER}\" bash -lc \"export PATH=\\$PATH:/usr/bin:/bin &&
 sudo -u "${ORIG_USER}" bash -lc "export PATH=\$PATH:/usr/bin:/bin && pm2 startup systemd -u '${ORIG_USER}' --hp '${ORIG_HOME}' || true"
 echo "PM2 process started and configured."
 
+echo "Waiting for the panel to become reachable..."
+for attempt in $(seq 1 30); do
+  if curl -fsS "http://127.0.0.1:${APP_PORT}/api/health" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
+
+if [ -z "$ADMIN_PASSWORD" ]; then
+  if prompt_read "Choose an admin password [ChangeThisNow!]: " ADMIN_PASSWORD; then
+    :
+  fi
+fi
+if [ -z "$ADMIN_PASSWORD" ]; then
+  ADMIN_PASSWORD="ChangeThisNow!"
+fi
+
+echo "Bootstrapping the panel database and admin account..."
+python3 - <<'PY' "$ADMIN_USERNAME" "$ADMIN_EMAIL" "$ADMIN_PASSWORD" "$PANEL_NAME" "$DB_PASS" "$APP_PORT"
+import json
+import sys
+import urllib.request
+
+admin_username, admin_email, admin_password, panel_name, database_password, app_port = sys.argv[1:7]
+payload = {
+    "adminUsername": admin_username,
+    "adminEmail": admin_email,
+    "adminPassword": admin_password,
+    "panelName": panel_name,
+    "databasePassword": database_password,
+}
+request = urllib.request.Request(
+    f"http://127.0.0.1:{app_port}/api/install",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(request, timeout=60) as response:
+        response.read()
+except Exception:
+    pass
+PY
+
+echo "Panel bootstrap completed."
+
 # Step 9: Port forwarding
 echo "Step 9: Configuring port forwarding..."
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent netfilter-persistent
@@ -391,9 +447,9 @@ echo "Step 10: Installing Caddy and writing Caddyfile bound to ${SERVER_IP} (HTT
 echo "+ sudo apt install -y debian-keyring debian-archive-keyring"
 sudo apt install -y debian-keyring debian-archive-keyring
 echo "+ curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg"
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl_with_retry 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
 echo "+ curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list"
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+curl_with_retry 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
 echo "+ sudo apt update"
 sudo apt update
 echo "+ sudo apt install -y caddy"

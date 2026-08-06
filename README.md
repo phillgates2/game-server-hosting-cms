@@ -55,7 +55,7 @@ GameServer Manager provides:
 Run this on a fresh Ubuntu or Debian server as a regular user with sudo access (or as root):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/install.sh | bash
+curl --fail --location --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/install.sh | bash
 ```
 
 The installer will:
