@@ -563,6 +563,11 @@ fi
 
 # Final notes
 echo
+SSH_CLIENT_SUMMARY="${ACTIVE_SSH_CLIENT_IP:-unknown}"
+SSH_PORT_SUMMARY="${ACTIVE_SSH_PORT:-unknown}"
+echo "================================================================"
+echo "SSH verify: client ${SSH_CLIENT_SUMMARY} -> server port ${SSH_PORT_SUMMARY}"
+echo "================================================================"
 echo "Installation finished."
 echo "Access the panel at http://${SERVER_IP} (port 80)."
 echo
