@@ -302,7 +302,7 @@ export default function Dashboard({ user, onLogout }: Props) {
                     <button key={`${r.type}-${r.id}`} onClick={() => {
                       const typeTabMap: Record<string, Tab> = { server: "servers", user: "users", game: "games", thread: "forum", cms: "cms", node: "nodes" };
                       const t = typeTabMap[r.type];
-                      if (t) { setTab(t); setPaletteOpen(false); setPaletteQuery(""); setMobileMenuOpen(false); }
+                      if (t) { setTab(t); setPaletteOpen(false); setPaletteQuery(""); setOpenGroup(null); }
                     }} className="w-full text-left p-3 rounded-xl hover:bg-bg-hover transition-colors flex items-center gap-3">
                       <span className="text-xl">{r.icon}</span>
                       <div className="flex-1 min-w-0">

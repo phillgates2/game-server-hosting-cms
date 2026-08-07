@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { Suspense, useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import InstallWizard from "@/components/InstallWizard";
@@ -19,7 +19,7 @@ interface AuthUser {
   roleIcon?: string;
 }
 
-export default function Home() {
+function HomeContent() {
   const searchParams = useSearchParams();
   const [state, setState] = useState<AppState>("loading");
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -104,5 +104,13 @@ export default function Home() {
     <ErrorBoundary name="PublicSite">
       <PublicSite onLoginClick={() => setState("login")} />
     </ErrorBoundary>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="inline-block w-12 h-12 border-4 border-accent border-t-transparent rounded-full animate-spin" /></div>}>
+      <HomeContent />
+    </Suspense>
   );
 }
