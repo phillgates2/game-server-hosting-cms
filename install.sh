@@ -251,13 +251,13 @@ sudo systemctl start postgresql
 echo "Creating PostgreSQL user and database..."
 sudo -u postgres psql -v ON_ERROR_STOP=1 <<'PSQL' || true
 DO
-\$do\$
+$do$
 BEGIN
    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'gsmadmin') THEN
       CREATE ROLE gsmadmin LOGIN;
    END IF;
 END
-\$do\$;
+$do$;
 PSQL
 
 DB_PASS_SQL_ESCAPED="$(printf '%s' "$DB_PASS" | sed "s/'/''/g")"
