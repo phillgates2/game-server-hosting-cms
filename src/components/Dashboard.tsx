@@ -23,6 +23,7 @@ import LadderPanel from "./panels/LadderPanel";
 import { ThemeToggleButton } from "./ThemeToggle";
 import { NotificationBell } from "./NotificationCenter";
 import { LanguageSelector } from "@/lib/i18n";
+import Link from "next/link";
 
 interface AuthUser {
   id: number; username: string; role: string;
@@ -80,8 +81,7 @@ const TAB_META: Record<Tab, { title: string; subtitle: string }> = {
 
 export default function Dashboard({ user, onLogout }: Props) {
   const [tab, setTab] = useState<Tab>("overview");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
   const [perms, setPerms] = useState<Record<string, boolean>>({});
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
@@ -133,7 +133,7 @@ export default function Dashboard({ user, onLogout }: Props) {
 
       // Ctrl/Cmd + K = palette
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPaletteOpen((v) => !v); return; }
-      if (e.key === "Escape") { setPaletteOpen(false); setMobileMenuOpen(false); return; }
+      if (e.key === "Escape") { setPaletteOpen(false); setOpenGroup(null); return; }
 
       // Single-key shortcuts (only when no modifiers)
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -142,30 +142,42 @@ export default function Dashboard({ user, onLogout }: Props) {
       for (const item of filteredNav) { if (item.shortcut) shortcutMap[item.shortcut.toLowerCase()] = item.key; }
 
       const target = shortcutMap[e.key.toLowerCase()];
-      if (target) { setTab(target); setMobileMenuOpen(false); }
+      if (target) { setTab(target); setOpenGroup(null); }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [filteredNav]);
+
+  useEffect(() => {
+    function onWindowClick(e: MouseEvent) {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (!target.closest("[data-top-menu]")) {
+        setOpenGroup(null);
+      }
+    }
+    window.addEventListener("click", onWindowClick);
+    return () => window.removeEventListener("click", onWindowClick);
+  }, []);
 
   // ── Command palette ──
   const paletteItems = useMemo(() => {
     const base = filteredNav.map((item) => ({
       id: item.key, icon: item.icon, title: item.label, subtitle: TAB_META[item.key].subtitle,
       section: SECTION_LABELS[item.section] || item.section, shortcut: item.shortcut,
-      action: () => { setTab(item.key); setPaletteOpen(false); setPaletteQuery(""); setMobileMenuOpen(false); },
+      action: () => { setTab(item.key); setPaletteOpen(false); setPaletteQuery(""); setOpenGroup(null); },
     }));
     const extras = [
       { id: "logout", icon: "🚪", title: "Log out", subtitle: "Return to the public site.", section: "Account", shortcut: undefined, action: () => { setPaletteOpen(false); handleLogout(); } },
-      { id: "toggle-sidebar", icon: sidebarOpen ? "◀" : "▶", title: sidebarOpen ? "Collapse sidebar" : "Expand sidebar", subtitle: "Toggle navigation width.", section: "Interface", shortcut: undefined, action: () => { setSidebarOpen((v) => !v); setPaletteOpen(false); } },
+      { id: "go-home", icon: "🏠", title: "Homepage", subtitle: "Open the public frontpage.", section: "Navigation", shortcut: undefined, action: () => { window.location.href = "/"; } },
     ];
     const all = [...base, ...extras];
     const q = paletteQuery.trim().toLowerCase();
     if (!q) return all;
     return all.filter((i) => i.title.toLowerCase().includes(q) || i.subtitle.toLowerCase().includes(q));
-  }, [filteredNav, paletteQuery, sidebarOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filteredNav, paletteQuery]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function navTo(t: Tab) { setTab(t); setMobileMenuOpen(false); }
+  function navTo(t: Tab) { setTab(t); setOpenGroup(null); }
 
   function renderPanel() {
     switch (tab) {
@@ -195,86 +207,80 @@ export default function Dashboard({ user, onLogout }: Props) {
   const roleIcon = user.roleIcon || "👤";
   const roleName = user.roleName || user.role;
 
+  const orderedSections = ["main", "community", "admin", "account"].filter((section) => sections[section]?.length);
+
   return (
-    <div className="dashboard-shell min-h-screen flex relative isolate">
-      {/* Mobile overlay */}
-      {mobileMenuOpen && <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 lg:hidden" onClick={() => setMobileMenuOpen(false)} />}
+    <div className="dashboard-shell min-h-screen relative isolate">
+      <main className="overflow-auto min-w-0 relative z-10">
+        <div className="dashboard-content p-4 lg:p-6 space-y-6 animate-panel-lift">
+          <header className="gaming-surface rounded-2xl px-4 py-3 lg:px-5 lg:py-4 flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-2xl pulse-glow">🎮</span>
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-[0.22em] text-text-muted">Operations</p>
+                  <h2 className="heading-font text-lg lg:text-xl font-bold uppercase tracking-[0.1em] truncate">{TAB_META[tab].title}</h2>
+                  <p className="text-text-secondary text-xs lg:text-sm hidden sm:block">{TAB_META[tab].subtitle}</p>
+                </div>
+              </div>
 
-      {/* Sidebar */}
-      <aside className={`
-        ${sidebarOpen ? "w-72" : "w-20"} gaming-surface border-r border-border/80 flex flex-col transition-all duration-300 flex-shrink-0
-        fixed lg:relative inset-y-0 left-0 z-40
-        ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
-      `}>
-        <div className="p-4 border-b border-border/80 flex items-center gap-3">
-          <span className="text-2xl pulse-glow">🎮</span>
-          {sidebarOpen && (
-            <div className="overflow-hidden">
-              <h1 className="heading-font text-sm font-bold uppercase tracking-[0.18em] whitespace-nowrap">GameServer Hub</h1>
-              <p className="text-[10px] text-text-muted tracking-[0.12em] uppercase">Control Room v1.0.0</p>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setPaletteOpen(true)} className="px-3 py-1.5 gaming-chip hover:border-accent/30 text-text-muted rounded-lg text-xs transition-colors hidden sm:flex items-center gap-1.5">
+                  <span>⌘K</span> <span className="hidden md:inline">Quick Jump</span>
+                </button>
+                <Link href="/?view=frontpage#frontpage" className="px-3 py-1.5 gaming-chip hover:border-accent/30 text-text-secondary rounded-lg text-xs transition-colors">Frontpage</Link>
+                <NotificationBell />
+                <ThemeToggleButton compact />
+              </div>
             </div>
-          )}
-        </div>
 
-        <nav className="flex-1 overflow-y-auto p-3 space-y-4">
-          {Object.entries(sections).map(([sKey, items]) => (
-            <div key={sKey}>
-              {sidebarOpen && <p className="text-[10px] text-text-muted uppercase tracking-[0.2em] px-3 mb-2">{SECTION_LABELS[sKey] || sKey}</p>}
-              <div className="space-y-1">
-                {items.map((item) => (
-                  <button key={item.key} onClick={() => navTo(item.key)}
-                    className={`nav-button w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium ${tab === item.key ? "nav-button-active text-accent" : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"}`}>
-                    <span className="text-base drop-shadow">{item.icon}</span>
-                    {sidebarOpen && (
-                      <span className="flex-1 text-left">{item.label}</span>
+            <div className="flex items-center justify-between gap-3 flex-wrap" data-top-menu>
+              <nav className="flex items-center gap-2 flex-wrap" data-top-menu>
+                {orderedSections.map((sectionKey) => (
+                  <div key={sectionKey} className="relative" data-top-menu>
+                    <button
+                      onClick={() => setOpenGroup((curr) => (curr === sectionKey ? null : sectionKey))}
+                      className="nav-button gaming-chip px-3 py-2 rounded-lg text-xs uppercase tracking-[0.14em] text-text-secondary hover:text-text-primary flex items-center gap-2"
+                      data-top-menu
+                    >
+                      <span>{SECTION_LABELS[sectionKey] || sectionKey}</span>
+                      <span className="text-[10px]">▾</span>
+                    </button>
+                    {openGroup === sectionKey && (
+                      <div className="absolute left-0 mt-2 w-72 gaming-surface rounded-xl p-2 z-40" data-top-menu>
+                        <div className="space-y-1">
+                          {sections[sectionKey].map((item) => (
+                            <button
+                              key={item.key}
+                              onClick={() => navTo(item.key)}
+                              className={`nav-button w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium ${tab === item.key ? "nav-button-active text-accent" : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"}`}
+                            >
+                              <span className="text-base drop-shadow">{item.icon}</span>
+                              <span className="flex-1 text-left">{item.label}</span>
+                              {item.shortcut && <kbd className="text-[9px] text-text-muted gaming-chip px-1.5 py-0.5 rounded font-mono">{item.shortcut}</kbd>}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     )}
-                    {sidebarOpen && item.shortcut && (
-                      <kbd className="text-[9px] text-text-muted gaming-chip px-1.5 py-0.5 rounded font-mono">{item.shortcut}</kbd>
-                    )}
-                  </button>
+                  </div>
                 ))}
+              </nav>
+
+              <div className="flex items-center gap-2">
+                <button onClick={() => navTo("profile")} className="flex items-center gap-2 hover:bg-bg-hover rounded-lg p-1.5 transition-colors">
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0" style={{ backgroundColor: `${roleColor}20`, color: roleColor }}>{user.username[0].toUpperCase()}</div>
+                  <div className="overflow-hidden text-left hidden sm:block">
+                    <p className="text-xs font-medium truncate">{user.username}</p>
+                    <p className="text-[10px] truncate" style={{ color: roleColor }}>{roleIcon} {roleName}</p>
+                  </div>
+                </button>
+                <LanguageSelector compact />
+                <button onClick={handleLogout} className="px-2.5 py-1.5 bg-danger/10 hover:bg-danger/20 border border-danger/30 text-danger text-xs rounded-lg">Logout</button>
               </div>
             </div>
-          ))}
-        </nav>
+          </header>
 
-        <div className="p-3 border-t border-border/80">
-          <button onClick={() => navTo("profile")} className="w-full flex items-center gap-3 mb-3 hover:bg-bg-hover rounded-xl p-2 transition-colors">
-            <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ backgroundColor: `${roleColor}20`, color: roleColor }}>{user.username[0].toUpperCase()}</div>
-            {sidebarOpen && <div className="overflow-hidden text-left"><p className="text-sm font-medium truncate">{user.username}</p><p className="text-[10px] truncate" style={{ color: roleColor }}>{roleIcon} {roleName}</p></div>}
-          </button>
-          <div className="flex gap-2">
-            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="flex-1 px-2 py-1.5 gaming-chip hover:bg-bg-hover text-text-muted text-xs rounded hidden lg:block">{sidebarOpen ? "◀" : "▶"}</button>
-            {sidebarOpen && <ThemeToggleButton compact />}
-            {sidebarOpen && <LanguageSelector compact />}
-            {sidebarOpen && <button onClick={handleLogout} className="flex-1 px-2 py-1.5 bg-danger/10 hover:bg-danger/20 border border-danger/30 text-danger text-xs rounded">Logout</button>}
-          </div>
-        </div>
-      </aside>
-
-      {/* Main */}
-      <main className="flex-1 overflow-auto min-w-0 relative z-10">
-        <div className="p-4 lg:p-6 space-y-6 animate-panel-lift">
-          {/* Top bar */}
-          <div className="gaming-surface rounded-2xl px-4 py-3 lg:px-5 lg:py-4 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <button onClick={() => setMobileMenuOpen(true)} className="lg:hidden text-text-muted hover:text-text-primary p-1">
-                <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
-              </button>
-              <div>
-                <p className="text-[10px] uppercase tracking-[0.22em] text-text-muted">Operations</p>
-                <h2 className="heading-font text-lg lg:text-xl font-bold uppercase tracking-[0.1em]">{TAB_META[tab].title}</h2>
-                <p className="text-text-secondary text-xs lg:text-sm hidden sm:block">{TAB_META[tab].subtitle}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => setPaletteOpen(true)} className="px-3 py-1.5 gaming-chip hover:border-accent/30 text-text-muted rounded-lg text-xs transition-colors hidden sm:flex items-center gap-1.5">
-                <span>⌘K</span> <span className="hidden md:inline">Quick Jump</span>
-              </button>
-              <NotificationBell />
-              <ThemeToggleButton compact />
-            </div>
-          </div>
           <ErrorBoundary key={tab} name={tab}>{renderPanel()}</ErrorBoundary>
         </div>
       </main>

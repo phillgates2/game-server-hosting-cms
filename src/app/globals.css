@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* ── Dark theme (default) ── */
+/* ── Base design tokens ── */
 @theme {
   --color-bg-primary: #070b14;
   --color-bg-secondary: #111a2b;
@@ -19,11 +19,31 @@
   --color-purple: #f97316;
 }
 
-html { color-scheme: dark; }
+:root,
+html[data-theme="nebula-dark"] {
+  --color-bg-primary: #070b14;
+  --color-bg-secondary: #111a2b;
+  --color-bg-tertiary: #17243a;
+  --color-bg-card: #111f34;
+  --color-bg-hover: #1d2e48;
+  --color-border: #2a4264;
+  --color-text-primary: #eaf2ff;
+  --color-text-secondary: #9db2d2;
+  --color-text-muted: #6980a5;
+  --color-accent: #22d3ee;
+  --color-accent-hover: #06b6d4;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-purple: #f97316;
+  --color-aurora-a: rgba(34, 211, 238, 0.14);
+  --color-aurora-b: rgba(239, 68, 68, 0.14);
+  --color-bg-depth: #091326;
+  color-scheme: dark;
+}
 
-/* ── Light theme override ── */
-html.light {
-  color-scheme: light;
+html.light,
+html[data-theme="cloud-light"] {
   --color-bg-primary: #edf2fb;
   --color-bg-secondary: #dfe8f5;
   --color-bg-tertiary: #cedcf0;
@@ -39,15 +59,79 @@ html.light {
   --color-warning: #d97706;
   --color-danger: #dc2626;
   --color-purple: #ea580c;
+  --color-aurora-a: rgba(2, 132, 199, 0.14);
+  --color-aurora-b: rgba(249, 115, 22, 0.12);
+  --color-bg-depth: #d8e4f6;
+  color-scheme: light;
+}
+
+html[data-theme="ember-sun"] {
+  --color-bg-primary: #fff5e6;
+  --color-bg-secondary: #ffe6c7;
+  --color-bg-tertiary: #ffd9ae;
+  --color-bg-card: #fff9ef;
+  --color-bg-hover: #ffd6ad;
+  --color-border: #f0bc84;
+  --color-text-primary: #4f2a03;
+  --color-text-secondary: #7e4611;
+  --color-text-muted: #9e642e;
+  --color-accent: #ef6c00;
+  --color-accent-hover: #c25100;
+  --color-success: #2e7d32;
+  --color-warning: #f59e0b;
+  --color-danger: #c62828;
+  --color-purple: #be3d2a;
+  --color-aurora-a: rgba(239, 108, 0, 0.16);
+  --color-aurora-b: rgba(190, 61, 42, 0.12);
+  --color-bg-depth: #ffe9ce;
+  color-scheme: light;
+}
+
+html[data-theme="forest-command"] {
+  --color-bg-primary: #06130d;
+  --color-bg-secondary: #0e2118;
+  --color-bg-tertiary: #143024;
+  --color-bg-card: #10281c;
+  --color-bg-hover: #19402e;
+  --color-border: #2d5b46;
+  --color-text-primary: #e2f6e9;
+  --color-text-secondary: #9acfb0;
+  --color-text-muted: #6ca081;
+  --color-accent: #16a34a;
+  --color-accent-hover: #15803d;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-purple: #22d3ee;
+  --color-aurora-a: rgba(22, 163, 74, 0.14);
+  --color-aurora-b: rgba(34, 211, 238, 0.1);
+  --color-bg-depth: #0b1a13;
+  color-scheme: dark;
 }
 
 body {
-  background: radial-gradient(circle at 15% 20%, rgba(34, 211, 238, 0.14), transparent 36%),
-    radial-gradient(circle at 85% 0%, rgba(239, 68, 68, 0.14), transparent 34%),
-    linear-gradient(160deg, var(--color-bg-primary), #091326 55%, #0a1220);
+  background: radial-gradient(circle at 15% 20%, var(--color-aurora-a), transparent 36%),
+    radial-gradient(circle at 85% 0%, var(--color-aurora-b), transparent 34%),
+    linear-gradient(160deg, var(--color-bg-primary), var(--color-bg-depth) 55%, color-mix(in srgb, var(--color-bg-depth) 72%, black));
   color: var(--color-text-primary);
   font-family: var(--font-body), system-ui, -apple-system, sans-serif;
   min-height: 100vh;
+}
+
+html[data-layout="compact"] .dashboard-content {
+  gap: 1rem;
+}
+
+html[data-layout="compact"] .dashboard-content .gaming-surface {
+  border-radius: 0.75rem;
+}
+
+html[data-layout="spacious"] .dashboard-content {
+  gap: 2rem;
+}
+
+html[data-layout="spacious"] .dashboard-content .gaming-surface {
+  border-radius: 1.25rem;
 }
 
 h1,

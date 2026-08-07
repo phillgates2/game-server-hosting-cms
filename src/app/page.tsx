@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import InstallWizard from "@/components/InstallWizard";
 import LoginForm from "@/components/LoginForm";
@@ -19,8 +20,10 @@ interface AuthUser {
 }
 
 export default function Home() {
+  const searchParams = useSearchParams();
   const [state, setState] = useState<AppState>("loading");
   const [user, setUser] = useState<AuthUser | null>(null);
+  const forceFrontpage = searchParams.get("view") === "frontpage";
 
   const checkStatus = useCallback(async () => {
     try {
@@ -28,6 +31,11 @@ export default function Home() {
       if (!installRes.ok) { setState("install"); return; }
       const installData = await installRes.json();
       if (!installData.installed) { setState("install"); return; }
+
+      if (forceFrontpage) {
+        setState("public");
+        return;
+      }
 
       // Installed — check if user is logged in
       const meRes = await fetch("/api/auth/me");
@@ -45,7 +53,7 @@ export default function Home() {
     } catch {
       setState("install");
     }
-  }, []);
+  }, [forceFrontpage]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
