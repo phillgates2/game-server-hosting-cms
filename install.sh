@@ -315,7 +315,7 @@ if [ -d "${INSTALL_DIR}" ]; then
   echo "Directory ${INSTALL_DIR} exists. Pulling latest..."
   sudo -u "${ORIG_USER}" git -C "${INSTALL_DIR}" pull || true
 else
-  sudo -u "${ORIG_USER}" git clone "${REPO_URL}" "${INSTALL_DIR}"
+  sudo git clone "${REPO_URL}" "${INSTALL_DIR}"
 fi
 sudo chown -R "${ORIG_USER}:${ORIG_USER}" "${INSTALL_DIR}"
 cd "${INSTALL_DIR}"
