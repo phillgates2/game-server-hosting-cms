@@ -69,6 +69,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { adminUsername, adminEmail, adminPassword, panelName, databasePassword } = body;
+    let pendingDatabaseUrlUpdate: string | null = null;
 
     if (!adminUsername || !adminEmail || !adminPassword) {
       return NextResponse.json({ error: "Admin credentials required" }, { status: 400 });
@@ -77,11 +78,8 @@ export async function POST(req: NextRequest) {
     if (databasePassword) {
       const currentDatabaseUrl = process.env.DATABASE_URL || "";
       await pool.query("ALTER ROLE gsmadmin WITH PASSWORD $1", [databasePassword]);
-      const nextDatabaseUrl = buildDatabaseUrlWithPassword(currentDatabaseUrl, databasePassword);
-      process.env.DATABASE_URL = nextDatabaseUrl;
-      await writeDatabaseUrlToEnv(nextDatabaseUrl);
-      await restartPanelProcess();
-      await logStep("database", "running", "Updated the database password for the panel and restarted the process...");
+      pendingDatabaseUrlUpdate = buildDatabaseUrlWithPassword(currentDatabaseUrl, databasePassword);
+      await logStep("database", "running", "Updated database role password. Will refresh panel connection settings at the end...");
     }
 
     // Step 1: Create database schema with multi-node support
@@ -422,6 +420,13 @@ export async function POST(req: NextRequest) {
       }
     }
     await logStep("settings", "done", "Panel settings saved");
+
+    if (pendingDatabaseUrlUpdate) {
+      process.env.DATABASE_URL = pendingDatabaseUrlUpdate;
+      await writeDatabaseUrlToEnv(pendingDatabaseUrlUpdate);
+      await restartPanelProcess();
+      await logStep("database", "done", "Database connection settings refreshed and panel restart requested.");
+    }
 
     return NextResponse.json({ 
       ok: true, 
