@@ -32,20 +32,27 @@ function HomeContent() {
       const installData = await installRes.json();
       if (!installData.installed) { setState("install"); return; }
 
+      // Installed — check if user is logged in
+      let meUser: AuthUser | null = null;
+      const meRes = await fetch("/api/auth/me");
+      if (meRes.ok) {
+        const meData = await meRes.json();
+        if (meData.user) {
+          meUser = meData.user as AuthUser;
+          setUser(meUser);
+        }
+      } else {
+        setUser(null);
+      }
+
       if (forceFrontpage) {
         setState("public");
         return;
       }
 
-      // Installed — check if user is logged in
-      const meRes = await fetch("/api/auth/me");
-      if (meRes.ok) {
-        const meData = await meRes.json();
-        if (meData.user) {
-          setUser(meData.user);
-          setState("dashboard");
-          return;
-        }
+      if (meUser) {
+        setState("dashboard");
+        return;
       }
 
       // Not logged in — show public site
@@ -102,7 +109,12 @@ function HomeContent() {
 
   return (
     <ErrorBoundary name="PublicSite">
-      <PublicSite onLoginClick={() => setState("login")} />
+      <PublicSite
+        user={user}
+        onLoginClick={() => setState("login")}
+        onDashboardClick={() => setState("dashboard")}
+        onLogout={handleLogout}
+      />
     </ErrorBoundary>
   );
 }

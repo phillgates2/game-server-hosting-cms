@@ -16,12 +16,20 @@ interface CmsPost {
 }
 
 interface Props {
+  user: {
+    username: string;
+    roleName?: string;
+    roleIcon?: string;
+    roleColor?: string;
+  } | null;
   onLoginClick: () => void;
+  onDashboardClick: () => void;
+  onLogout: () => void;
 }
 
 type Tab = "home" | "blog" | "changelog" | "post";
 
-export default function PublicSite({ onLoginClick }: Props) {
+export default function PublicSite({ user, onLoginClick, onDashboardClick, onLogout }: Props) {
   const [tab, setTab] = useState<Tab>("home");
   const [blogs, setBlogs] = useState<CmsPost[]>([]);
   const [changelogs, setChangelogs] = useState<CmsPost[]>([]);
@@ -48,6 +56,9 @@ export default function PublicSite({ onLoginClick }: Props) {
 
   function openPost(post: CmsPost) { setSelectedPost(post); setTab("post"); }
   function fmt(d: string) { return new Date(d).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }); }
+  const roleColor = user?.roleColor || "#3b82f6";
+  const roleIcon = user?.roleIcon || "👤";
+  const roleName = user?.roleName || "Member";
 
   return (
     <div className="min-h-screen bg-bg-primary flex flex-col">
@@ -61,7 +72,21 @@ export default function PublicSite({ onLoginClick }: Props) {
             {([["home","Home"],["blog","Blog"],["changelog","Changelog"]] as const).map(([k,l]) => (
               <button key={k} onClick={() => { setTab(k); setSelectedPost(null); }} className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${tab === k ? "text-accent bg-accent/10" : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"}`}>{l}</button>
             ))}
-            <button onClick={onLoginClick} className="ml-3 px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition-colors">Login</button>
+            {user ? (
+              <>
+                <button onClick={onDashboardClick} className="ml-3 px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition-colors">Control Panel</button>
+                <button onClick={onDashboardClick} className="ml-1 flex items-center gap-2 px-2 py-1.5 rounded-lg border border-border hover:bg-bg-hover transition-colors">
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold" style={{ backgroundColor: `${roleColor}20`, color: roleColor }}>{user.username[0].toUpperCase()}</div>
+                  <div className="hidden md:block text-left">
+                    <p className="text-xs font-medium leading-none">{user.username}</p>
+                    <p className="text-[10px] text-text-muted">{roleIcon} {roleName}</p>
+                  </div>
+                </button>
+                <button onClick={onLogout} className="ml-1 px-3 py-2 bg-danger/10 hover:bg-danger/20 border border-danger/30 text-danger text-sm rounded-lg transition-colors">Logout</button>
+              </>
+            ) : (
+              <button onClick={onLoginClick} className="ml-3 px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition-colors">Login</button>
+            )}
           </nav>
         </div>
       </header>
@@ -73,7 +98,7 @@ export default function PublicSite({ onLoginClick }: Props) {
               <h1 className="text-4xl sm:text-5xl font-bold mb-4"><span className="bg-gradient-to-r from-accent to-purple bg-clip-text text-transparent">Game Server Hosting</span></h1>
               <p className="text-text-secondary text-lg max-w-2xl mx-auto mb-8">High-performance game servers with a modern control panel. Multi-node infrastructure, real-time monitoring, and one-click deploys.</p>
               <div className="flex gap-4 justify-center flex-wrap">
-                <button onClick={onLoginClick} className="px-6 py-3 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors">Control Panel →</button>
+                <button onClick={user ? onDashboardClick : onLoginClick} className="px-6 py-3 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors">{user ? "Open Control Panel →" : "Control Panel →"}</button>
                 <button onClick={() => setTab("blog")} className="px-6 py-3 bg-bg-card border border-border hover:border-accent/30 rounded-lg font-medium transition-colors">Read Blog</button>
               </div>
             </section>
@@ -184,7 +209,14 @@ export default function PublicSite({ onLoginClick }: Props) {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 flex items-center justify-between text-xs text-text-muted">
           <span>© {new Date().getFullYear()} GameServer Manager</span>
           <div className="flex gap-4">
-            <button onClick={onLoginClick} className="hover:text-text-primary transition-colors">Login</button>
+            {user ? (
+              <>
+                <button onClick={onDashboardClick} className="hover:text-text-primary transition-colors">Control Panel</button>
+                <button onClick={onLogout} className="hover:text-text-primary transition-colors">Logout</button>
+              </>
+            ) : (
+              <button onClick={onLoginClick} className="hover:text-text-primary transition-colors">Login</button>
+            )}
             <button onClick={() => setTab("blog")} className="hover:text-text-primary transition-colors">Blog</button>
             <button onClick={() => setTab("changelog")} className="hover:text-text-primary transition-colors">Changelog</button>
           </div>

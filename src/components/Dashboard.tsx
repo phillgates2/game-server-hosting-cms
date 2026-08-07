@@ -24,6 +24,7 @@ import { ThemeToggleButton } from "./ThemeToggle";
 import { NotificationBell } from "./NotificationCenter";
 import { LanguageSelector } from "@/lib/i18n";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 interface AuthUser {
   id: number; username: string; role: string;
@@ -80,6 +81,7 @@ const TAB_META: Record<Tab, { title: string; subtitle: string }> = {
   };
 
 export default function Dashboard({ user, onLogout }: Props) {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>("overview");
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const [perms, setPerms] = useState<Record<string, boolean>>({});
@@ -169,7 +171,7 @@ export default function Dashboard({ user, onLogout }: Props) {
     }));
     const extras = [
       { id: "logout", icon: "🚪", title: "Log out", subtitle: "Return to the public site.", section: "Account", shortcut: undefined, action: () => { setPaletteOpen(false); handleLogout(); } },
-      { id: "go-home", icon: "🏠", title: "Homepage", subtitle: "Open the public frontpage.", section: "Navigation", shortcut: undefined, action: () => { window.location.href = "/"; } },
+      { id: "go-home", icon: "🏠", title: "Homepage", subtitle: "Open the public frontpage.", section: "Navigation", shortcut: undefined, action: () => { setPaletteOpen(false); router.push("/?view=frontpage#frontpage"); } },
     ];
     const all = [...base, ...extras];
     const q = paletteQuery.trim().toLowerCase();
@@ -213,7 +215,7 @@ export default function Dashboard({ user, onLogout }: Props) {
     <div className="dashboard-shell min-h-screen relative isolate">
       <main className="overflow-auto min-w-0 relative z-10">
         <div className="dashboard-content p-4 lg:p-6 space-y-6 animate-panel-lift">
-          <header className="gaming-surface rounded-2xl px-4 py-3 lg:px-5 lg:py-4 flex flex-col gap-3">
+          <header className="gaming-surface relative z-30 overflow-visible rounded-2xl px-4 py-3 lg:px-5 lg:py-4 flex flex-col gap-3">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 <span className="text-2xl pulse-glow">🎮</span>
@@ -228,7 +230,6 @@ export default function Dashboard({ user, onLogout }: Props) {
                 <button onClick={() => setPaletteOpen(true)} className="px-3 py-1.5 gaming-chip hover:border-accent/30 text-text-muted rounded-lg text-xs transition-colors hidden sm:flex items-center gap-1.5">
                   <span>⌘K</span> <span className="hidden md:inline">Quick Jump</span>
                 </button>
-                <Link href="/?view=frontpage#frontpage" className="px-3 py-1.5 gaming-chip hover:border-accent/30 text-text-secondary rounded-lg text-xs transition-colors">Frontpage</Link>
                 <NotificationBell />
                 <ThemeToggleButton compact />
               </div>
@@ -247,7 +248,7 @@ export default function Dashboard({ user, onLogout }: Props) {
                       <span className="text-[10px]">▾</span>
                     </button>
                     {openGroup === sectionKey && (
-                      <div className="absolute left-0 mt-2 w-72 gaming-surface rounded-xl p-2 z-40" data-top-menu>
+                      <div className="absolute left-0 mt-2 w-72 gaming-surface rounded-xl p-2 z-[90]" data-top-menu>
                         <div className="space-y-1">
                           {sections[sectionKey].map((item) => (
                             <button
@@ -265,6 +266,7 @@ export default function Dashboard({ user, onLogout }: Props) {
                     )}
                   </div>
                 ))}
+                <Link href="/?view=frontpage#frontpage" className="nav-button gaming-chip px-3 py-2 rounded-lg text-xs uppercase tracking-[0.14em] text-text-secondary hover:text-text-primary">Frontpage</Link>
               </nav>
 
               <div className="flex items-center gap-2">
