@@ -34,10 +34,16 @@ function getPool() {
 
 export const pool = new Proxy({} as Pool, {
   get(_target, prop, receiver) {
-    return Reflect.get(getPool(), prop, receiver);
+    const source = getPool();
+    const value = Reflect.get(source, prop, source);
+    if (typeof value === "function") {
+      return value.bind(source);
+    }
+    return value;
   },
   set(_target, prop, value, receiver) {
-    return Reflect.set(getPool(), prop, value, receiver);
+    const source = getPool();
+    return Reflect.set(source, prop, value, source);
   },
   has(_target, prop) {
     return prop in getPool();
@@ -52,10 +58,16 @@ export const pool = new Proxy({} as Pool, {
 
 export const db = new Proxy({} as ReturnType<typeof drizzle>, {
   get(_target, prop, receiver) {
-    return Reflect.get(getDb(), prop, receiver);
+    const source = getDb();
+    const value = Reflect.get(source, prop, source);
+    if (typeof value === "function") {
+      return value.bind(source);
+    }
+    return value;
   },
   set(_target, prop, value, receiver) {
-    return Reflect.set(getDb(), prop, value, receiver);
+    const source = getDb();
+    return Reflect.set(source, prop, value, source);
   },
   has(_target, prop) {
     return prop in getDb();
