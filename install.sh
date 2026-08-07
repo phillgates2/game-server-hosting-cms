@@ -509,12 +509,18 @@ if ! sudo ufw allow OpenSSH; then
 fi
 
 ACTIVE_SSH_PORT=""
+ACTIVE_SSH_CLIENT_IP=""
 if [ -n "${SSH_CONNECTION:-}" ]; then
+  ACTIVE_SSH_CLIENT_IP="$(echo "${SSH_CONNECTION}" | awk '{print $1}')"
   ACTIVE_SSH_PORT="$(echo "${SSH_CONNECTION}" | awk '{print $4}')"
 fi
 if [[ "${ACTIVE_SSH_PORT}" =~ ^[0-9]+$ ]] && (( ACTIVE_SSH_PORT >= 1 && ACTIVE_SSH_PORT <= 65535 )); then
   echo "Allowing active SSH port ${ACTIVE_SSH_PORT}/tcp in UFW to prevent disconnects."
   sudo ufw allow "${ACTIVE_SSH_PORT}/tcp" || true
+  if [[ "${ACTIVE_SSH_CLIENT_IP}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Allowing active SSH client ${ACTIVE_SSH_CLIENT_IP} to port ${ACTIVE_SSH_PORT}/tcp in UFW."
+    sudo ufw allow from "${ACTIVE_SSH_CLIENT_IP}" to any port "${ACTIVE_SSH_PORT}" proto tcp || true
+  fi
 fi
 
 # If port forwarding rules were provided, allow the external ports through UFW
@@ -538,10 +544,22 @@ if ! grep -q '^net/ipv4/ip_forward=1' /etc/ufw/sysctl.conf 2>/dev/null; then
   echo 'net/ipv4/ip_forward=1' | sudo tee -a /etc/ufw/sysctl.conf >/dev/null
 fi
 
-# Enable UFW (force to avoid interactive prompt) — safe because OpenSSH is allowed
-sudo ufw --force enable || true
-sudo ufw reload || true
-echo "UFW enabled and configured."
+UFW_AUTO_ENABLE="${UFW_AUTO_ENABLE:-0}"
+if [ "${UFW_AUTO_ENABLE}" = "1" ]; then
+  # Enable UFW only when explicitly requested to avoid SSH lockouts on custom setups.
+  sudo ufw --force enable || true
+  sudo ufw reload || true
+  echo "UFW enabled and configured."
+else
+  if sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+    sudo ufw reload || true
+    echo "UFW is already active; rules were updated and reloaded."
+  else
+    echo "UFW rules prepared, but firewall was not auto-enabled to avoid SSH disconnects."
+    echo "Enable later with: sudo ufw --force enable"
+    echo "Or auto-enable during install with: UFW_AUTO_ENABLE=1"
+  fi
+fi
 
 # Final notes
 echo
