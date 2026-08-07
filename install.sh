@@ -287,8 +287,9 @@ sudo mkdir -p /opt/steamcmd
 sudo chown -R "${ORIG_USER}:${ORIG_USER}" /opt/steamcmd
 cd /opt/steamcmd
 
-# Download and extract as the non-root user
-sudo -u "${ORIG_USER}" bash -c 'curl_with_retry "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -'
+# Download and extract as the non-root user.
+# Do not rely on exported shell functions here because sudo strips them.
+sudo -u "${ORIG_USER}" bash -c 'curl --fail --location --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar xzf -'
 sudo chown -R "${ORIG_USER}:${ORIG_USER}" /opt/steamcmd
 sudo chmod +x /opt/steamcmd/steamcmd.sh || true
 sudo chmod +x /opt/steamcmd/linux32/steamcmd || true
