@@ -503,8 +503,19 @@ if ! command -v ufw >/dev/null 2>&1; then
   sudo apt install -y ufw
 fi
 
-# Allow SSH (OpenSSH) first
-sudo ufw allow OpenSSH
+# Allow SSH first. OpenSSH profile may not match custom ports.
+if ! sudo ufw allow OpenSSH; then
+  echo "Warning: UFW OpenSSH profile was not available." >&2
+fi
+
+ACTIVE_SSH_PORT=""
+if [ -n "${SSH_CONNECTION:-}" ]; then
+  ACTIVE_SSH_PORT="$(echo "${SSH_CONNECTION}" | awk '{print $4}')"
+fi
+if [[ "${ACTIVE_SSH_PORT}" =~ ^[0-9]+$ ]] && (( ACTIVE_SSH_PORT >= 1 && ACTIVE_SSH_PORT <= 65535 )); then
+  echo "Allowing active SSH port ${ACTIVE_SSH_PORT}/tcp in UFW to prevent disconnects."
+  sudo ufw allow "${ACTIVE_SSH_PORT}/tcp" || true
+fi
 
 # If port forwarding rules were provided, allow the external ports through UFW
 if [ -n "$PF_RULES_RAW" ]; then
