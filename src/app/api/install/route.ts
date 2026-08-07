@@ -274,6 +274,25 @@ export async function POST(req: NextRequest) {
         created_at TIMESTAMP DEFAULT NOW() NOT NULL,
         updated_at TIMESTAMP DEFAULT NOW() NOT NULL
       );
+      
+        -- League ladder standings
+        CREATE TABLE IF NOT EXISTS league_ladder_entries (
+          id SERIAL PRIMARY KEY,
+          season VARCHAR(64) NOT NULL DEFAULT 'S1',
+          team_name VARCHAR(128) NOT NULL,
+          tag VARCHAR(12),
+          wins INTEGER NOT NULL DEFAULT 0,
+          losses INTEGER NOT NULL DEFAULT 0,
+          draws INTEGER NOT NULL DEFAULT 0,
+          points INTEGER NOT NULL DEFAULT 0,
+          streak INTEGER NOT NULL DEFAULT 0,
+          logo_emoji VARCHAR(8) DEFAULT '🎯',
+          notes TEXT,
+          created_by INTEGER REFERENCES users(id),
+          updated_by INTEGER REFERENCES users(id),
+          created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+          updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+        );
 
       -- Install Log
       CREATE TABLE IF NOT EXISTS install_log (
@@ -357,6 +376,22 @@ export async function POST(req: NextRequest) {
         }).returning();
         if (roleDef.name === "admin") adminRoleId = created.id;
       } else {
+          if (roleDef.isSystem) {
+            const mergedPermissions = {
+              ...(existing[0].permissions as Record<string, boolean> || {}),
+              ...roleDef.permissions,
+            };
+            await db.update(roles).set({
+              displayName: roleDef.displayName,
+              color: roleDef.color,
+              icon: roleDef.icon,
+              priority: roleDef.priority,
+              isSystem: roleDef.isSystem,
+              isDefault: roleDef.isDefault,
+              permissions: mergedPermissions,
+              updatedAt: new Date(),
+            }).where(eq(roles.id, existing[0].id));
+          }
         if (roleDef.name === "admin") adminRoleId = existing[0].id;
       }
     }

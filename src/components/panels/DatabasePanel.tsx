@@ -166,7 +166,7 @@ export default function DatabasePanel() {
   const currentTableInfo = tables.find((t) => t.name === selectedTable);
 
   return (
-    <div className="animate-fade-in space-y-6">
+    <div className="animate-fade-in panel-view space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">🗄️ Database Manager</h2>
@@ -196,7 +196,7 @@ export default function DatabasePanel() {
       {view === "tables" && (
         <div className="grid gap-3">
           {tables.map((table) => (
-            <div key={table.name} className="bg-bg-card border border-border rounded-xl p-4 flex items-center justify-between">
+            <div key={table.name} className="gaming-surface rounded-xl p-4 flex items-center justify-between">
               <div>
                 <h3 className="font-medium font-mono text-sm">{table.name}</h3>
                 <p className="text-xs text-text-muted">{table.rowCount} rows · {table.columns.length} columns</p>
@@ -252,7 +252,7 @@ export default function DatabasePanel() {
             </div>
           </div>
 
-          <div className="overflow-x-auto bg-bg-card border border-border rounded-xl">
+          <div className="overflow-x-auto gaming-surface rounded-xl">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border">
@@ -315,7 +315,7 @@ export default function DatabasePanel() {
       {view === "structure" && currentTableInfo && (
         <div className="space-y-4">
           <h3 className="font-semibold font-mono">{selectedTable} — Structure</h3>
-          <div className="overflow-x-auto bg-bg-card border border-border rounded-xl">
+          <div className="overflow-x-auto gaming-surface rounded-xl">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border">
@@ -349,7 +349,7 @@ export default function DatabasePanel() {
       {/* SQL Query */}
       {view === "query" && (
         <div className="space-y-4">
-          <div className="bg-bg-card border border-border rounded-xl p-4">
+          <div className="gaming-surface rounded-xl p-4">
             <div className="flex items-center justify-between mb-2">
               <h3 className="font-semibold text-sm">SQL Query Editor</h3>
               <button
@@ -389,7 +389,7 @@ export default function DatabasePanel() {
                 <span>Duration: {queryResult.duration}ms</span>
               </div>
               {queryResult.rows.length > 0 && (
-                <div className="overflow-x-auto bg-bg-card border border-border rounded-xl">
+                <div className="overflow-x-auto gaming-surface rounded-xl">
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b border-border">

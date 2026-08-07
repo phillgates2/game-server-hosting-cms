@@ -5,12 +5,12 @@ import { getCurrentUser } from "@/lib/auth";
 import { sendDiscordWebhook } from "@/lib/discord";
 import { eq } from "drizzle-orm";
 import { spawn } from "node:child_process";
+import { access, constants } from "node:fs/promises";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 async function findBash(): Promise<string> {
-  const { access, constants } = await import("node:fs/promises");
   for (const p of ["/usr/bin/bash", "/bin/bash", "/usr/local/bin/bash"]) {
     try { await access(p, constants.X_OK); return p; } catch { /* next */ }
   }

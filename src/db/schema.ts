@@ -218,6 +218,25 @@ export const forumPosts = pgTable("forum_posts", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// ── League ladder standings ─────────────────────────────────
+export const leagueLadderEntries = pgTable("league_ladder_entries", {
+  id: serial("id").primaryKey(),
+  season: varchar("season", { length: 64 }).notNull().default("S1"),
+  teamName: varchar("team_name", { length: 128 }).notNull(),
+  tag: varchar("tag", { length: 12 }),
+  wins: integer("wins").notNull().default(0),
+  losses: integer("losses").notNull().default(0),
+  draws: integer("draws").notNull().default(0),
+  points: integer("points").notNull().default(0),
+  streak: integer("streak").notNull().default(0),
+  logoEmoji: varchar("logo_emoji", { length: 8 }).default("🎯"),
+  notes: text("notes"),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // ── Install log ───────────────────────────────────────────────
 export const installLog = pgTable("install_log", {
   id: serial("id").primaryKey(),

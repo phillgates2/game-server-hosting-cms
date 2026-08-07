@@ -38,7 +38,7 @@ export default function AuditPanel() {
   });
 
   return (
-    <div className="animate-fade-in space-y-6">
+    <div className="animate-fade-in panel-view space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">🔍 Template Audit</h2>
@@ -195,7 +195,7 @@ export default function AuditPanel() {
 
       {/* Empty state */}
       {results.length === 0 && !loading && (
-        <div className="bg-bg-card border border-border rounded-xl p-12 text-center">
+        <div className="gaming-surface rounded-xl p-12 text-center">
           <span className="text-4xl block mb-3">🔍</span>
           <h3 className="font-semibold mb-1">No audit results</h3>
           <p className="text-text-secondary text-sm">Click &quot;Run Audit&quot; to verify all game templates</p>

@@ -8,7 +8,7 @@ import { eq } from "drizzle-orm";
 // POST /api/games/custom — Create a fully custom game definition
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "games.install"))) {
+  if (!auth || (!(await hasPermission(auth.userId, "games.create_custom")) && !(await hasPermission(auth.userId, "games.install")))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

@@ -6,7 +6,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.mts"
   },
   "dependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -39,6 +40,7 @@
     "eslint-config-next": "^16.2.11",
     "postcss": "^8.5.22",
     "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.10",
     "typescript": "^5.9.3"
   }
 }

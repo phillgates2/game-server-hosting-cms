@@ -53,15 +53,15 @@ function GameForm({ form, setForm, onSave, onCancel, saveLabel, title }: {
   onSave: (e?: React.FormEvent) => Promise<void> | void; onCancel: () => void; saveLabel: string; title: string;
 }) {
   return (
-    <div className="bg-bg-card border border-accent/30 rounded-xl p-6 space-y-4">
+    <div className="gaming-surface border-accent/30 rounded-xl p-6 space-y-4">
       <div className="flex items-center justify-between"><h3 className="font-semibold">{title}</h3><button onClick={onCancel} className="text-text-muted text-xs">Cancel</button></div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div><label className="block text-xs text-text-muted mb-1">Name *</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" required /></div>
-        <div><label className="block text-xs text-text-muted mb-1">Slug *</label><input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm font-mono" required placeholder="my-game" /></div>
-        <div><label className="block text-xs text-text-muted mb-1">Engine</label><input value={form.engine} onChange={(e) => setForm({ ...form, engine: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" placeholder="Unity, UE5, Source..." /></div>
-        <div><label className="block text-xs text-text-muted mb-1">Default Port *</label><input type="number" value={form.defaultPort} onChange={(e) => setForm({ ...form, defaultPort: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" required /></div>
-        <div><label className="block text-xs text-text-muted mb-1">Steam App ID</label><input value={form.steamAppId} onChange={(e) => setForm({ ...form, steamAppId: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" placeholder="Optional" /></div>
-        <div><label className="block text-xs text-text-muted mb-1">Icon Emoji</label><input value={form.iconEmoji} onChange={(e) => setForm({ ...form, iconEmoji: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
+        <div><label className="block text-xs text-text-muted mb-1">Name *</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" required /></div>
+        <div><label className="block text-xs text-text-muted mb-1">Slug *</label><input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm font-mono" required placeholder="my-game" /></div>
+        <div><label className="block text-xs text-text-muted mb-1">Engine</label><input value={form.engine} onChange={(e) => setForm({ ...form, engine: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" placeholder="Unity, UE5, Source..." /></div>
+        <div><label className="block text-xs text-text-muted mb-1">Default Port *</label><input type="number" value={form.defaultPort} onChange={(e) => setForm({ ...form, defaultPort: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" required /></div>
+        <div><label className="block text-xs text-text-muted mb-1">Steam App ID</label><input value={form.steamAppId} onChange={(e) => setForm({ ...form, steamAppId: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" placeholder="Optional" /></div>
+        <div><label className="block text-xs text-text-muted mb-1">Icon Emoji</label><input value={form.iconEmoji} onChange={(e) => setForm({ ...form, iconEmoji: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" /></div>
       </div>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.supportsIpv6} onChange={(e) => setForm({ ...form, supportsIpv6: e.target.checked })} className="rounded" /> Supports IPv6</label>
       <ScriptEditor label="Install Script *" value={form.installScript} onChange={(v) => setForm({ ...form, installScript: v })} rows={12} />
@@ -200,7 +200,7 @@ export default function GamesPanel() {
   const installedSlugs = new Set(installedGames.map((g) => g.slug));
 
   return (
-    <div className="animate-fade-in space-y-6">
+    <div className="animate-fade-in panel-view space-y-6">
       <div className="flex items-center justify-between">
         <div><h2 className="text-2xl font-bold">🎮 Game Management</h2><p className="text-text-secondary text-sm">Install, create, and edit game templates</p></div>
         <div className="flex gap-2">
@@ -229,7 +229,7 @@ export default function GamesPanel() {
       {tab === "installed" && !editing && (
         <div className="space-y-4">
           {installedGames.length === 0 ? (
-            <div className="bg-bg-card border border-border rounded-xl p-12 text-center">
+            <div className="gaming-surface rounded-xl p-12 text-center">
               <span className="text-4xl block mb-3">📦</span><h3 className="font-semibold mb-1">No games installed</h3>
               <p className="text-text-secondary text-sm mb-4">Go to Templates or create a custom game</p>
               <button onClick={() => setTab("templates")} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium">Browse Templates →</button>
@@ -237,7 +237,7 @@ export default function GamesPanel() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {installedGames.map((game) => (
-                <div key={game.id} className="bg-bg-card border border-border rounded-xl p-5 hover:border-accent/30 transition-colors">
+                <div key={game.id} className="gaming-surface rounded-xl p-5 hover:border-accent/30 transition-colors">
                   <div className="flex items-start gap-3">
                     <span className="text-3xl">{game.iconEmoji || "🎮"}</span>
                     <div className="flex-1 min-w-0">
@@ -359,14 +359,14 @@ export default function GamesPanel() {
 
       {/* ═══ IMPORT ═══ */}
       {tab === "import" && (
-        <div className="bg-bg-card border border-border rounded-xl p-6 space-y-4">
+        <div className="gaming-surface rounded-xl p-6 space-y-4">
           <h3 className="font-semibold">📥 Import Game Template</h3>
           <p className="text-text-secondary text-sm">
             Paste a <strong>Pterodactyl egg JSON</strong> or an <strong>AMP template JSON</strong> to import it as a game definition.
           </p>
           <div>
             <label className="block text-xs text-text-muted mb-1">Format</label>
-            <select value={importFormat} onChange={(e) => setImportFormat(e.target.value)} className="px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm">
+            <select value={importFormat} onChange={(e) => setImportFormat(e.target.value)} className="px-3 py-2 gaming-chip rounded-lg text-sm">
               <option value="auto">Auto-detect</option>
               <option value="pterodactyl">Pterodactyl Egg (JSON)</option>
               <option value="amp">AMP Template (JSON)</option>

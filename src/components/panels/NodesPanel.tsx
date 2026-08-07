@@ -223,7 +223,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
   const hasLocalNode = nodes.some((n) => n.isLocal);
 
   return (
-    <div className="animate-fade-in space-y-6">
+    <div className="animate-fade-in panel-view space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">🖥️ Server Nodes</h2>
@@ -258,7 +258,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
 
       {/* Create form */}
       {showCreate && (
-        <form onSubmit={createNode} className="bg-bg-card border border-border rounded-xl p-6 space-y-4">
+        <form onSubmit={createNode} className="gaming-surface rounded-xl p-6 space-y-4">
           <h3 className="font-semibold">Add Remote Node</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div>
@@ -266,7 +266,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
               <input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm"
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
                 required
                 placeholder="US East Server"
               />
@@ -276,7 +276,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
               <input
                 value={form.hostname}
                 onChange={(e) => setForm({ ...form, hostname: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm"
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
                 required
                 placeholder="node1.example.com"
               />
@@ -286,7 +286,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
               <input
                 value={form.ipv4}
                 onChange={(e) => setForm({ ...form, ipv4: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm"
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
                 placeholder="192.168.1.100"
               />
             </div>
@@ -295,7 +295,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
               <input
                 value={form.ipv6}
                 onChange={(e) => setForm({ ...form, ipv6: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm"
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
                 placeholder="2001:db8::1"
               />
             </div>
@@ -305,7 +305,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
                 type="number"
                 value={form.sshPort}
                 onChange={(e) => setForm({ ...form, sshPort: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm"
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
               />
             </div>
             <div>
@@ -313,7 +313,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
               <input
                 value={form.sshUser}
                 onChange={(e) => setForm({ ...form, sshUser: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm"
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
               />
             </div>
             <div>
@@ -321,7 +321,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
               <input
                 value={form.sshKeyPath}
                 onChange={(e) => setForm({ ...form, sshKeyPath: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm"
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
                 placeholder="/root/.ssh/id_rsa"
               />
             </div>
@@ -331,7 +331,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
                 type="number"
                 value={form.maxServers}
                 onChange={(e) => setForm({ ...form, maxServers: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm"
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
               />
             </div>
             <div>
@@ -340,7 +340,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
                 type="number"
                 value={form.maxRamMb}
                 onChange={(e) => setForm({ ...form, maxRamMb: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm"
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
               />
             </div>
             <div>
@@ -348,7 +348,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
               <input
                 value={form.gameServerPath}
                 onChange={(e) => setForm({ ...form, gameServerPath: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm"
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
               />
             </div>
             <div>
@@ -356,7 +356,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
               <input
                 value={form.location}
                 onChange={(e) => setForm({ ...form, location: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm"
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
                 placeholder="New York, USA"
               />
             </div>
@@ -365,7 +365,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
               <input
                 value={form.provider}
                 onChange={(e) => setForm({ ...form, provider: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm"
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
                 placeholder="Hetzner, OVH, etc."
               />
             </div>
@@ -386,7 +386,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
             <textarea
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
-              className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm resize-y"
+              className="w-full px-3 py-2 gaming-chip rounded-lg text-sm resize-y"
               rows={2}
               placeholder="Optional description"
             />
@@ -403,7 +403,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
 
       {/* Node list */}
       {nodes.length === 0 ? (
-        <div className="bg-bg-card border border-border rounded-xl p-12 text-center">
+        <div className="gaming-surface rounded-xl p-12 text-center">
           <span className="text-4xl block mb-3">🖥️</span>
           <h3 className="text-lg font-semibold mb-1">No nodes configured</h3>
           <p className="text-text-secondary text-sm mb-4">
@@ -509,7 +509,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
 
       {/* Selected node details */}
       {selectedNode && user.role === "admin" && (
-        <div className="bg-bg-card border border-border rounded-xl p-6">
+        <div className="gaming-surface rounded-xl p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold">{selectedNode.name} — Details</h3>
             <div className="flex gap-2">
@@ -525,15 +525,15 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
             <div className="border-t border-border pt-4 mt-4 space-y-4">
               <h4 className="font-semibold text-sm">Edit Node</h4>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div><label className="block text-xs text-text-muted mb-1">Name</label><input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
-                <div><label className="block text-xs text-text-muted mb-1">Hostname</label><input value={editForm.hostname} onChange={(e) => setEditForm({ ...editForm, hostname: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
-                <div><label className="block text-xs text-text-muted mb-1">IPv4</label><input value={editForm.ipv4} onChange={(e) => setEditForm({ ...editForm, ipv4: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
-                <div><label className="block text-xs text-text-muted mb-1">SSH Port</label><input type="number" value={editForm.sshPort} onChange={(e) => setEditForm({ ...editForm, sshPort: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
-                <div><label className="block text-xs text-text-muted mb-1">Max Servers</label><input type="number" value={editForm.maxServers} onChange={(e) => setEditForm({ ...editForm, maxServers: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
-                <div><label className="block text-xs text-text-muted mb-1">Max RAM (MB)</label><input type="number" value={editForm.maxRamMb} onChange={(e) => setEditForm({ ...editForm, maxRamMb: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
-                <div><label className="block text-xs text-text-muted mb-1">Game Server Path</label><input value={editForm.gameServerPath} onChange={(e) => setEditForm({ ...editForm, gameServerPath: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
-                <div><label className="block text-xs text-text-muted mb-1">Location</label><input value={editForm.location} onChange={(e) => setEditForm({ ...editForm, location: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
-                <div><label className="block text-xs text-text-muted mb-1">Provider</label><input value={editForm.provider} onChange={(e) => setEditForm({ ...editForm, provider: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
+                <div><label className="block text-xs text-text-muted mb-1">Name</label><input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" /></div>
+                <div><label className="block text-xs text-text-muted mb-1">Hostname</label><input value={editForm.hostname} onChange={(e) => setEditForm({ ...editForm, hostname: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" /></div>
+                <div><label className="block text-xs text-text-muted mb-1">IPv4</label><input value={editForm.ipv4} onChange={(e) => setEditForm({ ...editForm, ipv4: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" /></div>
+                <div><label className="block text-xs text-text-muted mb-1">SSH Port</label><input type="number" value={editForm.sshPort} onChange={(e) => setEditForm({ ...editForm, sshPort: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" /></div>
+                <div><label className="block text-xs text-text-muted mb-1">Max Servers</label><input type="number" value={editForm.maxServers} onChange={(e) => setEditForm({ ...editForm, maxServers: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" /></div>
+                <div><label className="block text-xs text-text-muted mb-1">Max RAM (MB)</label><input type="number" value={editForm.maxRamMb} onChange={(e) => setEditForm({ ...editForm, maxRamMb: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" /></div>
+                <div><label className="block text-xs text-text-muted mb-1">Game Server Path</label><input value={editForm.gameServerPath} onChange={(e) => setEditForm({ ...editForm, gameServerPath: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" /></div>
+                <div><label className="block text-xs text-text-muted mb-1">Location</label><input value={editForm.location} onChange={(e) => setEditForm({ ...editForm, location: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" /></div>
+                <div><label className="block text-xs text-text-muted mb-1">Provider</label><input value={editForm.provider} onChange={(e) => setEditForm({ ...editForm, provider: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" /></div>
               </div>
               <div className="flex gap-2">
                 <button onClick={saveEditNode} className="px-4 py-2 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium">Save Changes</button>

@@ -28,7 +28,19 @@ GameServer Manager focuses on three priorities:
 | Monitoring | CPU/RAM/Disk/Network visibility in dashboard panels |
 | Automation | Scheduler, Discord notifications, and API key access |
 | Access control | Roles, granular permissions, JWT auth, optional TOTP 2FA |
+| Competitive tools | League Ladder panel with season standings and RBAC-protected management |
 | Platform extras | Built-in CMS and forum modules |
+
+---
+
+## Security and Permissions
+
+The panel includes an advanced role-based access model with granular permissions across operational and admin surfaces.
+
+- Role-aware dashboard navigation: modules are hidden when permission is missing
+- System roles auto-upgrade during installer role seeding
+- Fine-grained categories for servers, nodes, games, users, roles, forum, ladder, monitor, database, scheduler, API keys, security, and panel configuration
+- Route-level permission checks on critical APIs (scheduler, templates import/create, API keys, roles, ladder, and more)
 
 ---
 
@@ -191,7 +203,27 @@ sudo systemctl status caddy
 sudo journalctl -u caddy -f
 sudo iptables -t nat -L -n -v
 sudo iptables -L FORWARD -n -v
+npm run typecheck
+npm run lint
+npm test
+npm run build
 ```
+
+---
+
+## Quality Checks
+
+Recommended validation sequence before release:
+
+1. `npm run typecheck`
+2. `npm run lint`
+3. `npm test`
+4. `npm run build`
+
+Current note:
+
+- Next.js 16 Turbopack may emit a non-blocking NFT tracing warning for the process-control route during `next build` even when compilation succeeds.
+- Node module-type test warnings are avoided by running tests via the dev-only `tsx` runner, keeping package runtime module mode unchanged.
 
 ---
 

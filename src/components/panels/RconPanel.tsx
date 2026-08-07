@@ -174,7 +174,7 @@ export default function RconPanel({ user }: { user: AuthUser }) {
   const commands = quickCommands[gameSlug] || ["status", "help"];
 
   return (
-    <div className="animate-fade-in space-y-6">
+    <div className="animate-fade-in panel-view space-y-6">
       <div>
         <h2 className="text-2xl font-bold">🖥️ RCON Console</h2>
         <p className="text-text-secondary text-sm">Send remote commands to your game servers</p>
@@ -187,7 +187,7 @@ export default function RconPanel({ user }: { user: AuthUser }) {
           <select
             value={selectedServerId || ""}
             onChange={(e) => e.target.value && selectServer(Number(e.target.value))}
-            className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm"
+            className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
           >
             <option value="">Choose a running server...</option>
             {servers.map((s) => (
@@ -209,14 +209,14 @@ export default function RconPanel({ user }: { user: AuthUser }) {
             value={rconPassword}
             onChange={(e) => setRconPassword(e.target.value)}
             placeholder="Leave blank to use saved password"
-            className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm"
+            className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
           />
         </div>
       </div>
 
       {/* No running servers */}
       {loaded && servers.length === 0 && (
-        <div className="bg-bg-card border border-border rounded-xl p-8 text-center">
+        <div className="gaming-surface rounded-xl p-8 text-center">
           <span className="text-4xl block mb-2">🖥️</span>
           <p className="text-text-secondary">No running servers. Start a server first to use RCON.</p>
         </div>
@@ -236,7 +236,7 @@ export default function RconPanel({ user }: { user: AuthUser }) {
 
       {/* Terminal */}
       {selectedServerId && (
-        <div className="bg-bg-card border border-border rounded-xl overflow-hidden">
+        <div className="gaming-surface rounded-xl overflow-hidden">
           {/* Terminal output */}
           <div
             ref={terminalRef}
@@ -301,7 +301,7 @@ export default function RconPanel({ user }: { user: AuthUser }) {
               <button
                 key={cmd}
                 onClick={() => { setCommand(cmd); inputRef.current?.focus(); }}
-                className="px-3 py-1.5 bg-bg-secondary border border-border rounded-lg text-xs font-mono hover:border-accent/30 hover:text-accent transition-colors"
+                className="px-3 py-1.5 gaming-chip rounded-lg text-xs font-mono hover:border-accent/30 hover:text-accent transition-colors"
               >
                 {cmd}
               </button>

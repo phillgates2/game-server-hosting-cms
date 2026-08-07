@@ -118,7 +118,7 @@ export default function RolesPanel() {
   }
 
   return (
-    <div className="animate-fade-in space-y-6">
+    <div className="animate-fade-in panel-view space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">🔑 Roles & Permissions</h2>
@@ -133,13 +133,13 @@ export default function RolesPanel() {
 
       {/* Create */}
       {showCreate && (
-        <form onSubmit={createRole} className="bg-bg-card border border-border rounded-xl p-6 space-y-4">
+        <form onSubmit={createRole} className="gaming-surface rounded-xl p-6 space-y-4">
           <h3 className="font-semibold">Create Role</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div><label className="block text-xs text-text-muted mb-1">Internal Name *</label><input value={createForm.name} onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" required placeholder="vip" /></div>
-            <div><label className="block text-xs text-text-muted mb-1">Display Name *</label><input value={createForm.displayName} onChange={(e) => setCreateForm({ ...createForm, displayName: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" required placeholder="VIP Member" /></div>
-            <div><label className="block text-xs text-text-muted mb-1">Color</label><div className="flex gap-2"><input type="color" value={createForm.color} onChange={(e) => setCreateForm({ ...createForm, color: e.target.value })} className="w-10 h-10 rounded cursor-pointer bg-transparent border-0" /><input value={createForm.color} onChange={(e) => setCreateForm({ ...createForm, color: e.target.value })} className="flex-1 px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm font-mono" /></div></div>
-            <div><label className="block text-xs text-text-muted mb-1">Priority</label><input type="number" value={createForm.priority} onChange={(e) => setCreateForm({ ...createForm, priority: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
+            <div><label className="block text-xs text-text-muted mb-1">Internal Name *</label><input value={createForm.name} onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" required placeholder="vip" /></div>
+            <div><label className="block text-xs text-text-muted mb-1">Display Name *</label><input value={createForm.displayName} onChange={(e) => setCreateForm({ ...createForm, displayName: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" required placeholder="VIP Member" /></div>
+            <div><label className="block text-xs text-text-muted mb-1">Color</label><div className="flex gap-2"><input type="color" value={createForm.color} onChange={(e) => setCreateForm({ ...createForm, color: e.target.value })} className="w-10 h-10 rounded cursor-pointer bg-transparent border-0" /><input value={createForm.color} onChange={(e) => setCreateForm({ ...createForm, color: e.target.value })} className="flex-1 px-3 py-2 gaming-chip rounded-lg text-sm font-mono" /></div></div>
+            <div><label className="block text-xs text-text-muted mb-1">Priority</label><input type="number" value={createForm.priority} onChange={(e) => setCreateForm({ ...createForm, priority: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" /></div>
           </div>
           <h4 className="font-medium text-sm pt-2">Permissions</h4>
           <PermGrid perms={createPerms} onChange={setCreatePerms} categories={categories} />
@@ -149,16 +149,16 @@ export default function RolesPanel() {
 
       {/* Edit */}
       {editing && (
-        <div className="bg-bg-card border border-accent/30 rounded-xl p-6 space-y-4">
+        <div className="gaming-surface border-accent/30 rounded-xl p-6 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold">Editing: {editing.displayName} {editing.isSystem ? <span className="text-xs text-text-muted">(system)</span> : ""}</h3>
             <button onClick={() => setEditing(null)} className="text-text-muted text-xs">Cancel</button>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div><label className="block text-xs text-text-muted mb-1">Display Name</label><input value={editFields.displayName} onChange={(e) => setEditFields({ ...editFields, displayName: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
-            <div><label className="block text-xs text-text-muted mb-1">Color</label><div className="flex gap-2"><input type="color" value={editFields.color} onChange={(e) => setEditFields({ ...editFields, color: e.target.value })} className="w-10 h-10 rounded cursor-pointer bg-transparent border-0" /><input value={editFields.color} onChange={(e) => setEditFields({ ...editFields, color: e.target.value })} className="flex-1 px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm font-mono" /></div></div>
-            <div><label className="block text-xs text-text-muted mb-1">Icon</label><input value={editFields.icon} onChange={(e) => setEditFields({ ...editFields, icon: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
-            <div><label className="block text-xs text-text-muted mb-1">Priority</label><input type="number" value={editFields.priority} onChange={(e) => setEditFields({ ...editFields, priority: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" /></div>
+            <div><label className="block text-xs text-text-muted mb-1">Display Name</label><input value={editFields.displayName} onChange={(e) => setEditFields({ ...editFields, displayName: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" /></div>
+            <div><label className="block text-xs text-text-muted mb-1">Color</label><div className="flex gap-2"><input type="color" value={editFields.color} onChange={(e) => setEditFields({ ...editFields, color: e.target.value })} className="w-10 h-10 rounded cursor-pointer bg-transparent border-0" /><input value={editFields.color} onChange={(e) => setEditFields({ ...editFields, color: e.target.value })} className="flex-1 px-3 py-2 gaming-chip rounded-lg text-sm font-mono" /></div></div>
+            <div><label className="block text-xs text-text-muted mb-1">Icon</label><input value={editFields.icon} onChange={(e) => setEditFields({ ...editFields, icon: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" /></div>
+            <div><label className="block text-xs text-text-muted mb-1">Priority</label><input type="number" value={editFields.priority} onChange={(e) => setEditFields({ ...editFields, priority: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" /></div>
           </div>
           <h4 className="font-medium text-sm pt-2">Permissions</h4>
           <PermGrid perms={editPerms} onChange={setEditPerms} categories={categories} />
@@ -169,7 +169,7 @@ export default function RolesPanel() {
       {/* Roles list */}
       <div className="grid gap-3">
         {rolesList.map((role) => (
-          <div key={role.id} className="bg-bg-card border border-border rounded-xl p-5 flex items-center justify-between">
+          <div key={role.id} className="gaming-surface rounded-xl p-5 flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div className="w-10 h-10 rounded-full flex items-center justify-center text-xl" style={{ backgroundColor: `${role.color}20` }}>
                 {role.icon || "👤"}

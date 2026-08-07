@@ -4,6 +4,39 @@ All notable changes to GameServer Manager are documented in this file.
 
 ---
 
+## [2.5.0] — 2026-08-07
+
+### Added
+- New League Ladder feature with dedicated API and dashboard panel
+  - `GET/POST /api/ladder`
+  - `PATCH/DELETE /api/ladder/[id]`
+- New ladder permission category and keys:
+  - `ladder.view`, `ladder.create`, `ladder.edit`, `ladder.delete`, `ladder.season`, `ladder.publish`
+- Advanced permission expansion across multiple categories (servers, nodes, games, users, monitor, database, scheduler, API keys, security, panel)
+- New `npm test` script for reproducible repository test runs:
+  - `node --test --experimental-strip-types tests/*.test.ts`
+
+### Changed
+- Dashboard navigation now includes permission-gated League Ladder access
+- Scheduler and API key features now enforce advanced permission keys (with compatibility fallback where appropriate)
+- Installer role seeding now upgrades existing system role permissions by merging in newly introduced keys
+- UI polish pass extended across panel components for consistent gaming surface styles and staggered panel entrance animations
+- README updated with current feature set, validation commands, and quality-check guidance
+
+### Fixed
+- Resolved failing test import in `tests/server-path.test.ts` by using explicit TypeScript extension for Node ESM test execution
+- Converted dynamic fs import in server process route to static import for cleaner runtime behavior
+- Eliminated `MODULE_TYPELESS_PACKAGE_JSON` warnings during `npm test` by switching to the dev-only `tsx` test runner, without changing package-level runtime module behavior
+
+### Debug
+- Full repository validation executed:
+  - `npm run typecheck` passed
+  - `npm run lint` passed
+  - `npm test` passed (7/7)
+  - `npm run build` passed
+- Known non-blocking warning remains during Turbopack build:
+  - NFT tracing warning referencing `src/app/api/servers/[id]/process/route.ts`
+
 ## [2.4.2] — 2026-08-06
 
 ### Added

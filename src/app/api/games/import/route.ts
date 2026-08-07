@@ -8,7 +8,7 @@ import { eq } from "drizzle-orm";
 // POST /api/games/import — Import a Pterodactyl egg JSON or AMP template
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "games.install"))) {
+  if (!auth || (!(await hasPermission(auth.userId, "games.import")) && !(await hasPermission(auth.userId, "games.install")))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

@@ -44,7 +44,7 @@ export default function ActivityPanel() {
   }, [load]);
 
   return (
-    <div className="animate-fade-in space-y-6">
+    <div className="animate-fade-in panel-view space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">📋 Activity Log</h2>
@@ -56,7 +56,7 @@ export default function ActivityPanel() {
       {!loaded && <div className="text-center py-12"><div className="inline-block w-8 h-8 border-4 border-accent border-t-transparent rounded-full animate-spin" /></div>}
 
       {loaded && entries.length === 0 && (
-        <div className="bg-bg-card border border-border rounded-xl p-12 text-center">
+        <div className="gaming-surface rounded-xl p-12 text-center">
           <span className="text-4xl block mb-3">📋</span>
           <h3 className="font-semibold mb-1">No activity yet</h3>
           <p className="text-text-secondary text-sm">Actions will appear here as users interact with the panel.</p>
@@ -64,7 +64,7 @@ export default function ActivityPanel() {
       )}
 
       {entries.length > 0 && (
-        <div className="bg-bg-card border border-border rounded-xl overflow-hidden">
+        <div className="gaming-surface rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>

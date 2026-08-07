@@ -131,7 +131,7 @@ export default function MonitorPanel({ user }: { user: AuthUser }) {
 
   if (!data) {
     return (
-      <div className="animate-fade-in flex items-center justify-center p-12">
+      <div className="animate-fade-in panel-view flex items-center justify-center p-12">
         <div className="text-center">
           <div className="inline-block w-10 h-10 border-4 border-accent border-t-transparent rounded-full animate-spin mb-3" />
           <p className="text-text-secondary text-sm">Loading system metrics...</p>
@@ -141,7 +141,7 @@ export default function MonitorPanel({ user }: { user: AuthUser }) {
   }
 
   return (
-    <div className="animate-fade-in space-y-6">
+    <div className="animate-fade-in panel-view space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">Server Monitor</h2>
@@ -175,7 +175,7 @@ export default function MonitorPanel({ user }: { user: AuthUser }) {
 
       {/* RAM Details + Buffer Management */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-bg-card border border-border rounded-xl p-6">
+        <div className="gaming-surface rounded-xl p-6">
           <h3 className="font-semibold mb-4">🧠 Memory Details</h3>
           <div className="space-y-3">
             <MemRow label="Total RAM" value={`${data.memory.totalMb} MB`} />
@@ -191,7 +191,7 @@ export default function MonitorPanel({ user }: { user: AuthUser }) {
           </div>
         </div>
 
-        <div className="bg-bg-card border border-border rounded-xl p-6">
+        <div className="gaming-surface rounded-xl p-6">
           <h3 className="font-semibold mb-4">📦 Buffer/Cache Management</h3>
           <div className="space-y-4">
             {/* Buffer visualization */}
@@ -246,7 +246,7 @@ export default function MonitorPanel({ user }: { user: AuthUser }) {
       </div>
 
       {/* History chart (text-based) */}
-      <div className="bg-bg-card border border-border rounded-xl p-6">
+      <div className="gaming-surface rounded-xl p-6">
         <h3 className="font-semibold mb-4">📊 Resource History (Last 30 samples)</h3>
         <div className="overflow-x-auto">
           <div className="flex items-end gap-1 h-32 min-w-[600px]">
@@ -281,7 +281,7 @@ export default function MonitorPanel({ user }: { user: AuthUser }) {
 
       {/* Network & IPv6 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-bg-card border border-border rounded-xl p-6">
+        <div className="gaming-surface rounded-xl p-6">
           <h3 className="font-semibold mb-4">🌐 Network</h3>
           <div className="space-y-3">
             <MemRow label="Data Received" value={`${data.network.rxMb} MB`} color="text-success" />
@@ -289,7 +289,7 @@ export default function MonitorPanel({ user }: { user: AuthUser }) {
           </div>
         </div>
 
-        <div className="bg-bg-card border border-border rounded-xl p-6">
+        <div className="gaming-surface rounded-xl p-6">
           <h3 className="font-semibold mb-4">🌐 IPv6 Status</h3>
           <div className="space-y-3">
             <div className="flex items-center gap-2">
@@ -314,7 +314,7 @@ export default function MonitorPanel({ user }: { user: AuthUser }) {
 
 function MetricCard({ label, value, icon, color }: { label: string; value: string; icon: string; color: string }) {
   return (
-    <div className="bg-bg-card border border-border rounded-xl p-4">
+    <div className="gaming-surface rounded-xl p-4">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-text-muted text-xs">{label}</p>

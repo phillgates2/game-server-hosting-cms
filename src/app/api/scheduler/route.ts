@@ -9,6 +9,9 @@ import { eq, desc } from "drizzle-orm";
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await hasPermission(auth.userId, "scheduler.view")) && !(await hasPermission(auth.userId, "servers.edit"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
 
   try {
     const tasks = await db
@@ -37,7 +40,7 @@ export async function GET(req: NextRequest) {
 // POST /api/scheduler — Create a scheduled task
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "servers.edit"))) {
+  if (!auth || (!(await hasPermission(auth.userId, "scheduler.create")) && !(await hasPermission(auth.userId, "servers.edit")))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

@@ -128,7 +128,7 @@ export default function ProfilePanel() {
   const roleBadge = profile.role === "admin" ? "bg-danger/15 text-danger" : profile.role === "moderator" ? "bg-purple/15 text-purple" : "bg-accent/15 text-accent";
 
   return (
-    <div className="animate-fade-in space-y-6 max-w-4xl">
+    <div className="animate-fade-in panel-view space-y-6 max-w-4xl">
       <h2 className="text-2xl font-bold">👤 My Profile</h2>
 
       {message && (
@@ -138,7 +138,7 @@ export default function ProfilePanel() {
       )}
 
       {/* Profile card */}
-      <div className="bg-bg-card border border-border rounded-xl p-6">
+      <div className="gaming-surface rounded-xl p-6">
         <div className="flex items-start gap-6">
           <div className="w-20 h-20 rounded-full bg-accent/20 flex items-center justify-center text-accent text-3xl font-bold flex-shrink-0">
             {profile.username[0].toUpperCase()}
@@ -172,25 +172,25 @@ export default function ProfilePanel() {
 
       {/* Edit form */}
       {editMode && (
-        <form onSubmit={saveProfile} className="bg-bg-card border border-border rounded-xl p-6 space-y-4">
+        <form onSubmit={saveProfile} className="gaming-surface rounded-xl p-6 space-y-4">
           <h3 className="font-semibold">Edit Profile</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs text-text-muted mb-1">Email</label>
-              <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" />
+              <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" />
             </div>
             <div>
               <label className="block text-xs text-text-muted mb-1">Location</label>
-              <input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" placeholder="City, Country" />
+              <input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" placeholder="City, Country" />
             </div>
             <div>
               <label className="block text-xs text-text-muted mb-1">Website</label>
-              <input value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" placeholder="https://..." />
+              <input value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" placeholder="https://..." />
             </div>
           </div>
           <div>
             <label className="block text-xs text-text-muted mb-1">Bio</label>
-            <textarea value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} rows={3} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm resize-y" placeholder="Tell us about yourself..." />
+            <textarea value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} rows={3} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm resize-y" placeholder="Tell us about yourself..." />
           </div>
           <button type="submit" disabled={loading} className="px-6 py-2 bg-success hover:opacity-90 disabled:opacity-50 text-white rounded-lg text-sm font-medium">
             {loading ? "Saving..." : "Save Profile"}
@@ -199,7 +199,7 @@ export default function ProfilePanel() {
       )}
 
       {/* Password change */}
-      <div className="bg-bg-card border border-border rounded-xl p-6">
+      <div className="gaming-surface rounded-xl p-6">
         <button onClick={() => setShowPwChange(!showPwChange)} className="flex items-center gap-2 text-sm font-medium text-text-primary">
           🔒 Change Password <span className="text-text-muted text-xs">{showPwChange ? "▼" : "▶"}</span>
         </button>
@@ -208,15 +208,15 @@ export default function ProfilePanel() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs text-text-muted mb-1">Current Password</label>
-                <input type="password" value={pwForm.currentPassword} onChange={(e) => setPwForm({ ...pwForm, currentPassword: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" required />
+                <input type="password" value={pwForm.currentPassword} onChange={(e) => setPwForm({ ...pwForm, currentPassword: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" required />
               </div>
               <div>
                 <label className="block text-xs text-text-muted mb-1">New Password</label>
-                <input type="password" value={pwForm.newPassword} onChange={(e) => setPwForm({ ...pwForm, newPassword: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" required />
+                <input type="password" value={pwForm.newPassword} onChange={(e) => setPwForm({ ...pwForm, newPassword: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" required />
               </div>
               <div>
                 <label className="block text-xs text-text-muted mb-1">Confirm New Password</label>
-                <input type="password" value={pwForm.confirmPassword} onChange={(e) => setPwForm({ ...pwForm, confirmPassword: e.target.value })} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" required />
+                <input type="password" value={pwForm.confirmPassword} onChange={(e) => setPwForm({ ...pwForm, confirmPassword: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" required />
               </div>
             </div>
             <button type="submit" disabled={loading} className="px-6 py-2 bg-warning/80 hover:bg-warning text-white rounded-lg text-sm font-medium disabled:opacity-50">
@@ -228,7 +228,7 @@ export default function ProfilePanel() {
 
       {/* My servers */}
       {servers.length > 0 && (
-        <div className="bg-bg-card border border-border rounded-xl p-6">
+        <div className="gaming-surface rounded-xl p-6">
           <h3 className="font-semibold mb-4">🎮 My Servers ({servers.length})</h3>
           <div className="space-y-2">
             {servers.map((s) => (
@@ -242,7 +242,7 @@ export default function ProfilePanel() {
       )}
 
       {/* Security info */}
-      <div className="bg-bg-card border border-border rounded-xl p-6">
+      <div className="gaming-surface rounded-xl p-6">
         <h3 className="font-semibold mb-4">🔐 Security</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
           <div>
@@ -269,7 +269,7 @@ export default function ProfilePanel() {
 
 function MiniStat({ label, value, icon }: { label: string; value: string; icon: string }) {
   return (
-    <div className="bg-bg-card border border-border rounded-xl p-4">
+    <div className="gaming-surface rounded-xl p-4">
       <div className="flex items-center gap-2 mb-1">
         <span>{icon}</span>
         <span className="text-text-muted text-xs">{label}</span>

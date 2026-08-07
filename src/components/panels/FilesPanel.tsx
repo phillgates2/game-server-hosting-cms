@@ -197,14 +197,14 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
   const isEditable = editingFile && !editingFile.tooLarge && EDITABLE_EXTS.has((editingFile.name.split(".").pop() || "").toLowerCase());
 
   return (
-    <div className="animate-fade-in space-y-4">
+    <div className="animate-fade-in panel-view space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">📂 File Manager</h2>
           <p className="text-text-secondary text-sm">Browse and edit server files</p>
         </div>
         <select value={selectedId || ""} onChange={(e) => e.target.value && selectServer(Number(e.target.value))}
-          className="px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm min-w-[220px]">
+          className="px-3 py-2 gaming-chip rounded-lg text-sm min-w-[220px]">
           <option value="">Select a server...</option>
           {servers.map((s) => <option key={s.id} value={s.id}>{s.gameIcon} {s.name}</option>)}
         </select>
@@ -220,8 +220,8 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
         <>
           {/* Toolbar */}
           <div className="flex items-center gap-2 flex-wrap">
-            <button onClick={goUp} disabled={currentPath === "."} className="px-3 py-1.5 bg-bg-secondary border border-border rounded-lg text-xs disabled:opacity-30">⬆️ Up</button>
-            <button onClick={() => loadDir(selectedId, currentPath)} className="px-3 py-1.5 bg-bg-secondary border border-border rounded-lg text-xs">🔄 Refresh</button>
+            <button onClick={goUp} disabled={currentPath === "."} className="px-3 py-1.5 gaming-chip rounded-lg text-xs disabled:opacity-30">⬆️ Up</button>
+            <button onClick={() => loadDir(selectedId, currentPath)} className="px-3 py-1.5 gaming-chip rounded-lg text-xs">🔄 Refresh</button>
             <button onClick={() => { setShowNewDialog("file"); setNewName(""); }} className="px-3 py-1.5 bg-accent/15 text-accent rounded-lg text-xs">📄 New File</button>
             <button onClick={() => { setShowNewDialog("dir"); setNewName(""); }} className="px-3 py-1.5 bg-accent/15 text-accent rounded-lg text-xs">📁 New Folder</button>
             <label className={`px-3 py-1.5 bg-success/15 text-success rounded-lg text-xs cursor-pointer ${uploading ? "opacity-50" : ""}`}>
@@ -249,7 +249,7 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
             <div className="flex items-center gap-2 bg-bg-card border border-border rounded-lg p-3">
               <span className="text-sm">{showNewDialog === "file" ? "📄" : "📁"} New {showNewDialog}:</span>
               <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={showNewDialog === "file" ? "filename.cfg" : "folder-name"}
-                className="flex-1 px-3 py-1.5 bg-bg-secondary border border-border rounded-lg text-sm" autoFocus
+                className="flex-1 px-3 py-1.5 gaming-chip rounded-lg text-sm" autoFocus
                 onKeyDown={(e) => e.key === "Enter" && createNew(showNewDialog)} />
               <button onClick={() => createNew(showNewDialog)} className="px-3 py-1.5 bg-success text-white rounded-lg text-xs">Create</button>
               <button onClick={() => setShowNewDialog(null)} className="px-3 py-1.5 bg-bg-secondary text-text-muted rounded-lg text-xs">Cancel</button>
@@ -260,7 +260,7 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
           {!loaded && <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-accent border-t-transparent rounded-full animate-spin" /></div>}
 
           {loaded && (
-            <div className="bg-bg-card border border-border rounded-xl overflow-hidden">
+            <div className="gaming-surface rounded-xl overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-text-muted">
@@ -341,7 +341,7 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
           </div>
 
           {editingFile.tooLarge ? (
-            <div className="bg-bg-card border border-border rounded-xl p-8 text-center">
+            <div className="gaming-surface rounded-xl p-8 text-center">
               <span className="text-3xl block mb-2">📦</span>
               <p className="text-text-secondary">File too large to edit in browser ({fmtSize(editingFile.size)})</p>
               <button onClick={() => { if (selectedId) downloadFile({ name: editingFile.name, path: editingFile.path, isDir: false, size: editingFile.size, modified: "", ext: null }); }}
@@ -353,7 +353,7 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
               spellCheck={false}
               onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); saveFile(); } }} />
           ) : (
-            <div className="bg-bg-card border border-border rounded-xl p-8 text-center">
+            <div className="gaming-surface rounded-xl p-8 text-center">
               <span className="text-3xl block mb-2">{fileIcon(editingFile.name.split(".").pop() || null, false)}</span>
               <p className="text-text-secondary">Binary file — cannot edit in browser</p>
               <button onClick={() => { if (selectedId) downloadFile({ name: editingFile.name, path: editingFile.path, isDir: false, size: editingFile.size, modified: "", ext: null }); }}
@@ -364,7 +364,7 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
       )}
 
       {!selectedId && (
-        <div className="bg-bg-card border border-border rounded-xl p-12 text-center">
+        <div className="gaming-surface rounded-xl p-12 text-center">
           <span className="text-4xl block mb-3">📂</span>
           <h3 className="font-semibold mb-1">Select a Server</h3>
           <p className="text-text-secondary text-sm">Choose a server from the dropdown to browse its files</p>

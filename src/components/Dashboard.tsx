@@ -19,6 +19,7 @@ import AuditPanel from "./panels/AuditPanel";
 import ActivityPanel from "./panels/ActivityPanel";
 import SchedulerPanel from "./panels/SchedulerPanel";
 import ApiKeysPanel from "./panels/ApiKeysPanel";
+import LadderPanel from "./panels/LadderPanel";
 import { ThemeToggleButton } from "./ThemeToggle";
 import { NotificationBell } from "./NotificationCenter";
 import { LanguageSelector } from "@/lib/i18n";
@@ -29,7 +30,7 @@ interface AuthUser {
 }
 interface Props { user: AuthUser; onLogout: () => void }
 
-type Tab = "overview" | "servers" | "files" | "rcon" | "nodes" | "games" | "audit" | "monitor" | "forum" | "cms" | "users" | "roles" | "profile" | "database" | "activity" | "scheduler" | "apikeys";
+type Tab = "overview" | "servers" | "files" | "rcon" | "nodes" | "games" | "audit" | "monitor" | "forum" | "cms" | "ladder" | "users" | "roles" | "profile" | "database" | "activity" | "scheduler" | "apikeys";
 
 interface NavItem { key: Tab; label: string; icon: string; permission?: string; section: string; shortcut?: string }
 
@@ -44,12 +45,13 @@ const NAV_ITEMS: NavItem[] = [
   { key: "monitor", label: "Monitor", icon: "📈", permission: "monitor.view", section: "main", shortcut: "M" },
   { key: "forum", label: "Forum", icon: "💬", permission: "forum.view", section: "community" },
   { key: "cms", label: "CMS", icon: "✍️", permission: "cms.view", section: "community" },
+  { key: "ladder", label: "League Ladder", icon: "🏆", permission: "ladder.view", section: "community", shortcut: "L" },
   { key: "users", label: "Users", icon: "👥", permission: "users.view", section: "admin", shortcut: "U" },
   { key: "roles", label: "Roles", icon: "🔑", permission: "roles.view", section: "admin" },
   { key: "database", label: "Database", icon: "🗄️", permission: "database.view", section: "admin", shortcut: "D" },
   { key: "activity", label: "Activity Log", icon: "📋", permission: "panel.settings", section: "admin" },
-  { key: "scheduler", label: "Scheduler", icon: "⏰", permission: "servers.edit", section: "main" },
-  { key: "apikeys", label: "API Keys", icon: "🔐", section: "account" },
+  { key: "scheduler", label: "Scheduler", icon: "⏰", permission: "scheduler.view", section: "main" },
+  { key: "apikeys", label: "API Keys", icon: "🔐", permission: "apikeys.view", section: "account" },
   { key: "profile", label: "My Profile", icon: "👤", section: "account", shortcut: "P" },
 ];
 
@@ -66,6 +68,7 @@ const TAB_META: Record<Tab, { title: string; subtitle: string }> = {
   monitor: { title: "Monitor", subtitle: "Track system health, memory, and buffer/cache usage." },
   forum: { title: "Forum", subtitle: "Community discussions, moderation, and user profiles." },
   cms: { title: "CMS", subtitle: "Publish blog posts, pages, and changelogs." },
+  ladder: { title: "League Ladder", subtitle: "Season standings, team rankings, and competitive records." },
   users: { title: "Users", subtitle: "Manage accounts, limits, roles, and account status." },
   roles: { title: "Roles", subtitle: "Create advanced roles and assign granular permissions." },
   profile: { title: "My Profile", subtitle: "Update your account details, password, and security info." },
@@ -83,12 +86,6 @@ export default function Dashboard({ user, onLogout }: Props) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Array<{ type: string; icon: string; id: number; title: string; subtitle: string }>>([]);
-  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({
-    main: false,
-    community: false,
-    admin: false,
-    account: false,
-  });
 
   const loadPerms = useCallback(async () => {
     try { const res = await fetch("/api/auth/permissions"); if (res.ok) setPerms((await res.json()).permissions || {}); } catch { /**/ }
@@ -182,6 +179,7 @@ export default function Dashboard({ user, onLogout }: Props) {
       case "monitor": return <MonitorPanel user={user} />;
       case "forum": return <ForumPanel user={user} />;
       case "cms": return <CmsPanel />;
+      case "ladder": return <LadderPanel />;
       case "users": return <UsersPanel />;
       case "roles": return <RolesPanel />;
       case "profile": return <ProfilePanel />;
@@ -198,35 +196,40 @@ export default function Dashboard({ user, onLogout }: Props) {
   const roleName = user.roleName || user.role;
 
   return (
-    <div className="min-h-screen flex">
+    <div className="dashboard-shell min-h-screen flex relative isolate">
       {/* Mobile overlay */}
-      {mobileMenuOpen && <div className="fixed inset-0 bg-black/50 z-30 lg:hidden" onClick={() => setMobileMenuOpen(false)} />}
+      {mobileMenuOpen && <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 lg:hidden" onClick={() => setMobileMenuOpen(false)} />}
 
       {/* Sidebar */}
       <aside className={`
-        ${sidebarOpen ? "w-64" : "w-16"} bg-bg-secondary border-r border-border flex flex-col transition-all duration-300 flex-shrink-0
+        ${sidebarOpen ? "w-72" : "w-20"} gaming-surface border-r border-border/80 flex flex-col transition-all duration-300 flex-shrink-0
         fixed lg:relative inset-y-0 left-0 z-40
         ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
       `}>
-        <div className="p-4 border-b border-border flex items-center gap-3">
-          <span className="text-2xl">🎮</span>
-          {sidebarOpen && <div className="overflow-hidden"><h1 className="text-sm font-bold whitespace-nowrap">GameServer Manager</h1><p className="text-[10px] text-text-muted">v1.0.0</p></div>}
+        <div className="p-4 border-b border-border/80 flex items-center gap-3">
+          <span className="text-2xl pulse-glow">🎮</span>
+          {sidebarOpen && (
+            <div className="overflow-hidden">
+              <h1 className="heading-font text-sm font-bold uppercase tracking-[0.18em] whitespace-nowrap">GameServer Hub</h1>
+              <p className="text-[10px] text-text-muted tracking-[0.12em] uppercase">Control Room v1.0.0</p>
+            </div>
+          )}
         </div>
 
-        <nav className="flex-1 overflow-y-auto p-2 space-y-3">
+        <nav className="flex-1 overflow-y-auto p-3 space-y-4">
           {Object.entries(sections).map(([sKey, items]) => (
             <div key={sKey}>
-              {sidebarOpen && <p className="text-[10px] text-text-muted uppercase tracking-wider px-3 mb-1">{SECTION_LABELS[sKey] || sKey}</p>}
-              <div className="space-y-0.5">
+              {sidebarOpen && <p className="text-[10px] text-text-muted uppercase tracking-[0.2em] px-3 mb-2">{SECTION_LABELS[sKey] || sKey}</p>}
+              <div className="space-y-1">
                 {items.map((item) => (
                   <button key={item.key} onClick={() => navTo(item.key)}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${tab === item.key ? "bg-accent/15 text-accent" : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"}`}>
-                    <span className="text-base">{item.icon}</span>
+                    className={`nav-button w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium ${tab === item.key ? "nav-button-active text-accent" : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"}`}>
+                    <span className="text-base drop-shadow">{item.icon}</span>
                     {sidebarOpen && (
                       <span className="flex-1 text-left">{item.label}</span>
                     )}
                     {sidebarOpen && item.shortcut && (
-                      <kbd className="text-[9px] text-text-muted bg-bg-tertiary px-1.5 py-0.5 rounded font-mono">{item.shortcut}</kbd>
+                      <kbd className="text-[9px] text-text-muted gaming-chip px-1.5 py-0.5 rounded font-mono">{item.shortcut}</kbd>
                     )}
                   </button>
                 ))}
@@ -235,36 +238,37 @@ export default function Dashboard({ user, onLogout }: Props) {
           ))}
         </nav>
 
-        <div className="p-3 border-t border-border">
-          <button onClick={() => navTo("profile")} className="w-full flex items-center gap-3 mb-3 hover:bg-bg-hover rounded-lg p-1 transition-colors">
+        <div className="p-3 border-t border-border/80">
+          <button onClick={() => navTo("profile")} className="w-full flex items-center gap-3 mb-3 hover:bg-bg-hover rounded-xl p-2 transition-colors">
             <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ backgroundColor: `${roleColor}20`, color: roleColor }}>{user.username[0].toUpperCase()}</div>
             {sidebarOpen && <div className="overflow-hidden text-left"><p className="text-sm font-medium truncate">{user.username}</p><p className="text-[10px] truncate" style={{ color: roleColor }}>{roleIcon} {roleName}</p></div>}
           </button>
           <div className="flex gap-2">
-            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="flex-1 px-2 py-1.5 bg-bg-tertiary hover:bg-bg-hover text-text-muted text-xs rounded hidden lg:block">{sidebarOpen ? "◀" : "▶"}</button>
+            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="flex-1 px-2 py-1.5 gaming-chip hover:bg-bg-hover text-text-muted text-xs rounded hidden lg:block">{sidebarOpen ? "◀" : "▶"}</button>
             {sidebarOpen && <ThemeToggleButton compact />}
             {sidebarOpen && <LanguageSelector compact />}
-            {sidebarOpen && <button onClick={handleLogout} className="flex-1 px-2 py-1.5 bg-danger/10 hover:bg-danger/20 text-danger text-xs rounded">Logout</button>}
+            {sidebarOpen && <button onClick={handleLogout} className="flex-1 px-2 py-1.5 bg-danger/10 hover:bg-danger/20 border border-danger/30 text-danger text-xs rounded">Logout</button>}
           </div>
         </div>
       </aside>
 
       {/* Main */}
-      <main className="flex-1 overflow-auto min-w-0">
-        <div className="p-4 lg:p-6 space-y-6">
+      <main className="flex-1 overflow-auto min-w-0 relative z-10">
+        <div className="p-4 lg:p-6 space-y-6 animate-panel-lift">
           {/* Top bar */}
-          <div className="bg-bg-card border border-border rounded-xl px-4 py-3 lg:px-5 lg:py-4 flex items-center justify-between gap-3">
+          <div className="gaming-surface rounded-2xl px-4 py-3 lg:px-5 lg:py-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <button onClick={() => setMobileMenuOpen(true)} className="lg:hidden text-text-muted hover:text-text-primary p-1">
                 <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
               </button>
               <div>
-                <h2 className="text-lg lg:text-xl font-bold">{TAB_META[tab].title}</h2>
+                <p className="text-[10px] uppercase tracking-[0.22em] text-text-muted">Operations</p>
+                <h2 className="heading-font text-lg lg:text-xl font-bold uppercase tracking-[0.1em]">{TAB_META[tab].title}</h2>
                 <p className="text-text-secondary text-xs lg:text-sm hidden sm:block">{TAB_META[tab].subtitle}</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={() => setPaletteOpen(true)} className="px-3 py-1.5 bg-bg-secondary border border-border hover:border-accent/30 text-text-muted rounded-lg text-xs transition-colors hidden sm:flex items-center gap-1.5">
+              <button onClick={() => setPaletteOpen(true)} className="px-3 py-1.5 gaming-chip hover:border-accent/30 text-text-muted rounded-lg text-xs transition-colors hidden sm:flex items-center gap-1.5">
                 <span>⌘K</span> <span className="hidden md:inline">Quick Jump</span>
               </button>
               <NotificationBell />
@@ -278,7 +282,7 @@ export default function Dashboard({ user, onLogout }: Props) {
       {/* Command Palette */}
       {paletteOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-start justify-center p-4" onClick={() => setPaletteOpen(false)}>
-          <div className="w-full max-w-2xl bg-bg-card border border-border rounded-2xl shadow-2xl overflow-hidden mt-16 lg:mt-20" onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-2xl gaming-surface rounded-2xl shadow-2xl overflow-hidden mt-16 lg:mt-20" onClick={(e) => e.stopPropagation()}>
             <div className="p-4 border-b border-border">
               <input autoFocus value={paletteQuery} onChange={(e) => setPaletteQuery(e.target.value)} placeholder="Search pages and actions..." className="w-full px-4 py-3 bg-bg-secondary border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-accent" />
               <p className="text-[10px] text-text-muted mt-2">Tip: type a page name or press its shortcut key. Esc to close.</p>
@@ -314,7 +318,7 @@ export default function Dashboard({ user, onLogout }: Props) {
                         <p className="font-medium text-sm">{item.title}</p>
                         <p className="text-xs text-text-muted truncate">{item.subtitle}</p>
                       </div>
-                      {item.shortcut && <kbd className="text-[10px] text-text-muted bg-bg-secondary px-2 py-1 rounded font-mono">{item.shortcut}</kbd>}
+                      {item.shortcut && <kbd className="text-[10px] text-text-muted gaming-chip px-2 py-1 rounded font-mono">{item.shortcut}</kbd>}
                     </button>
                   ))}
                 </div>

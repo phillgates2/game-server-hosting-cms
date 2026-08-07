@@ -109,7 +109,7 @@ export default function UsersPanel() {
   };
 
   return (
-    <div className="animate-fade-in space-y-6">
+    <div className="animate-fade-in panel-view space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">👥 User Management</h2>
@@ -120,7 +120,7 @@ export default function UsersPanel() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search users..."
-            className="px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm w-56"
+            className="px-3 py-2 gaming-chip rounded-lg text-sm w-56"
           />
         </div>
       </div>
@@ -141,7 +141,7 @@ export default function UsersPanel() {
 
       {/* Edit modal */}
       {editing && (
-        <div className="bg-bg-card border border-accent/30 rounded-xl p-6 space-y-4">
+        <div className="gaming-surface border-accent/30 rounded-xl p-6 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold">Editing: {editing.username}</h3>
             <button onClick={() => setEditing(null)} className="text-text-muted text-xs hover:text-text-primary">Cancel</button>
@@ -150,7 +150,7 @@ export default function UsersPanel() {
             <div>
               <label className="block text-xs text-text-muted mb-1">Role</label>
               <select value={editForm.role} onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm">
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm">
                 <option value="user">User</option>
                 <option value="moderator">Moderator</option>
                 <option value="admin">Admin</option>
@@ -159,7 +159,7 @@ export default function UsersPanel() {
             <div>
               <label className="block text-xs text-text-muted mb-1">Status</label>
               <select value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm">
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm">
                 <option value="active">Active</option>
                 <option value="suspended">Suspended</option>
                 <option value="banned">Banned</option>
@@ -168,17 +168,17 @@ export default function UsersPanel() {
             <div>
               <label className="block text-xs text-text-muted mb-1">Max Servers</label>
               <input type="number" value={editForm.maxServers} onChange={(e) => setEditForm({ ...editForm, maxServers: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" />
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" />
             </div>
             <div>
               <label className="block text-xs text-text-muted mb-1">Email</label>
               <input value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" />
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" />
             </div>
             <div>
               <label className="block text-xs text-text-muted mb-1">Reset Password</label>
               <input type="password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
-                placeholder="Leave blank to keep" className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm" />
+                placeholder="Leave blank to keep" className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" />
             </div>
           </div>
           <button onClick={saveEdit} className="px-6 py-2 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium">Save Changes</button>
@@ -189,7 +189,7 @@ export default function UsersPanel() {
       {!loaded && <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-accent border-t-transparent rounded-full animate-spin" /></div>}
 
       {loaded && usersList.length > 0 && (
-        <div className="bg-bg-card border border-border rounded-xl overflow-hidden">
+        <div className="gaming-surface rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -251,7 +251,7 @@ export default function UsersPanel() {
 
 function StatCard({ label, value, icon }: { label: string; value: number; icon: string }) {
   return (
-    <div className="bg-bg-card border border-border rounded-xl p-4 text-center">
+    <div className="gaming-surface rounded-xl p-4 text-center">
       <span className="text-xl">{icon}</span>
       <p className="text-2xl font-bold mt-1">{value}</p>
       <p className="text-text-muted text-xs">{label}</p>

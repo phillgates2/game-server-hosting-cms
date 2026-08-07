@@ -368,7 +368,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   const groupedServers = groupServersByNode(filteredServers);
   const serverSummary = summarizeServerStatus(servers);
   const visibleVars = gameVars.filter((v) => !["SERVER_NAME","PORT","INSTALL_PATH","QUERY_PORT"].includes(v.env_variable));
-  const inputCls = "w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/50 transition-colors";
+  const inputCls = "w-full px-3 py-2.5 gaming-chip rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/50 transition-colors";
   const hasActiveFilters = Boolean(searchQuery.trim()) || statusFilter !== "all";
   const installPathPreview = selectedNode && selectedGame && form.name
     ? `${selectedNode.gameServerPath || "/home/gameservers"}/${slugify(selectedGame.slug)}/${slugify(form.name)}`
@@ -405,7 +405,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   }
 
   return (
-    <div className="animate-fade-in space-y-6">
+    <div className="animate-fade-in panel-view space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
@@ -450,7 +450,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
 
       {/* ═══ CREATE WIZARD ═══ */}
       {wizard && onlineNodes.length > 0 && games.length > 0 && (
-        <div className="bg-bg-card border border-accent/30 rounded-xl overflow-hidden shadow-lg">
+        <div className="gaming-surface border-accent/30 rounded-xl overflow-hidden shadow-lg">
           <div className="flex border-b border-border">
             {["① Basics", "② Game Settings", "③ Confirm"].map((label, i) => (
               <button key={i} onClick={() => i <= wizardStep && setWizardStep(i)} className={`flex-1 py-3 text-xs font-medium transition-colors ${i === wizardStep ? "bg-accent/10 text-accent border-b-2 border-accent" : i < wizardStep ? "text-success bg-success/5" : "text-text-muted"}`}>{i < wizardStep ? `✓ ${label.slice(2)}` : label}</button>
@@ -480,7 +480,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
               <div className="space-y-5">
                 <p className="text-text-secondary text-sm">Configure {selectedGame?.name || "game"} settings. Defaults are already filled in.</p>
                 {visibleVars.length > 0 ? (<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">{visibleVars.map((v) => <VarField key={v.env_variable} v={v} />)}</div>) : (<div className="bg-bg-secondary rounded-lg p-6 text-center text-text-muted text-sm">No additional settings for this game.</div>)}
-                <div className="flex justify-between pt-2"><button type="button" onClick={() => setWizardStep(0)} className="px-5 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm font-medium">← Back</button><button type="button" onClick={() => setWizardStep(2)} className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium">Next →</button></div>
+                <div className="flex justify-between pt-2"><button type="button" onClick={() => setWizardStep(0)} className="px-5 py-2.5 gaming-chip rounded-lg text-sm font-medium">← Back</button><button type="button" onClick={() => setWizardStep(2)} className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium">Next →</button></div>
               </div>
             )}
             {wizardStep === 2 && (
@@ -499,7 +499,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                   )}
                 </div>
                 {error && <p className="text-danger text-sm">❌ {error}</p>}
-                <div className="flex justify-between pt-2"><button type="button" onClick={() => setWizardStep(1)} className="px-5 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm font-medium">← Back</button><button type="submit" disabled={loading || !canCreate} className="px-8 py-2.5 bg-success hover:opacity-90 disabled:opacity-40 text-white rounded-lg text-sm font-medium shadow-sm">{loading ? "Creating..." : "🚀 Create Server"}</button></div>
+                <div className="flex justify-between pt-2"><button type="button" onClick={() => setWizardStep(1)} className="px-5 py-2.5 gaming-chip rounded-lg text-sm font-medium">← Back</button><button type="submit" disabled={loading || !canCreate} className="px-8 py-2.5 bg-success hover:opacity-90 disabled:opacity-40 text-white rounded-lg text-sm font-medium shadow-sm">{loading ? "Creating..." : "🚀 Create Server"}</button></div>
               </div>
             )}
           </form>
@@ -508,7 +508,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
 
       {/* ═══ CONSOLE ═══ */}
       {consoleId && (
-        <div className="bg-bg-card border border-border rounded-xl overflow-hidden">
+        <div className="gaming-surface rounded-xl overflow-hidden">
           <div className="bg-bg-secondary px-5 py-3 border-b border-border flex items-center justify-between">
             <div className="flex items-center gap-3"><h3 className="font-semibold text-sm">📋 Console</h3><span className="text-xs text-text-muted">{servers.find((s) => s.id === consoleId)?.name}</span>{consoleInfo && <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${consoleInfo.status === "running" ? "bg-success/15 text-success" : "bg-bg-tertiary text-text-muted"}`}>{consoleInfo.status}{consoleInfo.pid ? ` · PID ${consoleInfo.pid}` : ""}</span>}</div>
             <div className="flex gap-2"><button onClick={() => fetchLog(consoleId)} className="text-accent text-xs">↻</button><button onClick={() => setConsoleId(null)} className="text-text-muted text-xs">✕</button></div>
@@ -520,7 +520,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
 
       {/* ═══ INSTALL LOG ═══ */}
       {installLog && (
-        <div className="bg-bg-card border border-border rounded-xl overflow-hidden">
+        <div className="gaming-surface rounded-xl overflow-hidden">
           <div className="bg-bg-secondary px-5 py-3 border-b border-border flex items-center justify-between"><h3 className="font-semibold text-sm">{installLog.success ? "✅" : "⚠️"} Install Log</h3><button onClick={() => setInstallLog(null)} className="text-text-muted text-xs">✕</button></div>
           <div className="p-4 max-h-72 overflow-y-auto bg-[#0d1117] font-mono text-xs whitespace-pre-wrap leading-relaxed">{installLog.output && <div className="text-text-secondary">{installLog.output}</div>}{installLog.error && <div className="text-danger mt-2">{installLog.error}</div>}</div>
         </div>
@@ -531,7 +531,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
 
       {/* ═══ EMPTY ═══ */}
       {loaded && servers.length === 0 && !wizard && (
-        <div className="bg-bg-card border border-border rounded-xl p-16 text-center">
+        <div className="gaming-surface rounded-xl p-16 text-center">
           <span className="text-5xl block mb-4">🎮</span><h3 className="text-xl font-bold mb-2">No servers yet</h3>
           <p className="text-text-secondary mb-6 max-w-md mx-auto">Create your first game server. The wizard will guide you through choosing a game, settings, and installing files.</p>
           <button onClick={() => { setWizard(true); setWizardStep(0); }} className="px-6 py-3 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium shadow-sm">+ Create Your First Server</button>

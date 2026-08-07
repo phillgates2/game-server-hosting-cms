@@ -119,7 +119,7 @@ export default function ForumPanel({ user }: { user: AuthUser }) {
   const fmtFull = (d: string) => new Date(d).toLocaleString();
 
   return (
-    <div className="animate-fade-in space-y-6">
+    <div className="animate-fade-in panel-view space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm">
         <button onClick={() => setView("categories")} className="text-accent hover:underline">Forum</button>
@@ -136,11 +136,11 @@ export default function ForumPanel({ user }: { user: AuthUser }) {
         <div className="space-y-4">
           <h2 className="text-2xl font-bold">💬 Forum</h2>
           {categories.length === 0 ? (
-            <div className="bg-bg-card border border-border rounded-xl p-8 text-center text-text-secondary">No forum categories. Run the installer.</div>
+            <div className="gaming-surface rounded-xl p-8 text-center text-text-secondary">No forum categories. Run the installer.</div>
           ) : (
             <div className="grid gap-3">
               {categories.map((cat) => (
-                <button key={cat.id} onClick={() => openCategory(cat)} className="bg-bg-card border border-border rounded-xl p-5 text-left hover:border-accent/30 transition-colors w-full">
+                <button key={cat.id} onClick={() => openCategory(cat)} className="gaming-surface rounded-xl p-5 text-left hover:border-accent/30 transition-colors w-full">
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="font-semibold">{cat.name}</h3>
@@ -173,17 +173,17 @@ export default function ForumPanel({ user }: { user: AuthUser }) {
           </div>
 
           {showNewThread && (
-            <form onSubmit={createThread} className="bg-bg-card border border-border rounded-xl p-6 space-y-4">
-              <input value={newThread.title} onChange={(e) => setNewThread({ ...newThread, title: e.target.value })} placeholder="Thread title" className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm" required />
-              <textarea value={newThread.body} onChange={(e) => setNewThread({ ...newThread, body: e.target.value })} placeholder="Write your post..." rows={5} className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm resize-y" required />
+            <form onSubmit={createThread} className="gaming-surface rounded-xl p-6 space-y-4">
+              <input value={newThread.title} onChange={(e) => setNewThread({ ...newThread, title: e.target.value })} placeholder="Thread title" className="w-full px-4 py-2.5 gaming-chip rounded-lg text-sm" required />
+              <textarea value={newThread.body} onChange={(e) => setNewThread({ ...newThread, body: e.target.value })} placeholder="Write your post..." rows={5} className="w-full px-4 py-2.5 gaming-chip rounded-lg text-sm resize-y" required />
               <button type="submit" className="px-6 py-2 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium">Create Thread</button>
             </form>
           )}
 
           {threads.length === 0 ? (
-            <div className="bg-bg-card border border-border rounded-xl p-8 text-center text-text-secondary text-sm">No threads yet. Start a discussion!</div>
+            <div className="gaming-surface rounded-xl p-8 text-center text-text-secondary text-sm">No threads yet. Start a discussion!</div>
           ) : (
-            <div className="bg-bg-card border border-border rounded-xl overflow-hidden">
+            <div className="gaming-surface rounded-xl overflow-hidden">
               {threads.map((thread, i) => (
                 <button key={thread.id} onClick={() => openThread(thread)} className={`w-full text-left p-4 hover:bg-bg-hover transition-colors flex items-center gap-4 ${i > 0 ? "border-t border-border/50" : ""}`}>
                   <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center text-accent text-sm font-bold flex-shrink-0">
@@ -239,7 +239,7 @@ export default function ForumPanel({ user }: { user: AuthUser }) {
           {/* Posts */}
           <div className="space-y-4">
             {posts.map((post, i) => (
-              <div key={post.id} className="bg-bg-card border border-border rounded-xl overflow-hidden">
+              <div key={post.id} className="gaming-surface rounded-xl overflow-hidden">
                 <div className="flex flex-col md:flex-row">
                   {/* Author sidebar */}
                   <div className="md:w-48 bg-bg-secondary/50 p-4 md:border-r border-b md:border-b-0 border-border flex md:flex-col items-center md:items-start gap-3">
@@ -268,7 +268,7 @@ export default function ForumPanel({ user }: { user: AuthUser }) {
 
                     {editingPostId === post.id ? (
                       <div className="space-y-3">
-                        <textarea value={editBody} onChange={(e) => setEditBody(e.target.value)} rows={4} className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm resize-y" />
+                        <textarea value={editBody} onChange={(e) => setEditBody(e.target.value)} rows={4} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm resize-y" />
                         <div className="flex gap-2">
                           <button onClick={() => savePostEdit(post.id)} className="px-4 py-1.5 bg-success hover:opacity-90 text-white rounded-lg text-xs font-medium">Save</button>
                           <button onClick={() => { setEditingPostId(null); setEditBody(""); }} className="px-4 py-1.5 bg-bg-secondary text-text-muted rounded-lg text-xs font-medium">Cancel</button>
@@ -316,7 +316,7 @@ export default function ForumPanel({ user }: { user: AuthUser }) {
 
           {/* Reply */}
           {!selectedThread.locked ? (
-            <form id="forum-reply" onSubmit={createReply} className="bg-bg-card border border-border rounded-xl p-6 space-y-4">
+            <form id="forum-reply" onSubmit={createReply} className="gaming-surface rounded-xl p-6 space-y-4">
               <h3 className="font-medium text-sm">Post a Reply</h3>
               {quoteText && (
                 <div className="border-l-2 border-accent/30 pl-3 py-2 bg-bg-secondary rounded-r text-xs text-text-muted flex items-start justify-between">
@@ -324,11 +324,11 @@ export default function ForumPanel({ user }: { user: AuthUser }) {
                   <button type="button" onClick={() => setQuoteText("")} className="text-text-muted hover:text-danger ml-2 flex-shrink-0">✕</button>
                 </div>
               )}
-              <textarea value={replyBody} onChange={(e) => setReplyBody(e.target.value)} placeholder="Write your reply..." rows={4} className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm resize-y" required />
+              <textarea value={replyBody} onChange={(e) => setReplyBody(e.target.value)} placeholder="Write your reply..." rows={4} className="w-full px-4 py-2.5 gaming-chip rounded-lg text-sm resize-y" required />
               <button type="submit" className="px-6 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium">Post Reply</button>
             </form>
           ) : (
-            <div className="bg-bg-card border border-border rounded-xl p-6 text-center text-text-muted text-sm">
+            <div className="gaming-surface rounded-xl p-6 text-center text-text-muted text-sm">
               🔒 This thread is locked. No new replies can be posted.
             </div>
           )}

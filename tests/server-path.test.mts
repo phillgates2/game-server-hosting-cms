@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildUniqueServerPath } from '../src/lib/server-path';
+import { buildUniqueServerPath } from '../src/lib/server-path.ts';
 
 test('buildUniqueServerPath avoids a path that already exists on disk or in the database', async () => {
   const reserved = ['/srv/games/ark/main'];

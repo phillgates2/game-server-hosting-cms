@@ -329,13 +329,14 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
   };
 
   return (
-    <div className="animate-fade-in space-y-6">
+    <div className="animate-fade-in panel-view space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-2xl font-bold">Welcome back, {user.username} 👋</h2>
+          <p className="text-[10px] uppercase tracking-[0.22em] text-text-muted">Mission Control</p>
+          <h2 className="heading-font text-2xl font-bold uppercase tracking-[0.08em]">Welcome back, {user.username} 👋</h2>
           <p className="text-text-secondary text-sm mt-1">Everything important is summarized here so you can jump straight into the next task.</p>
         </div>
-        <button onClick={() => { setLoaded(false); void loadData(); }} className="inline-flex items-center gap-2 self-start rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-secondary transition-colors hover:border-accent/30 hover:text-accent">
+        <button onClick={() => { setLoaded(false); void loadData(); }} className="inline-flex items-center gap-2 self-start rounded-lg gaming-chip px-3 py-2 text-sm text-text-secondary transition-colors hover:border-accent/30 hover:text-accent">
           <span>↻</span>
           <span>{lastUpdated ? `Updated ${lastUpdated}` : "Refresh"}</span>
         </button>
@@ -354,21 +355,21 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
 
       {(attentionItems.length > 0 || recentActivity.length > 0) && (
         <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="rounded-xl border border-border bg-bg-card p-5">
+          <div className="gaming-surface rounded-xl p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-lg font-semibold">⚠️ Needs attention</h3>
+                <h3 className="heading-font text-lg font-semibold uppercase tracking-[0.06em]">⚠️ Needs attention</h3>
                 <p className="text-sm text-text-secondary">Issues that are worth checking before the next deployment window.</p>
               </div>
             </div>
             <ul className="mt-4 space-y-2 text-sm text-text-secondary">
-              {attentionItems.length > 0 ? attentionItems.map((item) => <li key={item} className="rounded-lg bg-bg-secondary px-3 py-2">{item}</li>) : <li className="rounded-lg bg-bg-secondary px-3 py-2">Everything looks healthy right now.</li>}
+              {attentionItems.length > 0 ? attentionItems.map((item) => <li key={item} className="rounded-lg bg-bg-secondary px-3 py-2 border border-border/60">{item}</li>) : <li className="rounded-lg bg-bg-secondary px-3 py-2 border border-border/60">Everything looks healthy right now.</li>}
             </ul>
           </div>
-          <div className="rounded-xl border border-border bg-bg-card p-5">
+          <div className="gaming-surface rounded-xl p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-lg font-semibold">🕒 Recent activity</h3>
+                <h3 className="heading-font text-lg font-semibold uppercase tracking-[0.06em]">🕒 Recent activity</h3>
                 <p className="text-sm text-text-secondary">The latest admin and server actions from the panel.</p>
               </div>
             </div>
@@ -413,11 +414,11 @@ function formatRelativeTime(value: string) {
 
 function StatCard({ icon, label, value, sub, color }: { icon: string; label: string; value: string; sub: string; color: string }) {
   return (
-    <div className="bg-bg-card border border-border rounded-xl p-5">
+    <div className="gaming-surface rounded-xl p-5">
       <div className="flex items-start justify-between">
         <div>
           <p className="text-text-muted text-xs uppercase tracking-wider">{label}</p>
-          <p className={`text-2xl font-bold mt-1 ${color}`}>{value}</p>
+          <p className={`heading-font text-2xl font-bold mt-1 ${color}`}>{value}</p>
           <p className="text-text-muted text-xs mt-1">{sub}</p>
         </div>
         <span className="text-2xl">{icon}</span>
@@ -428,16 +429,16 @@ function StatCard({ icon, label, value, sub, color }: { icon: string; label: str
 
 function DashboardSection({ title, description, children, collapsed, onToggle, onMove }: { title: string; description: string; children: React.ReactNode; collapsed?: boolean; onToggle: () => void; onMove: (direction: -1 | 1) => void }) {
   return (
-    <div className="rounded-xl border border-border bg-bg-card p-6">
+    <div className="gaming-surface rounded-xl p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-lg font-semibold">{title}</h3>
+          <h3 className="heading-font text-lg font-semibold uppercase tracking-[0.06em]">{title}</h3>
           <p className="text-sm text-text-secondary">{description}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button onClick={() => onMove(-1)} className="rounded-lg border border-border bg-bg-secondary px-2 py-1 text-xs text-text-secondary">↑</button>
-          <button onClick={() => onMove(1)} className="rounded-lg border border-border bg-bg-secondary px-2 py-1 text-xs text-text-secondary">↓</button>
-          <button onClick={onToggle} className="rounded-lg border border-border bg-bg-secondary px-2 py-1 text-xs text-text-secondary">{collapsed ? "Expand" : "Collapse"}</button>
+          <button onClick={() => onMove(-1)} className="rounded-lg gaming-chip px-2 py-1 text-xs text-text-secondary hover:border-accent/30">↑</button>
+          <button onClick={() => onMove(1)} className="rounded-lg gaming-chip px-2 py-1 text-xs text-text-secondary hover:border-accent/30">↓</button>
+          <button onClick={onToggle} className="rounded-lg gaming-chip px-2 py-1 text-xs text-text-secondary hover:border-accent/30">{collapsed ? "Expand" : "Collapse"}</button>
         </div>
       </div>
       {!collapsed && children}
@@ -447,7 +448,7 @@ function DashboardSection({ title, description, children, collapsed, onToggle, o
 
 function ShortcutButton({ icon, label, onClick }: { icon: string; label: string; onClick?: () => void }) {
   return (
-    <button onClick={onClick} className="inline-flex items-center gap-2 rounded-full border border-border bg-bg-secondary px-3 py-1.5 text-sm text-text-secondary transition-colors hover:border-accent/30 hover:text-accent">
+    <button onClick={onClick} className="inline-flex items-center gap-2 rounded-full gaming-chip px-3 py-1.5 text-sm text-text-secondary transition-colors hover:border-accent/30 hover:text-accent">
       <span>{icon}</span>
       <span>{label}</span>
     </button>
@@ -470,9 +471,9 @@ function ProgressBar({ label, value, suffix, color }: { label: string; value: nu
 
 function QuickAction({ icon, title, desc, onClick }: { icon: string; title: string; desc: string; onClick?: () => void }) {
   return (
-    <button onClick={onClick} className="bg-bg-card border border-border rounded-xl p-5 text-left hover:border-accent/30 hover:shadow-md transition-all">
+    <button onClick={onClick} className="gaming-surface rounded-xl p-5 text-left hover:border-accent/30 hover:-translate-y-0.5 transition-all">
       <span className="text-2xl block mb-2">{icon}</span>
-      <p className="font-semibold mb-1">{title}</p>
+      <p className="heading-font font-semibold mb-1 uppercase tracking-[0.05em]">{title}</p>
       <p className="text-text-secondary text-sm">{desc}</p>
     </button>
   );
@@ -480,12 +481,12 @@ function QuickAction({ icon, title, desc, onClick }: { icon: string; title: stri
 
 function FriendlyEmpty({ icon, title, text, buttonLabel, onClick }: { icon: string; title: string; text: string; buttonLabel?: string; onClick?: () => void }) {
   return (
-    <div className="bg-bg-card border border-border rounded-xl p-8 text-center">
+    <div className="gaming-surface rounded-xl p-8 text-center">
       <span className="text-4xl block mb-3">{icon}</span>
-      <h3 className="font-semibold mb-1">{title}</h3>
+      <h3 className="heading-font font-semibold mb-1 uppercase tracking-[0.05em]">{title}</h3>
       <p className="text-text-secondary text-sm max-w-md mx-auto">{text}</p>
       {buttonLabel && onClick && (
-        <button onClick={onClick} className="mt-4 px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium">
+        <button onClick={onClick} className="mt-4 px-4 py-2 bg-accent hover:bg-accent-hover text-slate-950 rounded-lg text-sm font-bold uppercase tracking-[0.05em]">
           {buttonLabel}
         </button>
       )}

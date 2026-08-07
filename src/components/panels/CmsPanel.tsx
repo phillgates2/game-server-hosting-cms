@@ -145,7 +145,7 @@ export default function CmsPanel() {
   const filteredPosts = filter === "all" ? posts : posts.filter((p) => p.type === filter);
 
   return (
-    <div className="animate-fade-in space-y-6">
+    <div className="animate-fade-in panel-view space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">✍️ Content Management</h2>
@@ -167,7 +167,7 @@ export default function CmsPanel() {
 
       {/* Create/Edit form */}
       {showCreate && (
-        <form onSubmit={savePost} className="bg-bg-card border border-border rounded-xl p-6 space-y-4">
+        <form onSubmit={savePost} className="gaming-surface rounded-xl p-6 space-y-4">
           <h3 className="font-semibold">{editing ? "Edit Post" : "New Post"}</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="md:col-span-2">
@@ -175,7 +175,7 @@ export default function CmsPanel() {
               <input
                 value={form.title}
                 onChange={(e) => setForm({ ...form, title: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm"
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
                 required
                 placeholder="My Post Title"
               />
@@ -185,7 +185,7 @@ export default function CmsPanel() {
               <select
                 value={form.type}
                 onChange={(e) => setForm({ ...form, type: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm"
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
               >
                 <option value="blog">📝 Blog Post</option>
                 <option value="changelog">📋 Changelog</option>
@@ -198,7 +198,7 @@ export default function CmsPanel() {
             <input
               value={form.excerpt}
               onChange={(e) => setForm({ ...form, excerpt: e.target.value })}
-              className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm"
+              className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
               placeholder="Short summary shown on cards"
             />
           </div>
@@ -207,7 +207,7 @@ export default function CmsPanel() {
             <textarea
               value={form.content}
               onChange={(e) => setForm({ ...form, content: e.target.value })}
-              className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm resize-y min-h-[200px]"
+              className="w-full px-3 py-2 gaming-chip rounded-lg text-sm resize-y min-h-[200px]"
               required
               placeholder="Write your post content..."
             />
@@ -218,7 +218,7 @@ export default function CmsPanel() {
               <input
                 value={form.tags}
                 onChange={(e) => setForm({ ...form, tags: e.target.value })}
-                className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm"
+                className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
                 placeholder="update, gameserver, news"
               />
             </div>
@@ -281,7 +281,7 @@ export default function CmsPanel() {
       )}
 
       {loaded && filteredPosts.length === 0 && (
-        <div className="bg-bg-card border border-border rounded-xl p-12 text-center">
+        <div className="gaming-surface rounded-xl p-12 text-center">
           <span className="text-4xl block mb-3">✍️</span>
           <h3 className="font-semibold mb-1">No posts yet</h3>
           <p className="text-text-secondary text-sm">Create a blog post or changelog to populate the public site</p>
@@ -291,7 +291,7 @@ export default function CmsPanel() {
       {filteredPosts.length > 0 && (
         <div className="grid gap-3">
           {filteredPosts.map((post) => (
-            <div key={post.id} className="bg-bg-card border border-border rounded-xl p-5 flex items-center justify-between">
+            <div key={post.id} className="gaming-surface rounded-xl p-5 flex items-center justify-between">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-sm">{post.type === "blog" ? "📝" : post.type === "changelog" ? "📋" : "📄"}</span>

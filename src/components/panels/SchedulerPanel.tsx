@@ -74,17 +74,17 @@ export default function SchedulerPanel() {
     load();
   }
 
-  const ic = "w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm";
+  const ic = "w-full px-3 py-2.5 gaming-chip rounded-lg text-sm";
 
   return (
-    <div className="animate-fade-in space-y-6">
+    <div className="animate-fade-in panel-view space-y-6">
       <div className="flex items-center justify-between">
         <div><h2 className="text-2xl font-bold">⏰ Server Scheduler</h2><p className="text-text-secondary text-sm">Schedule automatic restarts, backups, updates, and commands</p></div>
         <button onClick={() => setShowCreate(!showCreate)} className="px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium">{showCreate ? "✕ Cancel" : "+ New Task"}</button>
       </div>
 
       {showCreate && (
-        <form onSubmit={createTask} className="bg-bg-card border border-accent/30 rounded-xl p-6 space-y-4">
+        <form onSubmit={createTask} className="gaming-surface border-accent/30 rounded-xl p-6 space-y-4">
           <h3 className="font-semibold">Create Scheduled Task</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div><label className="block text-xs font-medium text-text-secondary mb-1.5">Server *</label>
@@ -117,7 +117,7 @@ export default function SchedulerPanel() {
       {!loaded && <div className="text-center py-12"><div className="inline-block w-8 h-8 border-4 border-accent border-t-transparent rounded-full animate-spin" /></div>}
 
       {loaded && tasks.length === 0 && !showCreate && (
-        <div className="bg-bg-card border border-border rounded-xl p-12 text-center">
+        <div className="gaming-surface rounded-xl p-12 text-center">
           <span className="text-4xl block mb-3">⏰</span><h3 className="font-semibold mb-1">No scheduled tasks</h3>
           <p className="text-text-secondary text-sm">Create a task to automate server restarts, backups, or updates.</p>
         </div>
