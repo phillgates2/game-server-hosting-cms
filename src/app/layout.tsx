@@ -6,7 +6,6 @@ import { ToastProvider } from "@/components/ToastProvider";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
 import { NotificationProvider } from "@/components/NotificationCenter";
 import { I18nProvider } from "@/lib/i18n";
-import GlobalHomeLink from "@/components/GlobalHomeLink";
 
 const headingFont = Orbitron({
   subsets: ["latin"],
