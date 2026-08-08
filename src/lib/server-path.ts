@@ -27,11 +27,11 @@ export async function buildUniqueServerPath(
   const safeName = slugify(serverName);
   const used = new Set(reservedPaths);
 
-  let candidate = join(basePath, safeGame, safeName);
+  let candidate = join(/* turbopackIgnore: true */ basePath, safeGame, safeName);
   let i = 2;
 
   while (used.has(candidate) || (await existsOnDisk(candidate))) {
-    candidate = join(basePath, safeGame, `${safeName}-${i}`);
+    candidate = join(/* turbopackIgnore: true */ basePath, safeGame, `${safeName}-${i}`);
     i += 1;
   }
 

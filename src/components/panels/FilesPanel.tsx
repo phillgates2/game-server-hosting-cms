@@ -47,11 +47,16 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [showNewDialog, setShowNewDialog] = useState<"file" | "dir" | null>(null);
+  const [showMoveDialog, setShowMoveDialog] = useState(false);
+  const [moveTargetDir, setMoveTargetDir] = useState(".");
   const [newName, setNewName] = useState("");
   const [renamingEntry, setRenamingEntry] = useState<FileEntry | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+  const [lastSelectedPath, setLastSelectedPath] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const checkboxShiftRef = useRef(false);
 
   // Load servers
   useEffect(() => {
@@ -66,6 +71,8 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
         setEntries(data.items || []);
         setCurrentPath(data.path || ".");
         setBasePath(data.basePath || "");
+        setSelectedPaths([]);
+        setLastSelectedPath(null);
       } else if (data.error) {
         setMessage({ type: "error", text: data.error });
       }
@@ -80,6 +87,8 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
     setSelectedId(id);
     setEditingFile(null);
     setCurrentPath(".");
+    setSelectedPaths([]);
+    setLastSelectedPath(null);
     setLoaded(false);
     loadDir(id, ".");
   }
@@ -87,6 +96,8 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
   function navigate(path: string) {
     if (!selectedId) return;
     setEditingFile(null);
+    setSelectedPaths([]);
+    setLastSelectedPath(null);
     loadDir(selectedId, path);
   }
 
@@ -141,8 +152,140 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "delete", path: entry.path }),
       });
+      setSelectedPaths((prev) => prev.filter((p) => p !== entry.path));
       loadDir(selectedId, currentPath);
     } catch (e) { setMessage({ type: "error", text: e instanceof Error ? e.message : "Failed" }); }
+  }
+
+  function togglePath(path: string, checked: boolean, shiftKey = false) {
+    setSelectedPaths((prev) => {
+      if (shiftKey && lastSelectedPath) {
+        const indexByPath = new Map(entries.map((entry, index) => [entry.path, index]));
+        const start = indexByPath.get(lastSelectedPath);
+        const end = indexByPath.get(path);
+        if (start !== undefined && end !== undefined) {
+          const [from, to] = start <= end ? [start, end] : [end, start];
+          const range = entries.slice(from, to + 1).map((entry) => entry.path);
+          if (checked) {
+            const merged = new Set([...prev, ...range]);
+            return Array.from(merged);
+          }
+          const removeSet = new Set(range);
+          return prev.filter((p) => !removeSet.has(p));
+        }
+      }
+
+      if (checked) {
+        if (prev.includes(path)) return prev;
+        return [...prev, path];
+      }
+      return prev.filter((p) => p !== path);
+    });
+    setLastSelectedPath(path);
+  }
+
+  function onRowClick(entry: FileEntry, event: React.MouseEvent<HTMLTableRowElement>) {
+    const isToggleClick = event.ctrlKey || event.metaKey;
+    const isRangeClick = event.shiftKey;
+    if (!isToggleClick && !isRangeClick) {
+      return;
+    }
+
+    event.preventDefault();
+    const alreadySelected = selectedPaths.includes(entry.path);
+    const nextChecked = isRangeClick ? true : !alreadySelected;
+    togglePath(entry.path, nextChecked, isRangeClick);
+  }
+
+  function toggleSelectAllCurrent(checked: boolean) {
+    if (checked) {
+      setSelectedPaths(entries.map((e) => e.path));
+      if (entries.length > 0) {
+        setLastSelectedPath(entries[entries.length - 1].path);
+      }
+      return;
+    }
+    setSelectedPaths([]);
+    setLastSelectedPath(null);
+  }
+
+  async function deleteSelected() {
+    if (!selectedId || selectedPaths.length === 0) return;
+    if (!confirm(`Delete ${selectedPaths.length} selected item(s)?`)) return;
+
+    try {
+      const res = await fetch(`/api/servers/${selectedId}/files`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "deleteMany", paths: selectedPaths }),
+      });
+      const data = await res.json();
+      if (!res.ok && res.status !== 207) {
+        setMessage({ type: "error", text: data.error || "Bulk delete failed" });
+        return;
+      }
+
+      const failedCount = Array.isArray(data.failed) ? data.failed.length : 0;
+      const deletedCount = typeof data.deleted === "number" ? data.deleted : 0;
+      if (failedCount > 0) {
+        setMessage({ type: "error", text: `Deleted ${deletedCount}, failed ${failedCount}` });
+      } else {
+        setMessage({ type: "success", text: `Deleted ${deletedCount} item(s)` });
+      }
+      setSelectedPaths([]);
+      loadDir(selectedId, currentPath);
+    } catch (e) {
+      setMessage({ type: "error", text: e instanceof Error ? e.message : "Bulk delete failed" });
+    }
+  }
+
+  async function moveSelected(targetDir: string) {
+    if (!selectedId || selectedPaths.length === 0) return;
+
+    try {
+      const res = await fetch(`/api/servers/${selectedId}/files`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "moveMany", paths: selectedPaths, targetDir: targetDir.trim() || "." }),
+      });
+      const data = await res.json();
+      if (!res.ok && res.status !== 207) {
+        setMessage({ type: "error", text: data.error || "Bulk move failed" });
+        return;
+      }
+
+      const failedCount = Array.isArray(data.failed) ? data.failed.length : 0;
+      const movedCount = typeof data.moved === "number" ? data.moved : 0;
+      if (failedCount > 0) {
+        setMessage({ type: "error", text: `Moved ${movedCount}, failed ${failedCount}` });
+      } else {
+        setMessage({ type: "success", text: `Moved ${movedCount} item(s)` });
+      }
+      setSelectedPaths([]);
+      setLastSelectedPath(null);
+      setShowMoveDialog(false);
+      loadDir(selectedId, currentPath);
+    } catch (e) {
+      setMessage({ type: "error", text: e instanceof Error ? e.message : "Bulk move failed" });
+    }
+  }
+
+  function openMoveDialog() {
+    if (selectedPaths.length === 0) return;
+    setMoveTargetDir(currentPath === "." ? "." : currentPath);
+    setShowMoveDialog(true);
+  }
+
+  function closeMoveDialog() {
+    setShowMoveDialog(false);
+  }
+
+  async function submitMoveDialog() {
+    if (!moveTargetDir.trim()) {
+      setMessage({ type: "error", text: "Target directory is required" });
+      return;
+    }
+    await moveSelected(moveTargetDir);
   }
 
   async function createNew(type: "file" | "dir") {
@@ -195,6 +338,7 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
 
   const breadcrumbs = currentPath === "." ? ["root"] : ["root", ...currentPath.split("/")];
   const isEditable = editingFile && !editingFile.tooLarge && EDITABLE_EXTS.has((editingFile.name.split(".").pop() || "").toLowerCase());
+  const allSelected = entries.length > 0 && selectedPaths.length === entries.length;
 
   return (
     <div className="animate-fade-in panel-view space-y-4">
@@ -228,6 +372,20 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
               ⬆️ Upload
               <input ref={fileInputRef} type="file" className="hidden" onChange={uploadFile} disabled={uploading} />
             </label>
+            <button
+              onClick={openMoveDialog}
+              disabled={selectedPaths.length === 0}
+              className="px-3 py-1.5 bg-accent/15 text-accent rounded-lg text-xs disabled:opacity-40"
+            >
+              📦 Move Selected ({selectedPaths.length})
+            </button>
+            <button
+              onClick={deleteSelected}
+              disabled={selectedPaths.length === 0}
+              className="px-3 py-1.5 bg-danger/15 text-danger rounded-lg text-xs disabled:opacity-40"
+            >
+              🗑️ Delete Selected
+            </button>
             <div className="ml-auto text-xs text-text-muted font-mono truncate max-w-xs">{basePath}/{currentPath === "." ? "" : currentPath}</div>
           </div>
 
@@ -256,6 +414,31 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
             </div>
           )}
 
+          {/* Move dialog */}
+          {showMoveDialog && (
+            <div className="bg-bg-card border border-border rounded-lg p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-sm">📦 Move {selectedPaths.length} item(s) to:</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  value={moveTargetDir}
+                  onChange={(e) => setMoveTargetDir(e.target.value)}
+                  placeholder="relative/path or ."
+                  className="flex-1 px-3 py-1.5 gaming-chip rounded-lg text-sm"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") submitMoveDialog();
+                    if (e.key === "Escape") closeMoveDialog();
+                  }}
+                />
+                <button onClick={submitMoveDialog} className="px-3 py-1.5 bg-success text-white rounded-lg text-xs">Move</button>
+                <button onClick={closeMoveDialog} className="px-3 py-1.5 bg-bg-secondary text-text-muted rounded-lg text-xs">Cancel</button>
+              </div>
+              <p className="text-[11px] text-text-muted mt-2">Use a relative directory (for example: <span className="font-mono">configs/archive</span>).</p>
+            </div>
+          )}
+
           {/* File listing */}
           {!loaded && <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-accent border-t-transparent rounded-full animate-spin" /></div>}
 
@@ -264,6 +447,14 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-text-muted">
+                    <th className="px-4 py-2 font-medium w-8 text-center">
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        onChange={(e) => toggleSelectAllCurrent(e.target.checked)}
+                        aria-label="Select all"
+                      />
+                    </th>
                     <th className="px-4 py-2 font-medium w-8"></th>
                     <th className="px-4 py-2 font-medium">Name</th>
                     <th className="px-4 py-2 font-medium w-24 text-right">Size</th>
@@ -274,13 +465,30 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
                 <tbody>
                   {currentPath !== "." && (
                     <tr className="border-b border-border/30 hover:bg-bg-hover cursor-pointer" onClick={goUp}>
+                      <td></td>
                       <td className="px-4 py-2 text-center">⬆️</td>
                       <td className="px-4 py-2 text-text-muted">..</td>
                       <td></td><td></td><td></td>
                     </tr>
                   )}
                   {entries.map((entry) => (
-                    <tr key={entry.path} className="border-b border-border/30 hover:bg-bg-hover group">
+                    <tr
+                      key={entry.path}
+                      className={`border-b border-border/30 hover:bg-bg-hover group ${selectedPaths.includes(entry.path) ? "bg-accent/10" : ""}`}
+                      onClick={(event) => onRowClick(entry, event)}
+                    >
+                      <td className="px-4 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selectedPaths.includes(entry.path)}
+                          onMouseDown={(e) => { checkboxShiftRef.current = e.shiftKey; }}
+                          onChange={(e) => {
+                            togglePath(entry.path, e.target.checked, checkboxShiftRef.current);
+                            checkboxShiftRef.current = false;
+                          }}
+                          aria-label={`Select ${entry.name}`}
+                        />
+                      </td>
                       <td className="px-4 py-2 text-center cursor-pointer" onClick={() => openFile(entry)}>
                         {fileIcon(entry.ext, entry.isDir)}
                       </td>
@@ -311,7 +519,7 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
                     </tr>
                   ))}
                   {entries.length === 0 && (
-                    <tr><td colSpan={5} className="px-4 py-8 text-center text-text-muted">Empty directory</td></tr>
+                    <tr><td colSpan={6} className="px-4 py-8 text-center text-text-muted">Empty directory</td></tr>
                   )}
                 </tbody>
               </table>

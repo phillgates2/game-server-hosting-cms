@@ -5,9 +5,8 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
-import { buildUniqueServerPath } from "@/lib/server-path";
 
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
@@ -92,12 +91,13 @@ export async function POST(req: NextRequest) {
     let basePath = node.gameServerPath || "/home/gameservers";
     const isRootUser = process.getuid?.() === 0;
     if (node.isLocal && !isRootUser && basePath.startsWith("/opt/gameservers")) {
-      basePath = join(homedir() || "/home", "gameservers");
+      basePath = join(/* turbopackIgnore: true */ homedir() || "/home", "gameservers");
     }
 
     // Every new server gets its own unique folder, even if a previous server used the same path name.
     const existing = await db.select({ installPath: gameServers.installPath }).from(gameServers);
     const reservedPaths = existing.map((s) => s.installPath);
+    const { buildUniqueServerPath } = await import("@/lib/server-path");
     const finalInstallPath = await buildUniqueServerPath(basePath, game.slug, name, reservedPaths);
 
     // Pre-create the directory for local nodes so the folder exists immediately.

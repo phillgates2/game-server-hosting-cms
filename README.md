@@ -274,10 +274,12 @@ Recommended validation sequence before release:
 2. `npm run lint`
 3. `npm test`
 4. `npm run build`
+5. Optional fallback: `npm run build:webpack` (use this for release builds if Turbopack emits non-blocking NFT trace warnings)
 
 Current note:
 
 - Next.js 16 Turbopack may emit a non-blocking NFT tracing warning for the process-control route during `next build` even when compilation succeeds.
+- If you want a cleaner production build output without those Turbopack warnings, use `npm run build:webpack`.
 - Node module-type test warnings are avoided by running tests via the dev-only `tsx` runner, keeping package runtime module mode unchanged.
 
 ---

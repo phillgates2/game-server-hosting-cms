@@ -4,18 +4,9 @@ import { gameServers } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
-import { readdir, stat, readFile, writeFile, mkdir, rm, rename } from "node:fs/promises";
-import { join, resolve, relative, extname, basename } from "node:path";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-// Ensure the resolved path stays inside the server's install directory
-function safePath(basePath: string, requestedPath: string): string | null {
-  const resolved = resolve(basePath, requestedPath || ".");
-  if (!resolved.startsWith(resolve(basePath))) return null;
-  return resolved;
-}
 
 async function getServer(id: number) {
   const [server] = await db
@@ -53,17 +44,15 @@ export async function GET(
   const reqPath = url.searchParams.get("path") || ".";
   const action = url.searchParams.get("action") || "list"; // list | read | download
 
-  const fullPath = safePath(server.installPath, reqPath);
-  if (!fullPath) return NextResponse.json({ error: "Path outside server directory" }, { status: 403 });
-
   try {
-    const s = await stat(fullPath);
+    const fileOps = await import("@/lib/server-file-ops");
+    const { stat: s } = await fileOps.getPathStat(server.installPath, reqPath);
 
     if (action === "download" && s.isFile()) {
-      const content = await readFile(fullPath);
+      const { content, fileName } = await fileOps.readBinary(server.installPath, reqPath);
       return new NextResponse(content, {
         headers: {
-          "Content-Disposition": `attachment; filename="${basename(fullPath)}"`,
+          "Content-Disposition": `attachment; filename="${fileName}"`,
           "Content-Type": "application/octet-stream",
           "Content-Length": String(content.length),
         },
@@ -71,60 +60,12 @@ export async function GET(
     }
 
     if (s.isFile()) {
-      // Read file content (text files only, cap at 2MB)
-      if (s.size > 2 * 1024 * 1024) {
-        return NextResponse.json({
-          type: "file",
-          path: relative(server.installPath, fullPath),
-          name: basename(fullPath),
-          size: s.size,
-          tooLarge: true,
-          content: null,
-        });
-      }
-      const content = await readFile(fullPath, "utf8");
-      return NextResponse.json({
-        type: "file",
-        path: relative(server.installPath, fullPath),
-        name: basename(fullPath),
-        size: s.size,
-        modified: s.mtime.toISOString(),
-        content,
-      });
+      const result = await fileOps.readText(server.installPath, reqPath);
+      return NextResponse.json(result);
     }
 
-    // Directory listing
-    const entries = await readdir(fullPath, { withFileTypes: true });
-    const items = [];
-    for (const entry of entries) {
-      try {
-        const entryPath = join(fullPath, entry.name);
-        const entryStat = await stat(entryPath);
-        items.push({
-          name: entry.name,
-          path: relative(server.installPath, entryPath),
-          isDir: entry.isDirectory(),
-          size: entryStat.size,
-          modified: entryStat.mtime.toISOString(),
-          ext: entry.isFile() ? extname(entry.name).slice(1) : null,
-        });
-      } catch {
-        items.push({ name: entry.name, path: entry.name, isDir: entry.isDirectory(), size: 0, modified: "", ext: null });
-      }
-    }
-
-    // Sort: directories first, then alphabetical
-    items.sort((a, b) => {
-      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
-
-    return NextResponse.json({
-      type: "directory",
-      path: relative(server.installPath, fullPath) || ".",
-      items,
-      basePath: server.installPath,
-    });
+    const result = await fileOps.listDirectory(server.installPath, reqPath);
+    return NextResponse.json(result);
   } catch (e: unknown) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to read path" }, { status: 500 });
   }
@@ -150,46 +91,55 @@ export async function POST(
   }
 
   try {
+    const fileOps = await import("@/lib/server-file-ops");
     const body = await req.json();
-    const { action, path: reqPath, content, newName, newPath } = body;
+    const { action, path: reqPath, content, newName, newPath, paths, targetDir } = body;
 
     if (!action) return NextResponse.json({ error: "Action required" }, { status: 400 });
 
     if (action === "save") {
-      const fullPath = safePath(server.installPath, reqPath);
-      if (!fullPath) return NextResponse.json({ error: "Path outside server directory" }, { status: 403 });
-      await writeFile(fullPath, content || "", "utf8");
+      await fileOps.writeTextFile(server.installPath, reqPath, content || "");
       return NextResponse.json({ ok: true });
     }
 
     if (action === "createFile") {
-      const fullPath = safePath(server.installPath, reqPath);
-      if (!fullPath) return NextResponse.json({ error: "Path outside server directory" }, { status: 403 });
-      await writeFile(fullPath, content || "", "utf8");
+      await fileOps.writeTextFile(server.installPath, reqPath, content || "");
       return NextResponse.json({ ok: true });
     }
 
     if (action === "createDir") {
-      const fullPath = safePath(server.installPath, reqPath);
-      if (!fullPath) return NextResponse.json({ error: "Path outside server directory" }, { status: 403 });
-      await mkdir(fullPath, { recursive: true });
+      await fileOps.createDirectory(server.installPath, reqPath);
       return NextResponse.json({ ok: true });
     }
 
     if (action === "delete") {
-      const fullPath = safePath(server.installPath, reqPath);
-      if (!fullPath) return NextResponse.json({ error: "Path outside server directory" }, { status: 403 });
-      if (fullPath === resolve(server.installPath)) return NextResponse.json({ error: "Cannot delete root" }, { status: 400 });
-      await rm(fullPath, { recursive: true, force: true });
+      await fileOps.deletePath(server.installPath, reqPath);
       return NextResponse.json({ ok: true });
     }
 
     if (action === "rename") {
-      const fullPath = safePath(server.installPath, reqPath);
-      const fullNewPath = safePath(server.installPath, newPath || join(reqPath, "..", newName));
-      if (!fullPath || !fullNewPath) return NextResponse.json({ error: "Path outside server directory" }, { status: 403 });
-      await rename(fullPath, fullNewPath);
+      const sourcePath = String(reqPath || "");
+      const nextPath = String(newPath || "");
+      const fallback = sourcePath.split("/").slice(0, -1).concat(String(newName || "")).join("/");
+      await fileOps.renamePath(server.installPath, sourcePath, nextPath || fallback);
       return NextResponse.json({ ok: true });
+    }
+
+    if (action === "deleteMany") {
+      const selected: string[] = Array.isArray(paths) ? paths.filter((p) => typeof p === "string") : [];
+      if (selected.length === 0) return NextResponse.json({ error: "No paths selected" }, { status: 400 });
+      const result = await fileOps.deleteMany(server.installPath, selected);
+      return NextResponse.json(result, { status: result.ok ? 200 : 207 });
+    }
+
+    if (action === "moveMany") {
+      const selected: string[] = Array.isArray(paths) ? paths.filter((p) => typeof p === "string") : [];
+      if (selected.length === 0) return NextResponse.json({ error: "No paths selected" }, { status: 400 });
+      if (!targetDir || typeof targetDir !== "string") {
+        return NextResponse.json({ error: "Target directory is required" }, { status: 400 });
+      }
+      const result = await fileOps.moveMany(server.installPath, selected, targetDir);
+      return NextResponse.json(result, { status: result.ok ? 200 : 207 });
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });

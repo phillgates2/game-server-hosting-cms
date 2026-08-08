@@ -4,19 +4,10 @@ import { gameServers, gameDefinitions } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
-import { access, constants, readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { spawn, type ChildProcess } from "node:child_process";
+import { access, constants } from "node:fs/promises";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-async function findBash(): Promise<string> {
-  for (const p of ["/usr/bin/bash", "/bin/bash", "/usr/local/bin/bash"]) {
-    try { await access(p, constants.X_OK); return p; } catch { /**/ }
-  }
-  return "bash";
-}
 
 // POST /api/servers/[id]/update — Re-run SteamCMD app_update or re-download latest
 export async function POST(
@@ -57,38 +48,13 @@ export async function POST(
 
     await db.update(gameServers).set({ status: "installing", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
 
-    const bashPath = await findBash();
-    const script = `#!/usr/bin/env bash
-set -e
-STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
-if [ ! -x "$STEAMCMD_BIN" ]; then
-  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
-  exit 1
-fi
-export HOME="${server.installPath}"
-echo "Updating ${server.gameName || "game"} (AppID: ${server.steamAppId})..."
-"$STEAMCMD_BIN" +force_install_dir "${server.installPath}" +login anonymous +app_update ${server.steamAppId} validate +quit
-echo "Update complete"
-`;
-
-    const { mkdtemp, writeFile, chmod, rm } = await import("fs/promises");
-    const { tmpdir } = await import("os");
-    const tempDir = await mkdtemp(join(tmpdir(), "gsm-update-"));
-    const scriptPath = join(tempDir, "update.sh");
-    await writeFile(scriptPath, script, "utf8");
-    await chmod(scriptPath, 0o755);
-
-    const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-      let stdout = ""; let stderr = ""; let done = false;
-      const child: ChildProcess = spawn(bashPath, [scriptPath], { cwd: tempDir, env: { ...process.env as NodeJS.ProcessEnv, HOME: server.installPath } });
-      const timer = setTimeout(() => { if (!done) { done = true; child.kill("SIGKILL"); reject(new Error("Update timed out")); } }, 1000 * 60 * 30);
-      child.stdout?.on("data", (d: Buffer) => { stdout += d.toString(); });
-      child.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
-      child.on("error", (e: Error) => { if (!done) { done = true; clearTimeout(timer); reject(e); } });
-      child.on("close", (code: number | null) => { if (!done) { done = true; clearTimeout(timer); if (code === 0) resolve({ stdout, stderr }); else { const e = new Error(`Exit ${code}`); (e as unknown as Record<string,unknown>).stdout = stdout; (e as unknown as Record<string,unknown>).stderr = stderr; reject(e); } } });
+    const { runSteamUpdate } = await import("@/lib/server-update-runner");
+    const result = await runSteamUpdate({
+      installPath: server.installPath,
+      gameName: server.gameName || "game",
+      steamAppId: String(server.steamAppId),
     });
 
-    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
     await db.update(gameServers).set({ status: "stopped", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
 
     return NextResponse.json({ ok: true, message: `${server.gameName} updated successfully`, output: result.stdout.slice(-4000) });
