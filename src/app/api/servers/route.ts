@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { gameServers, gameDefinitions, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
@@ -11,6 +12,9 @@ import { buildUniqueServerPath } from "@/lib/server-path";
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await hasPermission(auth.userId, "servers.view"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
 
   try {
     const query = db
@@ -54,6 +58,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await hasPermission(auth.userId, "servers.create"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
 
   try {
     const body = await req.json();

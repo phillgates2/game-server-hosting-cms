@@ -8,7 +8,8 @@ import { eq } from "drizzle-orm";
 // POST /api/settings/import — Import panel config from JSON
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "panel.settings"))) {
+  const allowed = auth && ((await hasPermission(auth.userId, "panel.settings.import")) || (await hasPermission(auth.userId, "panel.settings")) || (await hasPermission(auth.userId, "database.import")));
+  if (!allowed) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

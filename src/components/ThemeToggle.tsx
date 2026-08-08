@@ -1,51 +1,31 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-
-type ThemeName = "nebula-dark" | "cloud-light" | "ember-sun" | "forest-command";
-type LayoutMode = "compact" | "cozy" | "spacious";
-
-const THEME_OPTIONS: Array<{ id: ThemeName; label: string; swatch: string; scheme: "light" | "dark" }> = [
-  { id: "nebula-dark", label: "Nebula Dark", swatch: "#22d3ee", scheme: "dark" },
-  { id: "cloud-light", label: "Cloud Light", swatch: "#0284c7", scheme: "light" },
-  { id: "ember-sun", label: "Ember Sun", swatch: "#ef6c00", scheme: "light" },
-  { id: "forest-command", label: "Forest Command", swatch: "#16a34a", scheme: "dark" },
-];
-
-const LAYOUT_OPTIONS: Array<{ id: LayoutMode; label: string }> = [
-  { id: "compact", label: "Compact" },
-  { id: "cozy", label: "Cozy" },
-  { id: "spacious", label: "Spacious" },
-];
-
-function applyThemeToDocument(theme: ThemeName) {
-  const option = THEME_OPTIONS.find((item) => item.id === theme);
-  document.documentElement.dataset.theme = theme;
-  document.documentElement.style.colorScheme = option?.scheme || "dark";
-}
-
-function applyLayoutToDocument(layout: LayoutMode) {
-  document.documentElement.dataset.layout = layout;
-}
+import {
+  applyThemePreference,
+  DEFAULT_CUSTOM_THEME,
+  getThemePreferenceFromStorage,
+  LAYOUT_OPTIONS,
+  persistThemePreference,
+  THEME_OPTIONS,
+  type CustomThemePalette,
+  type LayoutMode,
+  type ThemeName,
+} from "@/lib/theme";
 
 export function useTheme() {
   const [theme, setThemeState] = useState<ThemeName>("nebula-dark");
   const [layout, setLayoutState] = useState<LayoutMode>("cozy");
+  const [customTheme, setCustomThemeState] = useState<CustomThemePalette>(DEFAULT_CUSTOM_THEME);
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem("gsm-theme-v2") as ThemeName | null;
-    const savedLayout = localStorage.getItem("gsm-layout") as LayoutMode | null;
-    const legacyTheme = localStorage.getItem("gsm-theme") as "dark" | "light" | null;
-
-    const nextTheme = savedTheme || (legacyTheme === "light" ? "cloud-light" : "nebula-dark");
-    const nextLayout = savedLayout || "cozy";
+    const saved = getThemePreferenceFromStorage();
 
     const timer = window.setTimeout(() => {
-      setThemeState(nextTheme);
-      setLayoutState(nextLayout);
-      applyThemeToDocument(nextTheme);
-      applyLayoutToDocument(nextLayout);
-      document.documentElement.classList.toggle("light", nextTheme === "cloud-light");
+      setThemeState(saved.theme);
+      setLayoutState(saved.layout);
+      setCustomThemeState(saved.customTheme);
+      applyThemePreference(saved);
     }, 0);
 
     return () => window.clearTimeout(timer);
@@ -53,28 +33,40 @@ export function useTheme() {
 
   function setTheme(t: ThemeName) {
     setThemeState(t);
-    localStorage.setItem("gsm-theme-v2", t);
-    localStorage.setItem("gsm-theme", t === "cloud-light" ? "light" : "dark");
-    applyThemeToDocument(t);
-    document.documentElement.classList.toggle("light", t === "cloud-light");
+    const preference = { theme: t, layout, customTheme };
+    persistThemePreference(preference);
+    applyThemePreference(preference);
   }
 
   function setLayout(nextLayout: LayoutMode) {
     setLayoutState(nextLayout);
-    localStorage.setItem("gsm-layout", nextLayout);
-    applyLayoutToDocument(nextLayout);
+    const preference = { theme, layout: nextLayout, customTheme };
+    persistThemePreference(preference);
+    applyThemePreference(preference);
+  }
+
+  function setCustomTheme(nextCustomTheme: CustomThemePalette) {
+    setCustomThemeState(nextCustomTheme);
+    const preference = { theme: "custom-user" as ThemeName, layout, customTheme: nextCustomTheme };
+    setThemeState("custom-user");
+    persistThemePreference(preference);
+    applyThemePreference(preference);
   }
 
   function toggle() {
-    setTheme(theme === "nebula-dark" ? "cloud-light" : "nebula-dark");
+    setTheme(theme === "cloud-light" ? "nebula-dark" : "cloud-light");
   }
 
   function resetAppearance() {
-    setTheme("nebula-dark");
-    setLayout("cozy");
+    const preference = { theme: "nebula-dark" as ThemeName, layout: "cozy" as LayoutMode, customTheme: DEFAULT_CUSTOM_THEME };
+    setThemeState(preference.theme);
+    setLayoutState(preference.layout);
+    setCustomThemeState(preference.customTheme);
+    persistThemePreference(preference);
+    applyThemePreference(preference);
   }
 
-  return { theme, setTheme, layout, setLayout, toggle, resetAppearance };
+  return { theme, setTheme, layout, setLayout, customTheme, setCustomTheme, toggle, resetAppearance };
 }
 
 export function ThemeToggleButton({ compact }: { compact?: boolean }) {
@@ -93,7 +85,9 @@ export function ThemeToggleButton({ compact }: { compact?: boolean }) {
     return () => window.removeEventListener("mousedown", onDown);
   }, []);
 
-  const activeTheme = THEME_OPTIONS.find((item) => item.id === theme) || THEME_OPTIONS[0];
+  const activeTheme = theme === "custom-user"
+    ? { label: "Custom Theme", swatch: "#7c3aed" }
+    : (THEME_OPTIONS.find((item) => item.id === theme) || THEME_OPTIONS[0]);
 
   if (compact) {
     return (
@@ -136,6 +130,16 @@ function ThemeEditorPanel({
     <div className={`absolute right-0 z-50 mt-2 w-72 rounded-xl border border-border bg-bg-card p-3 shadow-2xl ${compact ? "max-h-[70vh] overflow-y-auto" : ""}`}>
       <p className="text-[10px] uppercase tracking-[0.16em] text-text-muted mb-2">Theme Presets</p>
       <div className="space-y-1.5 mb-3">
+        <button
+          onClick={() => setTheme("custom-user")}
+          className={`w-full flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-sm border transition-colors ${theme === "custom-user" ? "border-accent/50 bg-accent/10 text-text-primary" : "border-border hover:bg-bg-hover text-text-secondary"}`}
+        >
+          <span className="flex items-center gap-2">
+            <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "#7c3aed" }} />
+            Custom Theme
+          </span>
+          {theme === "custom-user" && <span className="text-accent text-xs">Active</span>}
+        </button>
         {THEME_OPTIONS.map((option) => (
           <button
             key={option.id}

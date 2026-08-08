@@ -37,6 +37,9 @@ export async function GET(
 ) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await hasPermission(auth.userId, "servers.files"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
 
   const { id } = await params;
   const server = await getServer(Number(id));
@@ -134,6 +137,9 @@ export async function POST(
 ) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await hasPermission(auth.userId, "servers.files"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
 
   const { id } = await params;
   const server = await getServer(Number(id));

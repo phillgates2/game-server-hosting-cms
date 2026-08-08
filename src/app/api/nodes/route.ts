@@ -2,11 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { nodes, gameServers, nodeMetrics } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { eq, desc, sql } from "drizzle-orm";
 
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await hasPermission(auth.userId, "nodes.view"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
 
   try {
     const nodeList = await db
@@ -67,8 +71,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || auth.role !== "admin") {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  if (!auth || !(await hasPermission(auth.userId, "nodes.create"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
   try {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { readFile } from "node:fs/promises";
 import { exec } from "node:child_process";
 import { promisify } from "util";
@@ -127,6 +128,9 @@ async function getIpv6Status() {
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await hasPermission(auth.userId, "monitor.view"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
 
   const [memory, cpu, disk, network, ipv6] = await Promise.all([
     getMemoryInfo(),

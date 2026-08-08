@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile, writeFile } from "node:fs/promises";
@@ -30,8 +31,8 @@ async function getMemStats() {
 
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || auth.role !== "admin") {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  if (!auth || !(await hasPermission(auth.userId, "monitor.clear_cache"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
   const before = await getMemStats();

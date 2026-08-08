@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { gameServers, gameDefinitions, users, forumThreads, cmsPages, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { ilike, or } from "drizzle-orm";
 
 // GET /api/search?q=term — Global search across servers, users, games, forum, CMS, nodes
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!((await hasPermission(auth.userId, "panel.search.global")) || (await hasPermission(auth.userId, "panel.settings")))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
 
   const url = new URL(req.url);
   const q = url.searchParams.get("q")?.trim();
@@ -36,7 +40,7 @@ export async function GET(req: NextRequest) {
     if (srvResults.status === "fulfilled") {
       for (const s of srvResults.value) results.push({ type: "server", icon: (s.gameIcon as string) || "🎮", id: s.id, title: s.name, subtitle: `Server · ${s.status}` });
     }
-    if (userResults.status === "fulfilled") {
+    if (userResults.status === "fulfilled" && ((await hasPermission(auth.userId, "users.view")) || (await hasPermission(auth.userId, "users.view.private")))) {
       for (const u of userResults.value) results.push({ type: "user", icon: "👤", id: u.id, title: u.username, subtitle: `User · ${u.role}` });
     }
     if (gameResults.status === "fulfilled") {
@@ -48,7 +52,7 @@ export async function GET(req: NextRequest) {
     if (cmsResults.status === "fulfilled") {
       for (const c of cmsResults.value) results.push({ type: "cms", icon: "✍️", id: c.id, title: c.title, subtitle: `CMS · ${c.type}` });
     }
-    if (nodeResults.status === "fulfilled") {
+    if (nodeResults.status === "fulfilled" && (await hasPermission(auth.userId, "nodes.view"))) {
       for (const n of nodeResults.value) results.push({ type: "node", icon: "🌐", id: n.id, title: n.name, subtitle: `Node · ${n.status}` });
     }
 

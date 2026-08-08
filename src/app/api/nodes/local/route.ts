@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
 import { readFile, mkdir, access, constants } from "fs/promises";
 import { exec } from "child_process";
@@ -14,8 +15,8 @@ const execAsync = promisify(exec);
 // POST /api/nodes/local - Create local node (this server)
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || auth.role !== "admin") {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  if (!auth || !(await hasPermission(auth.userId, "nodes.create"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
   try {

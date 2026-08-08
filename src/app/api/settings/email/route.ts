@@ -6,7 +6,8 @@ import { isEmailConfigured, sendEmail } from "@/lib/email";
 // GET /api/settings/email — Check email config status
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "panel.settings"))) {
+  const allowed = auth && ((await hasPermission(auth.userId, "panel.settings.email")) || (await hasPermission(auth.userId, "panel.settings")));
+  if (!allowed) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -22,7 +23,8 @@ export async function GET(req: NextRequest) {
 // POST /api/settings/email — Send test email
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "panel.settings"))) {
+  const allowed = auth && ((await hasPermission(auth.userId, "panel.settings.email")) || (await hasPermission(auth.userId, "panel.settings")));
+  if (!allowed) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

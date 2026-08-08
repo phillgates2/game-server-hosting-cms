@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { apiKeys } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { randomBytes, createHash } from "crypto";
 
 function hashKey(key: string): string {
@@ -86,7 +86,9 @@ export async function DELETE(req: NextRequest) {
 
   try {
     const { id } = await req.json();
-    await db.delete(apiKeys).where(eq(apiKeys.id, Number(id)));
+    await db
+      .delete(apiKeys)
+      .where(and(eq(apiKeys.id, Number(id)), eq(apiKeys.userId, auth.userId)));
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });

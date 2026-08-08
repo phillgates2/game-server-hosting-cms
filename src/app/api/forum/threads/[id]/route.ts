@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { forumThreads, forumPosts, users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { eq, asc, sql } from "drizzle-orm";
 
 // GET thread with posts and rich user data
@@ -9,6 +10,11 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await getCurrentUser(req.headers);
+  if (!auth || !(await hasPermission(auth.userId, "forum.view"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
+
   const { id } = await params;
 
   try {
@@ -63,6 +69,9 @@ export async function POST(
 ) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await hasPermission(auth.userId, "forum.post"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
 
   const { id } = await params;
 
@@ -99,15 +108,29 @@ export async function PATCH(
     const [thread] = await db.select({ userId: forumThreads.userId }).from(forumThreads).where(eq(forumThreads.id, Number(id))).limit(1);
     if (!thread) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    const isAdmin = auth.role === "admin" || auth.role === "moderator";
+    const canThreadModerate =
+      (await hasPermission(auth.userId, "forum.thread.edit_any")) ||
+      (await hasPermission(auth.userId, "forum.moderate"));
     const isOwner = thread.userId === auth.userId;
 
-    if (!isAdmin && !isOwner) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!canThreadModerate && !isOwner) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+    if (isOwner && !canThreadModerate && !(await hasPermission(auth.userId, "forum.thread.edit_own"))) {
+      return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+    }
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
-    if (body.title !== undefined && (isAdmin || isOwner)) update.title = body.title;
-    if (body.pinned !== undefined && isAdmin) update.pinned = body.pinned;
-    if (body.locked !== undefined && isAdmin) update.locked = body.locked;
+    if (body.title !== undefined && (canThreadModerate || isOwner)) update.title = body.title;
+    if (body.pinned !== undefined) {
+      const canPin = canThreadModerate || (await hasPermission(auth.userId, "forum.thread.pin")) || (await hasPermission(auth.userId, "forum.pin"));
+      if (!canPin) return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+      update.pinned = body.pinned;
+    }
+    if (body.locked !== undefined) {
+      const canLock = canThreadModerate || (await hasPermission(auth.userId, "forum.thread.lock")) || (await hasPermission(auth.userId, "forum.lock"));
+      if (!canLock) return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+      update.locked = body.locked;
+    }
 
     const [updated] = await db.update(forumThreads).set(update).where(eq(forumThreads.id, Number(id))).returning();
     return NextResponse.json({ thread: updated });
@@ -130,8 +153,13 @@ export async function DELETE(
     const [thread] = await db.select({ userId: forumThreads.userId }).from(forumThreads).where(eq(forumThreads.id, Number(id))).limit(1);
     if (!thread) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    const isAdmin = auth.role === "admin" || auth.role === "moderator";
-    if (!isAdmin && thread.userId !== auth.userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const canDeleteAny =
+      (await hasPermission(auth.userId, "forum.thread.delete_any")) ||
+      (await hasPermission(auth.userId, "forum.moderate"));
+    const isOwner = thread.userId === auth.userId;
+    const canDeleteOwn = await hasPermission(auth.userId, "forum.thread.delete_own");
+
+    if (!canDeleteAny && !(isOwner && canDeleteOwn)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     // Delete posts first, then thread
     await db.delete(forumPosts).where(eq(forumPosts.threadId, Number(id)));

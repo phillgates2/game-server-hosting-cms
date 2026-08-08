@@ -7,7 +7,8 @@ import { hasPermission } from "@/lib/permissions";
 // GET /api/settings/export — Export panel config as JSON
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "panel.settings"))) {
+  const allowed = auth && ((await hasPermission(auth.userId, "panel.settings.export")) || (await hasPermission(auth.userId, "panel.settings")) || (await hasPermission(auth.userId, "database.export")));
+  if (!allowed) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

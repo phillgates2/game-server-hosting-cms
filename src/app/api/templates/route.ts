@@ -1,8 +1,15 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { gameTemplates, getTemplatesByCategory } from "@/db/seeds";
+import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 
 // GET /api/templates - List all available game templates
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const auth = await getCurrentUser(req.headers);
+  if (!auth || !((await hasPermission(auth.userId, "games.templates")) || (await hasPermission(auth.userId, "games.view")))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
+
   const byCategory = getTemplatesByCategory();
   
   return NextResponse.json({

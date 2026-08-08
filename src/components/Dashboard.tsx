@@ -34,27 +34,27 @@ interface Props { user: AuthUser; onLogout: () => void }
 
 type Tab = "overview" | "servers" | "files" | "rcon" | "nodes" | "games" | "audit" | "monitor" | "forum" | "cms" | "ladder" | "users" | "roles" | "profile" | "database" | "activity" | "scheduler" | "apikeys";
 
-interface NavItem { key: Tab; label: string; icon: string; permission?: string; section: string; shortcut?: string }
+interface NavItem { key: Tab; label: string; permission?: string; section: string; shortcut?: string }
 
 const NAV_ITEMS: NavItem[] = [
-  { key: "overview", label: "Overview", icon: "📊", section: "main", shortcut: "O" },
-  { key: "servers", label: "Servers", icon: "🎮", permission: "servers.view", section: "main", shortcut: "S" },
-  { key: "files", label: "File Manager", icon: "📂", permission: "servers.files", section: "main", shortcut: "F" },
-  { key: "rcon", label: "RCON Console", icon: "🖥️", permission: "servers.console", section: "main", shortcut: "R" },
-  { key: "nodes", label: "Nodes", icon: "🌐", permission: "nodes.view", section: "main", shortcut: "N" },
-  { key: "games", label: "Games", icon: "📦", permission: "games.view", section: "main", shortcut: "G" },
-  { key: "audit", label: "Audit", icon: "🔍", permission: "games.install", section: "main", shortcut: "A" },
-  { key: "monitor", label: "Monitor", icon: "📈", permission: "monitor.view", section: "main", shortcut: "M" },
-  { key: "forum", label: "Forum", icon: "💬", permission: "forum.view", section: "community" },
-  { key: "cms", label: "CMS", icon: "✍️", permission: "cms.view", section: "community" },
-  { key: "ladder", label: "League Ladder", icon: "🏆", permission: "ladder.view", section: "community", shortcut: "L" },
-  { key: "users", label: "Users", icon: "👥", permission: "users.view", section: "admin", shortcut: "U" },
-  { key: "roles", label: "Roles", icon: "🔑", permission: "roles.view", section: "admin" },
-  { key: "database", label: "Database", icon: "🗄️", permission: "database.view", section: "admin", shortcut: "D" },
-  { key: "activity", label: "Activity Log", icon: "📋", permission: "panel.settings", section: "admin" },
-  { key: "scheduler", label: "Scheduler", icon: "⏰", permission: "scheduler.view", section: "main" },
-  { key: "apikeys", label: "API Keys", icon: "🔐", permission: "apikeys.view", section: "account" },
-  { key: "profile", label: "My Profile", icon: "👤", section: "account", shortcut: "P" },
+  { key: "overview", label: "Overview", section: "main", shortcut: "O" },
+  { key: "servers", label: "Servers", permission: "servers.view", section: "main", shortcut: "S" },
+  { key: "files", label: "File Manager", permission: "servers.files", section: "main", shortcut: "F" },
+  { key: "rcon", label: "RCON Console", permission: "servers.console", section: "main", shortcut: "R" },
+  { key: "nodes", label: "Nodes", permission: "nodes.view", section: "main", shortcut: "N" },
+  { key: "games", label: "Games", permission: "games.view", section: "main", shortcut: "G" },
+  { key: "audit", label: "Audit", permission: "games.install", section: "main", shortcut: "A" },
+  { key: "monitor", label: "Monitor", permission: "monitor.view", section: "main", shortcut: "M" },
+  { key: "forum", label: "Forum", permission: "forum.view", section: "community" },
+  { key: "cms", label: "CMS", permission: "cms.view", section: "community" },
+  { key: "ladder", label: "League Ladder", permission: "ladder.view", section: "community", shortcut: "L" },
+  { key: "users", label: "Users", permission: "users.view", section: "admin", shortcut: "U" },
+  { key: "roles", label: "Roles", permission: "roles.view", section: "admin" },
+  { key: "database", label: "Database", permission: "database.view", section: "admin", shortcut: "D" },
+  { key: "activity", label: "Activity Log", permission: "security.audit", section: "admin" },
+  { key: "scheduler", label: "Scheduler", permission: "scheduler.view", section: "main" },
+  { key: "apikeys", label: "API Keys", permission: "apikeys.view", section: "account" },
+  { key: "profile", label: "My Profile", section: "account", shortcut: "P" },
 ];
 
 const SECTION_LABELS: Record<string, string> = { main: "Management", community: "Community", admin: "Administration", account: "Account" };
@@ -165,7 +165,7 @@ export default function Dashboard({ user, onLogout }: Props) {
   // ── Command palette ──
   const paletteItems = useMemo(() => {
     const base = filteredNav.map((item) => ({
-      id: item.key, icon: item.icon, title: item.label, subtitle: TAB_META[item.key].subtitle,
+      id: item.key, icon: undefined as string | undefined, title: item.label, subtitle: TAB_META[item.key].subtitle,
       section: SECTION_LABELS[item.section] || item.section, shortcut: item.shortcut,
       action: () => { setTab(item.key); setPaletteOpen(false); setPaletteQuery(""); setOpenGroup(null); },
     }));
@@ -218,7 +218,6 @@ export default function Dashboard({ user, onLogout }: Props) {
           <header className="gaming-surface relative z-30 overflow-visible rounded-2xl px-4 py-3 lg:px-5 lg:py-4 flex flex-col gap-3">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
-                <span className="text-2xl pulse-glow">🎮</span>
                 <div className="min-w-0">
                   <p className="text-[10px] uppercase tracking-[0.22em] text-text-muted">Operations</p>
                   <h2 className="heading-font text-lg lg:text-xl font-bold uppercase tracking-[0.1em] truncate">{TAB_META[tab].title}</h2>
@@ -241,14 +240,14 @@ export default function Dashboard({ user, onLogout }: Props) {
                   <div key={sectionKey} className="relative" data-top-menu>
                     <button
                       onClick={() => setOpenGroup((curr) => (curr === sectionKey ? null : sectionKey))}
-                      className="nav-button gaming-chip px-3 py-2 rounded-lg text-xs uppercase tracking-[0.14em] text-text-secondary hover:text-text-primary flex items-center gap-2"
+                      className="nav-button gaming-chip menu-chip-opaque px-3 py-2 rounded-lg text-xs uppercase tracking-[0.14em] text-text-secondary hover:text-text-primary flex items-center gap-2"
                       data-top-menu
                     >
                       <span>{SECTION_LABELS[sectionKey] || sectionKey}</span>
                       <span className="text-[10px]">▾</span>
                     </button>
                     {openGroup === sectionKey && (
-                      <div className="absolute left-0 mt-2 w-72 gaming-surface rounded-xl p-2 z-[90]" data-top-menu>
+                      <div className="absolute left-0 mt-2 w-72 gaming-surface menu-surface rounded-xl p-2 z-[90]" data-top-menu>
                         <div className="space-y-1">
                           {sections[sectionKey].map((item) => (
                             <button
@@ -256,7 +255,6 @@ export default function Dashboard({ user, onLogout }: Props) {
                               onClick={() => navTo(item.key)}
                               className={`nav-button w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium ${tab === item.key ? "nav-button-active text-accent" : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"}`}
                             >
-                              <span className="text-base drop-shadow">{item.icon}</span>
                               <span className="flex-1 text-left">{item.label}</span>
                               {item.shortcut && <kbd className="text-[9px] text-text-muted gaming-chip px-1.5 py-0.5 rounded font-mono">{item.shortcut}</kbd>}
                             </button>
@@ -266,7 +264,7 @@ export default function Dashboard({ user, onLogout }: Props) {
                     )}
                   </div>
                 ))}
-                <Link href="/?view=frontpage#frontpage" className="nav-button gaming-chip px-3 py-2 rounded-lg text-xs uppercase tracking-[0.14em] text-text-secondary hover:text-text-primary">Frontpage</Link>
+                <Link href="/?view=frontpage#frontpage" className="nav-button gaming-chip menu-chip-opaque px-3 py-2 rounded-lg text-xs uppercase tracking-[0.14em] text-text-secondary hover:text-text-primary">Frontpage</Link>
               </nav>
 
               <div className="flex items-center gap-2">
@@ -321,7 +319,7 @@ export default function Dashboard({ user, onLogout }: Props) {
                   {searchResults.length > 0 && <p className="text-[10px] text-text-muted uppercase tracking-wider px-3 mb-1 mt-2">Pages & Actions</p>}
                   {paletteItems.map((item) => (
                     <button key={item.id} onClick={item.action} className="w-full text-left p-3 rounded-xl hover:bg-bg-hover transition-colors flex items-center gap-3">
-                      <span className="text-xl">{item.icon}</span>
+                      {item.icon && <span className="text-xl">{item.icon}</span>}
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-sm">{item.title}</p>
                         <p className="text-xs text-text-muted truncate">{item.subtitle}</p>

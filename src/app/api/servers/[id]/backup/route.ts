@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { gameServers } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
 import { mkdir, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -17,6 +18,9 @@ export async function GET(
 ) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!((await hasPermission(auth.userId, "servers.backup")) || (await hasPermission(auth.userId, "servers.restore")))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
 
   const { id } = await params;
   try {
@@ -49,6 +53,14 @@ export async function POST(
   const { id } = await params;
   const body = await req.json();
   const action = body.action as string; // "create" | "restore"
+
+  if (action === "restore") {
+    if (!(await hasPermission(auth.userId, "servers.restore"))) {
+      return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+    }
+  } else if (!(await hasPermission(auth.userId, "servers.backup"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
 
   try {
     const [server] = await db.select({ installPath: gameServers.installPath, userId: gameServers.userId, name: gameServers.name, status: gameServers.status }).from(gameServers).where(eq(gameServers.id, Number(id))).limit(1);

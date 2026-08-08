@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { users, gameServers } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { eq, sql, ilike, or } from "drizzle-orm";
 
 // GET /api/users — Admin: list all users
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || auth.role !== "admin") {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  if (!auth || !(await hasPermission(auth.userId, "users.view"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
   try {

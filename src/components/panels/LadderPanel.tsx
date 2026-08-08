@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 
 interface LadderEntry {
   id: number;
+  gameId: number | null;
   season: string;
   teamName: string;
   tag: string | null;
@@ -17,7 +18,16 @@ interface LadderEntry {
   rank: number;
 }
 
+interface LadderGame {
+  id: number;
+  slug: string;
+  name: string;
+  iconEmoji: string | null;
+}
+
 interface LadderResponse {
+  gameId: number | null;
+  games: LadderGame[];
   season: string;
   seasons: string[];
   standings: LadderEntry[];
@@ -36,6 +46,8 @@ const EMPTY_FORM = {
 };
 
 export default function LadderPanel() {
+  const [gameId, setGameId] = useState("");
+  const [games, setGames] = useState<LadderGame[]>([]);
   const [season, setSeason] = useState("S1");
   const [seasons, setSeasons] = useState<string[]>([]);
   const [standings, setStandings] = useState<LadderEntry[]>([]);
@@ -48,7 +60,10 @@ export default function LadderPanel() {
   const canCreate = perms["ladder.create"] === true;
   const canEdit = perms["ladder.edit"] === true;
   const canDelete = perms["ladder.delete"] === true;
-  const canSeason = perms["ladder.season"] === true;
+  const canSeason = perms["ladder.season"] === true || perms["ladder.season.manage"] === true;
+  const canCreateEntry = canCreate || perms["ladder.create.entry"] === true;
+  const canEditEntry = canEdit || perms["ladder.edit.entry"] === true;
+  const canDeleteEntry = canDelete || perms["ladder.delete.entry"] === true;
 
   const loadPermissions = useCallback(async () => {
     try {
@@ -59,18 +74,25 @@ export default function LadderPanel() {
     }
   }, []);
 
-  const loadLadder = useCallback(async (activeSeason: string) => {
+  const loadLadder = useCallback(async (activeSeason: string, activeGameId?: string) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/ladder?season=${encodeURIComponent(activeSeason)}`);
+      const query = new URLSearchParams({ season: activeSeason });
+      const nextGameId = activeGameId ?? gameId;
+      if (nextGameId) query.set("gameId", nextGameId);
+      const res = await fetch(`/api/ladder?${query.toString()}`);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setMessage({ type: "error", text: data.error || "Failed to load standings" });
         setStandings([]);
         setSeasons([]);
+        setGames([]);
         return;
       }
       const data = (await res.json()) as LadderResponse;
+      const nextId = data.gameId ? String(data.gameId) : "";
+      setGameId(nextId);
+      setGames(data.games || []);
       setSeason(data.season || activeSeason);
       setSeasons(data.seasons || []);
       setStandings(data.standings || []);
@@ -79,12 +101,12 @@ export default function LadderPanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [gameId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadPermissions();
-      void loadLadder("S1");
+      void loadLadder("S1", "");
     }, 0);
     return () => window.clearTimeout(timer);
   }, [loadLadder, loadPermissions]);
@@ -119,6 +141,7 @@ export default function LadderPanel() {
     setMessage(null);
 
     const payload = {
+      gameId: gameId ? Number(gameId) : null,
       season,
       teamName: form.teamName,
       tag: form.tag,
@@ -146,7 +169,7 @@ export default function LadderPanel() {
 
       setMessage({ type: "success", text: editingId ? "Entry updated" : "Entry created" });
       clearForm();
-      void loadLadder(season);
+      void loadLadder(season, gameId);
     } catch {
       setMessage({ type: "error", text: "Could not save entry" });
     }
@@ -164,7 +187,7 @@ export default function LadderPanel() {
       }
       setMessage({ type: "success", text: "Entry deleted" });
       if (editingId === id) clearForm();
-      void loadLadder(season);
+      void loadLadder(season, gameId);
     } catch {
       setMessage({ type: "error", text: "Could not delete entry" });
     }
@@ -175,9 +198,24 @@ export default function LadderPanel() {
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="heading-font text-2xl font-bold uppercase tracking-[0.08em]">🏆 Gaming League Ladder</h2>
-          <p className="text-text-secondary text-sm">Manage ranked standings with advanced role-based permission controls.</p>
+          <p className="text-text-secondary text-sm">Run parallel ladders per game, each with its own active seasons and standings.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <label className="text-xs text-text-muted uppercase tracking-[0.14em]">Game</label>
+          <select
+            value={gameId}
+            onChange={(e) => {
+              const nextGameId = e.target.value;
+              setGameId(nextGameId);
+              void loadLadder(season, nextGameId);
+            }}
+            className="min-w-48 px-3 py-2 gaming-chip rounded-lg text-sm"
+          >
+            {games.length === 0 && <option value="">No installed games</option>}
+            {games.map((game) => (
+              <option key={game.id} value={String(game.id)}>{game.iconEmoji || "🎮"} {game.name}</option>
+            ))}
+          </select>
           <label className="text-xs text-text-muted uppercase tracking-[0.14em]">Season</label>
           <input
             value={season}
@@ -186,7 +224,7 @@ export default function LadderPanel() {
             disabled={!canSeason}
           />
           <button
-            onClick={() => void loadLadder(season)}
+            onClick={() => void loadLadder(season, gameId)}
             className="gaming-chip px-3 py-2 rounded-lg text-xs font-semibold hover:border-accent/40"
           >
             Refresh
@@ -201,7 +239,7 @@ export default function LadderPanel() {
               key={s}
               onClick={() => {
                 setSeason(s);
-                void loadLadder(s);
+                void loadLadder(s, gameId);
               }}
               className={`px-3 py-1.5 rounded-full text-xs font-medium ${season === s ? "bg-accent text-slate-950" : "gaming-chip text-text-secondary hover:text-text-primary"}`}
             >
@@ -217,7 +255,13 @@ export default function LadderPanel() {
         </div>
       )}
 
-      {(canCreate || (canEdit && editingId !== null)) && (
+      {(!gameId && games.length > 0) && (
+        <div className="rounded-lg p-3 text-sm bg-danger/15 text-danger">
+          Select a game to manage ladder entries.
+        </div>
+      )}
+
+      {(canCreateEntry || (canEditEntry && editingId !== null)) && gameId && (
         <form onSubmit={saveEntry} className="gaming-surface rounded-xl p-5 space-y-4">
           <h3 className="heading-font text-lg uppercase tracking-[0.06em]">{editingId ? "Edit Ladder Team" : "Add Ladder Team"}</h3>
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
@@ -258,13 +302,13 @@ export default function LadderPanel() {
                 <th className="px-4 py-3">D</th>
                 <th className="px-4 py-3">Pts</th>
                 <th className="px-4 py-3">Streak</th>
-                {(canEdit || canDelete) && <th className="px-4 py-3">Actions</th>}
+                {(canEditEntry || canDeleteEntry) && <th className="px-4 py-3">Actions</th>}
               </tr>
             </thead>
             <tbody>
               {!loading && standings.length === 0 && (
                 <tr>
-                  <td className="px-4 py-10 text-center text-text-muted" colSpan={canEdit || canDelete ? 8 : 7}>
+                  <td className="px-4 py-10 text-center text-text-muted" colSpan={canEditEntry || canDeleteEntry ? 8 : 7}>
                     No teams in this season yet.
                   </td>
                 </tr>
@@ -284,11 +328,11 @@ export default function LadderPanel() {
                   <td className="px-4 py-3">{entry.draws}</td>
                   <td className="px-4 py-3 font-bold text-accent">{entry.points}</td>
                   <td className="px-4 py-3">{entry.streak}</td>
-                  {(canEdit || canDelete) && (
+                  {(canEditEntry || canDeleteEntry) && (
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
-                        {canEdit && <button onClick={() => startEdit(entry)} className="px-2 py-1 bg-accent/15 text-accent rounded text-xs">Edit</button>}
-                        {canDelete && <button onClick={() => void deleteEntry(entry.id)} className="px-2 py-1 bg-danger/15 text-danger rounded text-xs">Delete</button>}
+                        {canEditEntry && <button onClick={() => startEdit(entry)} className="px-2 py-1 bg-accent/15 text-accent rounded text-xs">Edit</button>}
+                        {canDeleteEntry && <button onClick={() => void deleteEntry(entry.id)} className="px-2 py-1 bg-danger/15 text-danger rounded text-xs">Delete</button>}
                       </div>
                     </td>
                   )}

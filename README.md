@@ -28,6 +28,7 @@ GameServer Manager focuses on three priorities:
 | Monitoring | CPU/RAM/Disk/Network visibility in dashboard panels |
 | Automation | Scheduler, Discord notifications, and API key access |
 | Access control | Roles, granular permissions, JWT auth, optional TOTP 2FA |
+| Personalization | User theme generator with custom palettes and profile persistence |
 | Competitive tools | League Ladder panel with season standings and RBAC-protected management |
 | Platform extras | Built-in CMS and forum modules |
 
@@ -40,7 +41,18 @@ The panel includes an advanced role-based access model with granular permissions
 - Role-aware dashboard navigation: modules are hidden when permission is missing
 - System roles auto-upgrade during installer role seeding
 - Fine-grained categories for servers, nodes, games, users, roles, forum, ladder, monitor, database, scheduler, API keys, security, and panel configuration
-- Route-level permission checks on critical APIs (scheduler, templates import/create, API keys, roles, ladder, and more)
+- Route-level permission checks on critical APIs (scheduler, templates import/create, API keys, roles, ladder, database, monitor, settings, forum moderation, and more)
+- Installer hardening: re-running install workflow after first setup requires explicit `panel.install` permission
+
+### Nitty-Gritty Permission Areas
+
+- Servers: separate keys for create/edit/delete/start-stop/restart/clone/install/files/console/backup/restore/log views
+- Games & templates: separate keys for browse, metadata edits, script edits, install/uninstall, import/export
+- Forum: split own-vs-any post/thread edit/delete, plus dedicated lock/pin/moderation scopes
+- CMS: split create/edit/edit-published/publish/pin/delete
+- Database: split schema browse, row browse, row edit, and raw query execution
+- Settings and panel tools: split email settings, export, import, global search, and Discord test permissions
+- Security and audit: dedicated `security.audit` scope for activity log access
 
 ---
 
@@ -208,6 +220,49 @@ npm run lint
 npm test
 npm run build
 ```
+
+---
+
+## Updating A Live Panel
+
+Use this sequence for in-place production upgrades.
+
+### 1. Pull latest code and install dependencies
+
+```bash
+cd /opt/gsm-panel
+git fetch --all --prune
+git checkout main
+git pull --ff-only origin main
+npm install
+```
+
+### 2. Build and run validation
+
+```bash
+npm run typecheck
+npm run lint
+npm test
+npm run build
+```
+
+### 3. Restart panel process
+
+```bash
+pm2 restart gsm-panel
+pm2 status
+pm2 logs gsm-panel --lines 150
+```
+
+### 4. Verify health and critical endpoints
+
+```bash
+curl -fsS http://127.0.0.1:${PORT:-3000}/api/health
+```
+
+### 5. Database compatibility note
+
+Some releases add columns lazily at runtime through safe `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` guards. For this release, user theme persistence and ladder game scoping include those guards in API routes, so manual migration is optional.
 
 ---
 

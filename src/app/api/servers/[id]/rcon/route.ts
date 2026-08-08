@@ -107,6 +107,9 @@ export async function GET(
 ) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await hasPermission(auth.userId, "servers.console"))) {
+    return NextResponse.json({ error: "Permission denied: servers.console required" }, { status: 403 });
+  }
 
   const { id } = await params;
 

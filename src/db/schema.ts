@@ -38,6 +38,7 @@ export const users = pgTable("users", {
   bio: text("bio"),
   location: varchar("location", { length: 128 }),
   website: varchar("website", { length: 256 }),
+  themeConfig: jsonb("theme_config"),
   twoFactorEnabled: boolean("two_factor_enabled").default(false),
   twoFactorSecret: text("two_factor_secret"),
   maxServers: integer("max_servers").default(5),
@@ -221,6 +222,7 @@ export const forumPosts = pgTable("forum_posts", {
 // ── League ladder standings ─────────────────────────────────
 export const leagueLadderEntries = pgTable("league_ladder_entries", {
   id: serial("id").primaryKey(),
+  gameId: integer("game_id").references(() => gameDefinitions.id),
   season: varchar("season", { length: 64 }).notNull().default("S1"),
   teamName: varchar("team_name", { length: 128 }).notNull(),
   tag: varchar("tag", { length: 12 }),

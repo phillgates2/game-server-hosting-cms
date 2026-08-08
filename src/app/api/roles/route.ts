@@ -9,6 +9,9 @@ import { sql } from "drizzle-orm";
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await hasPermission(auth.userId, "roles.view"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
 
   try {
     const allRoles = await db.select().from(roles).orderBy(roles.priority);

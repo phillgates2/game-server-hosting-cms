@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { gameServers, gameDefinitions, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { sendDiscordWebhook } from "@/lib/discord";
 import { eq } from "drizzle-orm";
 import { spawn } from "node:child_process";
@@ -115,6 +116,19 @@ export async function POST(
 
     const body = await req.json();
     const action = body.action as string; // "start" | "stop" | "restart" | "status"
+
+    if (action === "status") {
+      if (!(await hasPermission(auth.userId, "servers.view"))) {
+        return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+      }
+    } else if (action === "restart") {
+      const canRestart = (await hasPermission(auth.userId, "servers.restart")) || (await hasPermission(auth.userId, "servers.start_stop"));
+      if (!canRestart) return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+    } else {
+      if (!(await hasPermission(auth.userId, "servers.start_stop"))) {
+        return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+      }
+    }
 
     // ─── STATUS ───
     if (action === "status") {

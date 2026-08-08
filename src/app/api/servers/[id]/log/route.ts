@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { gameServers } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -16,6 +17,9 @@ export async function GET(
 ) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!((await hasPermission(auth.userId, "servers.view.logs")) || (await hasPermission(auth.userId, "servers.edit")))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
 
   const { id } = await params;
 

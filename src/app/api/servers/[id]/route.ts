@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { gameServers, gameDefinitions, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { sendDiscordWebhook } from "@/lib/discord";
 import { eq } from "drizzle-orm";
 import { rm } from "node:fs/promises";
@@ -56,6 +57,9 @@ function isSafeToDeleteFolder(installPath: string, nodeBasePath: string | null) 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await hasPermission(auth.userId, "servers.view"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
 
   try {
     const { id } = await params;
@@ -95,6 +99,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await hasPermission(auth.userId, "servers.edit"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
 
   try {
     const { id } = await params;
@@ -149,6 +156,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await hasPermission(auth.userId, "servers.delete"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
 
   try {
     const { id } = await params;

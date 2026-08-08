@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { cmsPages, users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { eq, desc, and } from "drizzle-orm";
 
 // GET /api/cms?type=blog|changelog|page&published=true
@@ -49,13 +50,22 @@ export async function GET(req: NextRequest) {
 // POST /api/cms - Create a new post (admin only)
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || auth.role !== "admin") {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  if (!auth || !(await hasPermission(auth.userId, "cms.create"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
   try {
     const body = await req.json();
     const { title, slug, content, type, excerpt, coverImage, published, pinned, tags } = body;
+
+    if (published !== undefined && published !== null) {
+      const canPublish = await hasPermission(auth.userId, "cms.publish");
+      if (!canPublish) return NextResponse.json({ error: "cms.publish permission required" }, { status: 403 });
+    }
+    if (pinned !== undefined && pinned !== null) {
+      const canPin = (await hasPermission(auth.userId, "cms.pin")) || (await hasPermission(auth.userId, "cms.publish"));
+      if (!canPin) return NextResponse.json({ error: "cms.pin permission required" }, { status: 403 });
+    }
 
     if (!title || !content) {
       return NextResponse.json({ error: "Title and content required" }, { status: 400 });

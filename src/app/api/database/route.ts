@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool } from "@/db";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || auth.role !== "admin") {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  const allowed = auth && ((await hasPermission(auth.userId, "database.view")) || (await hasPermission(auth.userId, "database.view.schema")));
+  if (!allowed) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
   try {

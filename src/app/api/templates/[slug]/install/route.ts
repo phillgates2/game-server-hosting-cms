@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { gameDefinitions } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { getTemplateBySlug } from "@/db/seeds";
 import { eq } from "drizzle-orm";
 
@@ -11,8 +12,8 @@ export async function POST(
   { params }: { params: Promise<{ slug: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || auth.role !== "admin") {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  if (!auth || !(await hasPermission(auth.userId, "games.install"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
   const { slug } = await params;
@@ -70,8 +71,8 @@ export async function DELETE(
   { params }: { params: Promise<{ slug: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || auth.role !== "admin") {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  if (!auth || !(await hasPermission(auth.userId, "games.uninstall"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
   const { slug } = await params;

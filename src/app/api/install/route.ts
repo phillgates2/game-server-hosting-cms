@@ -5,8 +5,9 @@ import { execFile } from "node:child_process";
 import { db, pool } from "@/db";
 import { installLog, settings, users, forumCategories, roles } from "@/db/schema";
 import { hashPassword } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { gameTemplates } from "@/db/seeds";
-import { DEFAULT_ROLES } from "@/lib/permissions";
+import { DEFAULT_ROLES, hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
 
 function buildDatabaseUrlWithPassword(databaseUrl: string, password: string) {
@@ -67,6 +68,16 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const installedRows = await db.select().from(settings).where(eq(settings.key, "installed")).limit(1);
+    const alreadyInstalled = installedRows.length > 0 && installedRows[0].value === "true";
+
+    if (alreadyInstalled) {
+      const auth = await getCurrentUser(req.headers);
+      if (!auth || !(await hasPermission(auth.userId, "panel.install"))) {
+        return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+      }
+    }
+
     const body = await req.json();
     const { adminUsername, adminEmail, adminPassword, panelName, databasePassword } = body;
     let pendingDatabaseUrlUpdate: string | null = null;
@@ -114,6 +125,7 @@ export async function POST(req: NextRequest) {
         bio TEXT,
         location VARCHAR(128),
         website VARCHAR(256),
+        theme_config JSONB,
         two_factor_enabled BOOLEAN DEFAULT FALSE,
         two_factor_secret TEXT,
         max_servers INTEGER DEFAULT 5,
@@ -278,6 +290,7 @@ export async function POST(req: NextRequest) {
         -- League ladder standings
         CREATE TABLE IF NOT EXISTS league_ladder_entries (
           id SERIAL PRIMARY KEY,
+          game_id INTEGER REFERENCES game_definitions(id),
           season VARCHAR(64) NOT NULL DEFAULT 'S1',
           team_name VARCHAR(128) NOT NULL,
           tag VARCHAR(12),
@@ -293,6 +306,9 @@ export async function POST(req: NextRequest) {
           created_at TIMESTAMP DEFAULT NOW() NOT NULL,
           updated_at TIMESTAMP DEFAULT NOW() NOT NULL
         );
+
+        CREATE INDEX IF NOT EXISTS league_ladder_entries_game_season_idx
+          ON league_ladder_entries (game_id, season);
 
       -- Install Log
       CREATE TABLE IF NOT EXISTS install_log (

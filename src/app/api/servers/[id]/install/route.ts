@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { gameDefinitions, gameServers, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
 import { mkdtemp, writeFile, chmod, rm, mkdir, access, constants, stat, readdir } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
@@ -345,6 +346,9 @@ export async function POST(
 ) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await hasPermission(auth.userId, "servers.install"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
 
   const { id } = await params;
 

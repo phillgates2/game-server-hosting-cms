@@ -4,12 +4,21 @@ import { users, gameServers, forumPosts } from "@/db/schema";
 import { getCurrentUser, verifyPassword, hashPassword } from "@/lib/auth";
 import { eq, sql } from "drizzle-orm";
 
+async function ensureThemeConfigColumn() {
+  await db.execute(sql`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS theme_config JSONB
+  `);
+}
+
 // GET /api/auth/profile — Get own full profile
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
+    await ensureThemeConfigColumn();
+
     const [user] = await db
       .select({
         id: users.id,
@@ -20,6 +29,7 @@ export async function GET(req: NextRequest) {
         bio: users.bio,
         location: users.location,
         website: users.website,
+        themeConfig: users.themeConfig,
         maxServers: users.maxServers,
         twoFactorEnabled: users.twoFactorEnabled,
         lastLoginAt: users.lastLoginAt,
@@ -65,6 +75,8 @@ export async function PATCH(req: NextRequest) {
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
+    await ensureThemeConfigColumn();
+
     const body = await req.json();
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
 
@@ -72,6 +84,7 @@ export async function PATCH(req: NextRequest) {
     if (body.bio !== undefined) updateData.bio = body.bio;
     if (body.location !== undefined) updateData.location = body.location;
     if (body.website !== undefined) updateData.website = body.website;
+    if (body.themeConfig !== undefined) updateData.themeConfig = body.themeConfig;
     if (body.email !== undefined) updateData.email = body.email;
 
     // Password change requires current password
@@ -100,6 +113,7 @@ export async function PATCH(req: NextRequest) {
         bio: users.bio,
         location: users.location,
         website: users.website,
+        themeConfig: users.themeConfig,
       });
 
     return NextResponse.json({ profile: updated });

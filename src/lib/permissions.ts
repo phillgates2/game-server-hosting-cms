@@ -11,8 +11,12 @@ export const PERMISSION_CATEGORIES = {
     label: "Game Servers",
     permissions: {
       "servers.view":         "View servers",
+      "servers.view.metrics": "View live server metrics",
+      "servers.view.logs":    "View server logs",
       "servers.create":       "Create new servers",
       "servers.edit":         "Edit server settings",
+      "servers.edit.network": "Edit server networking ports/IP",
+      "servers.edit.resources": "Edit CPU/RAM limits",
       "servers.delete":       "Delete servers",
       "servers.start_stop":   "Start and stop servers",
       "servers.restart":      "Restart servers",
@@ -30,8 +34,11 @@ export const PERMISSION_CATEGORIES = {
     label: "Nodes",
     permissions: {
       "nodes.view":           "View nodes",
+      "nodes.view.metrics":   "View node performance metrics",
       "nodes.create":         "Add new nodes",
       "nodes.edit":           "Edit node settings",
+      "nodes.edit.resources": "Edit node capacity limits",
+      "nodes.edit.paths":     "Edit node install paths",
       "nodes.delete":         "Delete nodes",
       "nodes.maintenance":    "Put nodes into maintenance mode",
       "nodes.monitor":        "View detailed node telemetry",
@@ -45,6 +52,8 @@ export const PERMISSION_CATEGORIES = {
       "games.templates":      "View game templates",
       "games.install":        "Install game templates",
       "games.uninstall":      "Uninstall game templates",
+      "games.edit":           "Edit installed game metadata",
+      "games.edit.scripts":   "Edit install/start scripts",
       "games.create_custom":  "Create custom templates",
       "games.import":         "Import templates",
       "games.export":         "Export templates",
@@ -55,7 +64,10 @@ export const PERMISSION_CATEGORIES = {
     label: "User Management",
     permissions: {
       "users.view":           "View user list",
+      "users.view.private":   "View private account metadata",
+      "users.view.detail":    "View detailed user profile data",
       "users.edit":           "Edit user profiles",
+      "users.edit.security":  "Edit account security properties",
       "users.delete":         "Delete users",
       "users.roles":          "Change user roles",
       "users.suspend":        "Suspend/ban users",
@@ -72,6 +84,8 @@ export const PERMISSION_CATEGORIES = {
       "roles.view":           "View roles",
       "roles.create":         "Create new roles",
       "roles.edit":           "Edit roles & permissions",
+      "roles.assign":         "Assign roles to users",
+      "roles.default":        "Set default signup role",
       "roles.delete":         "Delete roles",
     },
   },
@@ -80,6 +94,12 @@ export const PERMISSION_CATEGORIES = {
     permissions: {
       "forum.view":           "View forum",
       "forum.post":           "Create threads & replies",
+      "forum.thread.edit_own": "Edit own threads",
+      "forum.thread.delete_own": "Delete own threads",
+      "forum.thread.edit_any": "Edit any thread (mod)",
+      "forum.thread.delete_any": "Delete any thread (mod)",
+      "forum.thread.pin":     "Pin/unpin threads",
+      "forum.thread.lock":    "Lock/unlock threads",
       "forum.edit_own":       "Edit own posts",
       "forum.delete_own":     "Delete own posts",
       "forum.edit_any":       "Edit any post (mod)",
@@ -94,11 +114,22 @@ export const PERMISSION_CATEGORIES = {
     label: "League Ladder",
     permissions: {
       "ladder.view":          "View ladder standings",
+      "ladder.view.history":  "View archived ladder history",
       "ladder.create":        "Create ladder entries",
+      "ladder.create.entry":  "Create team entries",
       "ladder.edit":          "Edit ladder entries",
+      "ladder.edit.entry":    "Edit team identity fields",
+      "ladder.edit.stats":    "Edit wins/losses/draws/points",
+      "ladder.edit.notes":    "Edit internal ladder notes",
       "ladder.delete":        "Delete ladder entries",
+      "ladder.delete.entry":  "Delete team entries",
       "ladder.season":        "Manage seasons and resets",
+      "ladder.season.manage": "Create/switch game seasons",
+      "ladder.season.reset":  "Reset season standings",
+      "ladder.manage.games":  "Move entries between games",
       "ladder.publish":       "Publish featured standings",
+      "ladder.import":        "Bulk import standings",
+      "ladder.export":        "Export standings",
     },
   },
   cms: {
@@ -107,8 +138,11 @@ export const PERMISSION_CATEGORIES = {
       "cms.view":             "View CMS panel",
       "cms.create":           "Create posts",
       "cms.edit":             "Edit posts",
+      "cms.edit.published":   "Edit already-published posts",
+      "cms.pin":              "Pin/unpin content",
       "cms.delete":           "Delete posts",
       "cms.publish":          "Publish/unpublish posts",
+      "cms.media":            "Manage media assets",
     },
   },
   monitor: {
@@ -118,12 +152,15 @@ export const PERMISSION_CATEGORIES = {
       "monitor.clear_cache":  "Clear RAM buffers/cache",
       "monitor.alerts":       "Manage monitor alerts",
       "monitor.history":      "View metric history",
+      "monitor.export":       "Export monitoring data",
     },
   },
   database: {
     label: "Database",
     permissions: {
       "database.view":        "View database tables",
+      "database.view.schema": "View schema metadata",
+      "database.view.rows":   "View table rows",
       "database.edit":        "Edit database rows",
       "database.query":       "Execute SQL queries",
       "database.export":      "Export database data",
@@ -139,6 +176,7 @@ export const PERMISSION_CATEGORIES = {
       "scheduler.edit":       "Edit tasks",
       "scheduler.delete":     "Delete tasks",
       "scheduler.run":        "Run tasks manually",
+      "scheduler.logs":       "View scheduler run logs",
     },
   },
   apikeys: {
@@ -148,6 +186,7 @@ export const PERMISSION_CATEGORIES = {
       "apikeys.create":       "Create API keys",
       "apikeys.revoke":       "Revoke API keys",
       "apikeys.scope":        "Manage key scopes",
+      "apikeys.rotate":       "Rotate API keys",
     },
   },
   security: {
@@ -156,6 +195,8 @@ export const PERMISSION_CATEGORIES = {
       "security.audit":       "View security audit logs",
       "security.sessions":    "Manage active sessions",
       "security.settings":    "Manage security settings",
+      "security.2fa.enforce": "Enforce 2FA policy",
+      "security.tokens":      "Manage auth/API tokens",
     },
   },
   panel: {
@@ -166,6 +207,11 @@ export const PERMISSION_CATEGORIES = {
       "panel.branding":       "Manage panel branding",
       "panel.i18n":           "Manage languages",
       "panel.install":        "Run installer and setup",
+      "panel.updates":        "Run panel update operations",
+      "panel.search.global":  "Use global cross-resource search",
+      "panel.settings.email": "Manage SMTP/test email",
+      "panel.settings.export": "Export panel config",
+      "panel.settings.import": "Import panel config",
     },
   },
 };
@@ -204,15 +250,22 @@ export const DEFAULT_ROLES = [
       "nodes.view": true, "nodes.monitor": true,
       "games.view": true, "games.templates": true, "games.variables": true,
       "users.view": true, "users.suspend": true, "users.limits": true,
+      "users.view.detail": true,
       "forum.view": true, "forum.post": true, "forum.edit_own": true,
       "forum.delete_own": true, "forum.edit_any": true, "forum.delete_any": true,
       "forum.pin": true, "forum.lock": true, "forum.moderate": true,
-      "ladder.view": true, "ladder.create": true, "ladder.edit": true, "ladder.publish": true,
-      "cms.view": true, "cms.create": true, "cms.edit": true, "cms.publish": true,
+      "forum.thread.edit_own": true, "forum.thread.delete_own": true,
+      "forum.thread.edit_any": true, "forum.thread.delete_any": true,
+      "forum.thread.pin": true, "forum.thread.lock": true,
+      "ladder.view": true, "ladder.view.history": true, "ladder.create": true, "ladder.create.entry": true,
+      "ladder.edit": true, "ladder.edit.entry": true, "ladder.edit.stats": true, "ladder.edit.notes": true,
+      "ladder.season": true, "ladder.season.manage": true, "ladder.publish": true,
+      "cms.view": true, "cms.create": true, "cms.edit": true, "cms.publish": true, "cms.pin": true,
       "monitor.view": true, "monitor.history": true,
       "scheduler.view": true,
       "apikeys.view": true, "apikeys.create": true,
       "security.audit": true,
+      "panel.search.global": true,
     },
   },
   {
@@ -300,6 +353,11 @@ export async function getUserPermissions(userId: number): Promise<Record<string,
 export async function hasPermission(userId: number, permission: string): Promise<boolean> {
   const perms = await getUserPermissions(userId);
   return perms[permission] === true;
+}
+
+export async function hasAnyPermission(userId: number, permissions: string[]): Promise<boolean> {
+  const perms = await getUserPermissions(userId);
+  return permissions.some((permission) => perms[permission] === true);
 }
 
 export function invalidateRoleCache() {

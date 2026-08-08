@@ -2,9 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { forumThreads, forumPosts, users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { eq, desc, sql } from "drizzle-orm";
 
 export async function GET(req: NextRequest) {
+  const auth = await getCurrentUser(req.headers);
+  if (!auth || !(await hasPermission(auth.userId, "forum.view"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
+
   const url = new URL(req.url);
   const categoryId = url.searchParams.get("categoryId");
 
@@ -41,6 +47,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await hasPermission(auth.userId, "forum.post"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
+  }
 
   try {
     const { categoryId, title, body } = await req.json();

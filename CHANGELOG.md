@@ -4,6 +4,46 @@ All notable changes to GameServer Manager are documented in this file.
 
 ---
 
+## [2.6.0] — 2026-08-08
+
+### Added
+- User Theme Generator in profile settings:
+  - Custom palette creation (color tokens + scheme)
+  - Live application across the panel UI
+  - Profile-backed persistence through `users.theme_config`
+  - Theme preference sync with local storage for immediate UX
+- New theme utility module for shared theme preference and token application logic:
+  - `src/lib/theme.ts`
+
+### Changed
+- Permission model expanded with deeper scopes:
+  - `users.view.detail`
+  - `forum.thread.*` granular keys (own/any edit/delete, pin, lock)
+  - `cms.pin`
+  - `database.view.schema`, `database.view.rows`
+  - `panel.search.global`, `panel.settings.email`, `panel.settings.export`, `panel.settings.import`
+- API route authorization hardened across servers, games/templates, forum, CMS, database, monitor, settings, search, Discord test endpoint, users, nodes, and roles.
+- Dashboard activity log visibility now uses `security.audit`.
+- Installer API now requires `panel.install` permission when re-run on already-installed panels.
+
+### Fixed
+- API key deletion now scoped to the authenticated owner's keys.
+- Theme profile endpoint compatibility for existing installations via runtime-safe `ALTER TABLE users ADD COLUMN IF NOT EXISTS theme_config JSONB`.
+
+### Debug
+- Full project validation completed:
+  - `npm run typecheck` passed
+  - `npm run lint` passed
+  - `npm test` passed (7/7)
+  - `npm run build` passed
+- Turbopack NFT warning remains non-blocking for dynamic process-control tracing.
+
+### Docs
+- README expanded with:
+  - Theme generator coverage
+  - Nitty-gritty permission scope overview
+  - Step-by-step live panel update workflow
+
 ## [2.5.0] — 2026-08-07
 
 ### Added

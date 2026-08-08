@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { users, gameServers, forumPosts } from "@/db/schema";
 import { getCurrentUser, hashPassword } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { eq, sql } from "drizzle-orm";
 
 // GET /api/users/[id] — Admin: get user detail
@@ -10,8 +11,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || auth.role !== "admin") {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  const allowed = auth && ((await hasPermission(auth.userId, "users.view")) || (await hasPermission(auth.userId, "users.view.detail")));
+  if (!allowed) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
   const { id } = await params;
@@ -65,8 +67,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || auth.role !== "admin") {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  if (!auth || !(await hasPermission(auth.userId, "users.edit"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
   const { id } = await params;
@@ -74,14 +76,32 @@ export async function PATCH(
 
   try {
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
-    if (body.role !== undefined) updateData.role = body.role;
-    if (body.status !== undefined) updateData.status = body.status;
-    if (body.maxServers !== undefined) updateData.maxServers = body.maxServers;
+    if (body.role !== undefined) {
+      if (!(await hasPermission(auth.userId, "users.roles"))) {
+        return NextResponse.json({ error: "users.roles permission required" }, { status: 403 });
+      }
+      updateData.role = body.role;
+    }
+    if (body.status !== undefined) {
+      if (!(await hasPermission(auth.userId, "users.suspend"))) {
+        return NextResponse.json({ error: "users.suspend permission required" }, { status: 403 });
+      }
+      updateData.status = body.status;
+    }
+    if (body.maxServers !== undefined) {
+      if (!(await hasPermission(auth.userId, "users.limits"))) {
+        return NextResponse.json({ error: "users.limits permission required" }, { status: 403 });
+      }
+      updateData.maxServers = body.maxServers;
+    }
     if (body.email !== undefined) updateData.email = body.email;
     if (body.bio !== undefined) updateData.bio = body.bio;
     if (body.location !== undefined) updateData.location = body.location;
     if (body.website !== undefined) updateData.website = body.website;
     if (body.password) {
+      if (!((await hasPermission(auth.userId, "users.reset_password")) || (await hasPermission(auth.userId, "users.edit.security")))) {
+        return NextResponse.json({ error: "users.reset_password permission required" }, { status: 403 });
+      }
       updateData.passwordHash = await hashPassword(body.password);
     }
 
@@ -98,8 +118,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || auth.role !== "admin") {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  if (!auth || !(await hasPermission(auth.userId, "users.delete"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
   const { id } = await params;
