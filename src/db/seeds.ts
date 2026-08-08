@@ -1246,6 +1246,54 @@ set rconpassword "{{RCON_PASSWORD}}"
 set sv_punkbuster "0"
 set g_allowvote "1"
 set sv_mapRotation "map oasis; map battery; map goldrush; map radar; map railgun; map fueldump"
+set server_motd0 " ^NET: Legacy ^7MOTD "        // message in right corner of join screen
+set server_motd1 ""
+set server_motd2 ""
+set server_motd3 ""
+set server_motd4 ""
+set server_motd5 ""
+
+// CLIENTS
+
+set sv_privateclients "4"                       // if set > 0, then this number of client slots will be reserved for connections
+set sv_privatepassword ""                       // that have "password" set to the value of "sv_privatePassword"
+
+// PASSWORDS
+
+set g_password ""                               // server protection password
+set refereePassword ""                          // referee status password
+set shoutcastPassword ""                        // shoutcast status password
+
+// NETWORK
+
+set sv_advert "3"                               // 1: send heartbeats to master server 3: to also sent statistics to Trackbase
+set sv_timeout "40"                             // seconds without any message from connected clients
+set sv_dl_timeout "240"                         // seconds without any message from downloading or preparing clients
+set sv_minping "0"                              // minimum ping required on connect (0: no minimum)
+set sv_maxping "0"                              // maximum ping allowed on connect (0: no maximum)
+
+// DOWNLOAD
+
+set sv_maxRate "25000"                          // 10000 standard but poor for ET (0: unlimited)
+set sv_dlRate "100"                             // increase/decrease if you have plenty/little spare bandwidth
+set sv_allowDownload "1"                        // global toggle for both legacy download and web download
+set sv_wwwDownload "0"                          // toggle to enable web download
+set sv_wwwBaseURL ""                            // base URL for redirection
+set sv_wwwDlDisconnected "0"                    // tell clients to perform their downloads while disconnected from the server
+set sv_wwwFallbackURL ""                        // URL to send to if an http/ftp fails or is refused client side
+
+// LOGGING & PROTECTION
+
+set logfile "2"                                 // enable console logging - 'etconsole.log' (1: enabled 2: enabled and synchronized)
+set sv_pure "1"                                 // enable hash check of client pk3 files
+set sv_protect "1"                              // 1: Use ioquake3 getstatus, getchallenge DDoS protection 2: Use OpenWolf getstatus, getinfo, getchallenge DRDoS protection
+set sv_protectLog "sv_protect.log"              // when set all sv_protect and server security related messages are written into this log file
+set sv_floodProtect "1"                         // prevent server flooding
+set sv_userInfofloodProtect "1"                 // prevent userinfo flooding
+set sv_ipMaxClients "0"                         // limits connections per IP to cvar value (0: no maximum)
+
+// MOD CONFIG - put mod related vars in a separate config
+exec legacy.cfg
 map oasis
 MODCFG
 fi
