@@ -32,7 +32,6 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <ConfirmProvider>
             <NotificationProvider>
               <I18nProvider>
-                <GlobalHomeLink />
                 {children}
               </I18nProvider>
             </NotificationProvider>
