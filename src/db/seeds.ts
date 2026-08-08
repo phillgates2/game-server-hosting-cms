@@ -1293,6 +1293,12 @@ set sv_userInfofloodProtect "1"                 // prevent userinfo flooding
 set sv_ipMaxClients "0"                         // limits connections per IP to cvar value (0: no maximum)
 
 // MOD CONFIG - put mod related vars in a separate config
+set sv_master1 "etmaster.idsoftware.com"
+set sv_master2 "master0.etmaster.net"
+set sv_master3 "master3.idsoftware.com"
+set sv_master4 "wolfmaster.idsoftware.com"
+set sv_master5 "master3.idsoftware.com:27900"
+set sv_master6 "master.etlegacy.com"
 exec legacy.cfg
 map oasis
 MODCFG
