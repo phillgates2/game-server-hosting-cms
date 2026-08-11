@@ -1,350 +1,244 @@
-# GameServer Manager
+# 🎮 GameServer Manager
 
-Production-ready game server control panel with Next.js, PostgreSQL, and a practical installer for fresh Linux hosts.
+**Modern Game Server Hosting Panel** — A self-hosted, open-source alternative to TCAdmin for managing game servers across multiple nodes.
 
-Built for teams who want one place to manage game servers, nodes, templates, users, permissions, monitoring, and CMS content.
-
----
-
-## Why This Project
-
-GameServer Manager focuses on three priorities:
-
-- Fast server operations: install, start, stop, restart, monitor, and automate
-- Clear ownership and security: role-based access, API keys, 2FA, audit trails
-- Simple deployment: one-line installer with PM2 + Caddy + PostgreSQL setup
+Built with **Next.js 16**, **PostgreSQL**, **Drizzle ORM**, and **Tailwind CSS**.
 
 ---
 
-## Feature Highlights
+## ⚡ One-Liner Install
 
-| Area | What You Get |
-| --- | --- |
-| Server lifecycle | Create, install, start/stop/restart, clone, backup workflows |
-| Game templates | Built-in templates, custom templates, external import support |
-| Node operations | Local and remote node management patterns |
-| File tooling | Browser file management and editing for server assets |
-| Console access | RCON workflows for supported games |
-| Monitoring | CPU/RAM/Disk/Network visibility in dashboard panels |
-| Automation | Scheduler, Discord notifications, and API key access |
-| Access control | Roles, granular permissions, JWT auth, optional TOTP 2FA |
-| Personalization | User theme generator with custom palettes and profile persistence |
-| Competitive tools | League Ladder panel with season standings and RBAC-protected management |
-| Platform extras | Built-in CMS and forum modules |
+Run this on a fresh **Ubuntu 22.04+** or **Debian 12+** server:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/public/install.sh)
+```
+
+The interactive installer will prompt you for an admin username, email, and password, then handle everything else automatically.
+
+### Non-Interactive Install
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/public/install.sh) \
+  --admin-user admin \
+  --admin-email admin@example.com \
+  --admin-pass 'YourSecurePassword123!' \
+  --panel-name 'My Game Servers' \
+  --domain gs.example.com \
+  --caddy \
+  -y
+```
+
+### Installer Options
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--admin-user` | Admin username | `admin` (prompted) |
+| `--admin-email` | Admin email | `admin@localhost` (prompted) |
+| `--admin-pass` | Admin password | Prompted (min 8 chars) |
+| `--panel-name` | Panel display name | `GameServer Manager` |
+| `--domain` | Domain for Caddy reverse proxy (e.g., `gs.example.com`) | None (IP access) |
+| `--port` | Panel port | `3000` |
+| `--db-name` | PostgreSQL database | `gsm_panel` |
+| `--db-user` | PostgreSQL user | `gsm` |
+| `--db-pass` | PostgreSQL password | Auto-generated |
+| `--jwt-secret` | JWT signing secret | Auto-generated |
+| `--install-dir` | Installation path | `/opt/gsm-panel` |
+| `--caddy` | Set up Caddy reverse proxy with automatic HTTPS | No |
+| `-y`, `--noninteractive` | Skip prompts | No |
+
+### What the Installer Does
+
+1. **System packages** — Installs curl, git, build-essential, ufw, fail2ban
+2. **Node.js 22** — Via NodeSource repository
+3. **PostgreSQL** — Latest from official repo, creates database + role
+4. **System user** — Creates a dedicated `gsm` user
+5. **Clones repo** — Downloads source to `/opt/gsm-panel`
+6. **Environment** — Auto-generates `.env` with secure JWT secret & DB credentials
+7. **Build** — Runs `npm ci` and `npx next build`
+8. **Database init** — Pushes schema & runs install (admin user, roles, forum categories, seeds)
+9. **PM2** — Configures process manager with systemd auto-start
+10. **Caddy** — (Optional) Reverse proxy with **automatic HTTPS** via Let's Encrypt — no Certbot needed
 
 ---
 
-## Security and Permissions
+## 🌐 Caddy Reverse Proxy
 
-The panel includes an advanced role-based access model with granular permissions across operational and admin surfaces.
+The installer uses [Caddy](https://caddyserver.com/) as the reverse proxy. Caddy provides:
 
-- Role-aware dashboard navigation: modules are hidden when permission is missing
-- System roles auto-upgrade during installer role seeding
-- Fine-grained categories for servers, nodes, games, users, roles, forum, ladder, monitor, database, scheduler, API keys, security, and panel configuration
-- Route-level permission checks on critical APIs (scheduler, templates import/create, API keys, roles, ladder, database, monitor, settings, forum moderation, and more)
-- Installer hardening: re-running install workflow after first setup requires explicit `panel.install` permission
+- **Automatic HTTPS** — Obtains and renews Let's Encrypt certificates without any extra configuration
+- **HTTP/2 & HTTP/3** — Enabled by default
+- **Zero-config SSL** — Just point your domain's DNS A record to your server IP and Caddy handles the rest
+- **WebSocket support** — Built-in for live logs, RCON console, and real-time monitoring
 
-### Nitty-Gritty Permission Areas
+### Caddyfile Location
 
-- Servers: separate keys for create/edit/delete/start-stop/restart/clone/install/files/console/backup/restore/log views
-- Games & templates: separate keys for browse, metadata edits, script edits, install/uninstall, import/export
-- Forum: split own-vs-any post/thread edit/delete, plus dedicated lock/pin/moderation scopes
-- CMS: split create/edit/edit-published/publish/pin/delete
-- Database: split schema browse, row browse, row edit, and raw query execution
-- Settings and panel tools: split email settings, export, import, global search, and Discord test permissions
-- Security and audit: dedicated `security.audit` scope for activity log access
-
----
-
-## Quick Start
-
-### One-line installer (interactive)
-
-Run on a fresh Ubuntu or Debian server with sudo access (or as root):
-
-```bash
-curl --fail --location --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors \
-  https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/install.sh | bash
+```
+/etc/caddy/Caddyfile
 ```
 
-The installer will:
-
-- install system packages
-- install Node.js 22, PostgreSQL, SteamCMD, PM2, and Caddy
-- create and configure the panel database
-- build and start the panel
-- configure reverse proxy and firewall rules
-- apply port forwarding mappings from `PF_RULES`
-
-### One-line installer (non-interactive / automation)
-
-Set required values up front so the installer never waits for prompts:
+### Caddy Commands
 
 ```bash
-curl --fail --location --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors \
-  https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/install.sh | \
-  INSTALLER_NON_INTERACTIVE=1 \
-  PF_RULES='80:3000,25565:25565:127.0.0.1' \
-  DB_PASSWORD='ChangeThisNow' \
-  APP_PORT=3000 \
-  ADMIN_USERNAME='admin' \
-  ADMIN_EMAIL='admin@localhost' \
-  ADMIN_PASSWORD='ChangeThisNowToo' \
-  PANEL_NAME='GameServer Manager' \
-  bash
+systemctl status caddy          # Check Caddy status
+systemctl restart caddy         # Restart Caddy
+caddy validate --config /etc/caddy/Caddyfile  # Validate config
+journalctl -u caddy             # View Caddy logs
 ```
 
-Dry run mode (safe validation, no system changes):
+### Manual Caddy Setup
+
+If you installed without `--caddy` and want to add it later:
 
 ```bash
-INSTALLER_DRY_RUN=1 APP_PORT=3000 PF_RULES='80:3000' bash install.sh
-```
-
----
-
-## Installer Inputs
-
-| Variable | Required | Default | Description |
-| --- | --- | --- | --- |
-| `PF_RULES` | Yes (non-interactive) | none | Port forwarding list: `external:internal` or `external:internal:target_ip` |
-| `DB_PASSWORD` | No | auto fallback value | PostgreSQL password used for `gsmadmin` |
-| `APP_PORT` | No | `3000` | Internal panel port |
-| `ADMIN_USERNAME` | No | `admin` | Bootstrap admin username |
-| `ADMIN_EMAIL` | No | `admin@localhost` | Bootstrap admin email |
-| `ADMIN_PASSWORD` | No | prompt or fallback | Bootstrap admin password |
-| `PANEL_NAME` | No | `GameServer Manager` | Display name used during install bootstrap |
-| `INSTALLER_NON_INTERACTIVE` | No | `0` | Set to `1` to disable interactive prompts |
-| `INSTALLER_DRY_RUN` | No | `0` | Set to `1` to print plan and exit |
-
-Notes:
-
-- `PF_RULES` is validated before heavy install work starts.
-- Password values with special characters are handled during database role updates.
-- `APP_PORT` is validated and guarded against commonly reserved ports.
-
----
-
-## Manual Installation
-
-### 1. Install base dependencies
-
-```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y curl git build-essential unzip wget gnupg ca-certificates openssl python3
-```
-
-### 2. Install Node.js 22 LTS
-
-```bash
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt install -y nodejs
-```
-
-### 3. Install PostgreSQL and create database
-
-```bash
-sudo apt install -y postgresql postgresql-contrib
-sudo systemctl enable postgresql
-sudo systemctl start postgresql
-
-export DB_PASS='CHANGE_THIS_PASSWORD'
-sudo -u postgres psql -c "CREATE USER gsmadmin WITH PASSWORD '${DB_PASS}';"
-sudo -u postgres psql -c "CREATE DATABASE gameserver_db OWNER gsmadmin;"
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE gameserver_db TO gsmadmin;"
-```
-
-### 4. Clone and install app
-
-```bash
-cd /opt
-git clone https://github.com/phillgates2/game-server-hosting-cms.git gsm-panel
-cd gsm-panel
-npm install
-```
-
-### 5. Create `.env`
-
-```bash
-JWT_SECRET=$(openssl rand -hex 32)
-
-cat > .env <<EOF_ENV
-DATABASE_URL=postgresql://gsmadmin:${DB_PASS}@127.0.0.1:5432/gameserver_db
-JWT_SECRET=${JWT_SECRET}
-NODE_ENV=production
-PORT=3000
-EOF_ENV
-```
-
-### 6. Build and run
-
-```bash
-npm run build
-sudo npm install -g pm2
-pm2 start npm --name "gsm-panel" -- start
-pm2 save
-pm2 startup
-```
-
-### 7. Put Caddy in front
-
-```bash
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+# Install Caddy
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update
-sudo apt install -y caddy
-```
+sudo apt update && sudo apt install caddy
 
-Example Caddyfile:
-
-```caddyfile
-http://YOUR_SERVER_IP {
-  encode gzip zstd
-  reverse_proxy 127.0.0.1:3000
+# Write Caddyfile
+sudo tee /etc/caddy/Caddyfile <<EOF
+gs.example.com {
+    reverse_proxy 127.0.0.1:3000
+    encode gzip zstd
 }
+EOF
+
+# Start Caddy
+sudo systemctl enable --now caddy
 ```
 
 ---
 
-## Runtime Commands
+## 🧰 Management Commands
 
 ```bash
+# View panel status
 pm2 status
+
+# View live logs
 pm2 logs gsm-panel
-sudo systemctl status caddy
-sudo journalctl -u caddy -f
-sudo iptables -t nat -L -n -v
-sudo iptables -L FORWARD -n -v
-npm run typecheck
-npm run lint
-npm test
-npm run build
+
+# Restart panel
+pm2 restart gsm-panel
+
+# Stop panel
+pm2 stop gsm-panel
 ```
 
----
-
-## Updating A Live Panel
-
-Use this sequence for in-place production upgrades.
-
-### 1. Pull latest code and install dependencies
+### Update to Latest Version
 
 ```bash
 cd /opt/gsm-panel
-git fetch --all --prune
-git checkout main
-git pull --ff-only origin main
-npm install
-```
-
-### 2. Build and run validation
-
-```bash
-npm run typecheck
-npm run lint
-npm test
-npm run build
-```
-
-### 3. Restart panel process
-
-```bash
+git pull
+npm ci
+npx next build
 pm2 restart gsm-panel
-pm2 status
-pm2 logs gsm-panel --lines 150
 ```
 
-### 4. Verify health and critical endpoints
+### Uninstall
 
 ```bash
-curl -fsS http://127.0.0.1:${PORT:-3000}/api/health
-```
+# Keep database and user
+sudo bash /opt/gsm-panel/public/uninstall.sh
 
-### 5. Database compatibility note
-
-Some releases add columns lazily at runtime through safe `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` guards. For this release, user theme persistence and ladder game scoping include those guards in API routes, so manual migration is optional.
-
----
-
-## Quality Checks
-
-Recommended validation sequence before release:
-
-1. `npm run typecheck`
-2. `npm run lint`
-3. `npm test`
-4. `npm run build`
-5. Optional fallback: `npm run build:webpack` (use this for release builds if Turbopack emits non-blocking NFT trace warnings)
-
-Current note:
-
-- Next.js 16 Turbopack may emit a non-blocking NFT tracing warning for the process-control route during `next build` even when compilation succeeds.
-- If you want a cleaner production build output without those Turbopack warnings, use `npm run build:webpack`.
-- Node module-type test warnings are avoided by running tests via the dev-only `tsx` runner, keeping package runtime module mode unchanged.
-
----
-
-## Troubleshooting
-
-| Issue | Check |
-| --- | --- |
-| Installer appears stuck | Ensure prompts are visible in your terminal; use non-interactive mode for CI/cloud-init |
-| App unavailable | Verify PM2 process and health endpoint `http://127.0.0.1:<PORT>/api/health` |
-| Database failures | Confirm PostgreSQL is running and `DATABASE_URL` credentials are valid |
-| Reverse proxy issues | Validate Caddy config and check `journalctl -u caddy` |
-| Port forwarding not working | Inspect NAT/FORWARD rules and firewall allowances for forwarded ports |
-
----
-
-## Environment Variables (App)
-
-| Key | Purpose |
-| --- | --- |
-| `DATABASE_URL` | PostgreSQL connection string |
-| `JWT_SECRET` | JWT signing secret |
-| `NODE_ENV` | Runtime mode (`production`/`development`) |
-| `PORT` | Internal panel listen port |
-| `PF_RULES` | Optional persisted forwarding rules |
-| `SMTP_HOST` | SMTP host |
-| `SMTP_PORT` | SMTP port |
-| `SMTP_USER` | SMTP auth username |
-| `SMTP_PASS` | SMTP auth password |
-| `SMTP_FROM` | Default sender address |
-
----
-
-## Project Structure
-
-```text
-game-server-hosting-cms/
-├── src/
-│   ├── app/                  # App routes and API endpoints
-│   ├── components/           # Dashboard and panel UI
-│   ├── db/                   # Drizzle schema and DB wiring
-│   └── lib/                  # Auth, permissions, RCON, Discord, email helpers
-├── tests/                    # Test suites
-├── install.sh                # Fresh-host installer
-├── CHANGELOG.md              # Release history
-└── README.md                 # This file
+# Full purge (removes database, user, Caddy, everything)
+sudo bash /opt/gsm-panel/public/uninstall.sh --purge
 ```
 
 ---
 
-## Tech Stack
+## 🚀 Features
 
-- Next.js
-- React
-- TypeScript
-- PostgreSQL
-- Drizzle ORM
-- Tailwind CSS
+| Feature | Description |
+|---------|-------------|
+| 🖥️ **Multi-Node** | Manage game servers across multiple machines via SSH/API |
+| 🎮 **30+ Game Templates** | Minecraft, CS2, Rust, ARK, Valheim, Palworld, Terraria, and more |
+| 📊 **Real-Time Monitoring** | CPU, RAM, disk, network metrics with live charts |
+| 🔧 **RCON Console** | Remote server management from the browser |
+| 📁 **File Manager** | Browse, edit, upload, and download server files |
+| 💬 **Forum** | Built-in community forum with categories and threads |
+| 📝 **CMS** | Blog posts, changelogs, and static pages |
+| 🏆 **League Ladder** | Team rankings and competitive standings |
+| 🗄️ **Database Manager** | phpMyAdmin-style database browser and SQL editor |
+| ⏰ **Scheduler** | Cron-based automated restarts, backups, and commands |
+| 🔑 **API Keys** | Token-based API access for external integrations |
+| 📋 **Audit Log** | Full activity tracking for security |
+| 🔔 **Discord** | Webhook notifications for server start/stop/crash |
+| 📧 **Email** | SMTP notifications via Nodemailer |
+| 🔐 **2FA** | Two-factor authentication (TOTP) |
+| 👥 **Roles & Permissions** | Granular role-based access control |
+| 🎨 **Themes** | 5 built-in themes + custom theme editor |
+| 🌐 **IPv6** | Full IPv6 support for servers and nodes |
+| 🛡️ **Install Wizard** | Web-based first-run setup |
 
 ---
 
-## Contributing
+## 🔧 Manual Installation
 
-1. Fork the repository.
-2. Create a feature branch.
-3. Make focused changes with tests where possible.
-4. Open a pull request with clear context and rollout notes.
+If you prefer manual setup:
 
+```bash
+# 1. Clone
+git clone https://github.com/phillgates2/game-server-hosting-cms.git
+cd game-server-hosting-cms
+
+# 2. Configure
+cp .env.example .env
+# Edit .env with your DATABASE_URL and JWT_SECRET
+
+# 3. Install & build
+npm ci
+npx next build
+
+# 4. Push database schema
+npx drizzle-kit push
+
+# 5. Start
+npm start
+# Or with PM2:
+pm2 start npm --name gsm-panel -- start
+```
+
+Then visit `http://your-server:3000` to complete setup via the install wizard.
+
+---
+
+## 📋 Requirements
+
+| Requirement | Minimum |
+|-------------|---------|
+| OS | Ubuntu 22.04+ / Debian 12+ |
+| Node.js | 22.x |
+| PostgreSQL | 14+ |
+| RAM | 1 GB |
+| Disk | 10 GB |
+| CPU | 1 vCPU |
+
+---
+
+## 🌐 Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DATABASE_URL` | ✅ | PostgreSQL connection string |
+| `JWT_SECRET` | ⚠️ | JWT signing secret (auto-generated if missing) |
+| `PORT` | ❌ | Panel port (default: 3000) |
+| `SMTP_HOST` | ❌ | SMTP server for email |
+| `SMTP_PORT` | ❌ | SMTP port (default: 587) |
+| `SMTP_USER` | ❌ | SMTP username |
+| `SMTP_PASS` | ❌ | SMTP password |
+| `SMTP_FROM` | ❌ | From email address |
+
+---
+
+## 📄 License
+
+MIT
+
+---
+
+<p align="center">
+  Built with ❤️ for the game server hosting community
+</p>

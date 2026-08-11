@@ -68,8 +68,13 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const installedRows = await db.select().from(settings).where(eq(settings.key, "installed")).limit(1);
-    const alreadyInstalled = installedRows.length > 0 && installedRows[0].value === "true";
+    let alreadyInstalled = false;
+    try {
+      const installedRows = await db.select().from(settings).where(eq(settings.key, "installed")).limit(1);
+      alreadyInstalled = installedRows.length > 0 && installedRows[0].value === "true";
+    } catch {
+      // settings table may not exist yet on first install — that's fine
+    }
 
     if (alreadyInstalled) {
       const auth = await getCurrentUser(req.headers);
