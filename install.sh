@@ -418,42 +418,7 @@ PY
 
 echo "Panel bootstrap completed."
 
-# Step 9: Port forwarding
-echo "Step 9: Configuring port forwarding..."
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent netfilter-persistent
-
-# Enable IPv4 forwarding
-sudo sysctl -w net.ipv4.ip_forward=1
-if ! grep -q '^net.ipv4.ip_forward=1' /etc/sysctl.conf 2>/dev/null; then
-  echo 'net.ipv4.ip_forward=1' | sudo tee -a /etc/sysctl.conf >/dev/null
-fi
-
-IFS=',' read -ra RULES <<< "$PF_RULES_RAW"
-for r in "${RULES[@]}"; do
-  if [[ "$r" =~ ^([0-9]{1,5}):([0-9]{1,5})(:([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+))?$ ]]; then
-    EXT_PORT="${BASH_REMATCH[1]}"
-    INT_PORT="${BASH_REMATCH[2]}"
-    TARGET_IP="${BASH_REMATCH[4]:-127.0.0.1}"
-  else
-    echo "Invalid port forwarding rule: $r" >&2
-    exit 1
-  fi
-
-  echo "Adding forwarding: ${EXT_PORT} -> ${TARGET_IP}:${INT_PORT} (tcp/udp)"
-  sudo iptables -t nat -A PREROUTING -p tcp --dport "${EXT_PORT}" -j DNAT --to-destination "${TARGET_IP}:${INT_PORT}"
-  sudo iptables -t nat -A POSTROUTING -p tcp -d "${TARGET_IP}" --dport "${INT_PORT}" -j MASQUERADE || true
-  sudo iptables -t nat -A PREROUTING -p udp --dport "${EXT_PORT}" -j DNAT --to-destination "${TARGET_IP}:${INT_PORT}"
-  sudo iptables -t nat -A POSTROUTING -p udp -d "${TARGET_IP}" --dport "${INT_PORT}" -j MASQUERADE || true
-
-  sudo iptables -A FORWARD -p tcp -d "${TARGET_IP}" --dport "${INT_PORT}" -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT || true
-  sudo iptables -A FORWARD -p udp -d "${TARGET_IP}" --dport "${INT_PORT}" -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT || true
-done
-
-echo "Saving iptables rules..."
-sudo netfilter-persistent save || true
-echo "Port forwarding rules applied."
-
-# Step 10: Install Caddy and write Caddyfile bound to server IP (HTTP)
+# Step 9: Install Caddy and write Caddyfile bound to server IP (HTTP)
 echo "Step 10: Installing Caddy and writing Caddyfile bound to ${SERVER_IP} (HTTP only)..."
 echo "+ sudo apt install -y debian-keyring debian-archive-keyring"
 sudo apt install -y debian-keyring debian-archive-keyring
@@ -495,72 +460,6 @@ if sudo caddy validate --config "${CADDYFILE_PATH}" >/dev/null 2>&1; then
 else
   echo "Warning: Caddy configuration validation failed. Check ${CADDYFILE_PATH}." >&2
 fi
-
-# Step 11: UFW configuration (safe)
-echo "Step 11: Configuring UFW (will allow SSH before enabling to avoid disconnecting you)..."
-# Install UFW if missing
-if ! command -v ufw >/dev/null 2>&1; then
-  sudo apt install -y ufw
-fi
-
-# Allow SSH first. OpenSSH profile may not match custom ports.
-if ! sudo ufw allow OpenSSH; then
-  echo "Warning: UFW OpenSSH profile was not available." >&2
-fi
-
-ACTIVE_SSH_PORT=""
-ACTIVE_SSH_CLIENT_IP=""
-if [ -n "${SSH_CONNECTION:-}" ]; then
-  ACTIVE_SSH_CLIENT_IP="$(echo "${SSH_CONNECTION}" | awk '{print $1}')"
-  ACTIVE_SSH_PORT="$(echo "${SSH_CONNECTION}" | awk '{print $4}')"
-fi
-if [[ "${ACTIVE_SSH_PORT}" =~ ^[0-9]+$ ]] && (( ACTIVE_SSH_PORT >= 1 && ACTIVE_SSH_PORT <= 65535 )); then
-  echo "Allowing active SSH port ${ACTIVE_SSH_PORT}/tcp in UFW to prevent disconnects."
-  sudo ufw allow "${ACTIVE_SSH_PORT}/tcp" || true
-  if [[ "${ACTIVE_SSH_CLIENT_IP}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Allowing active SSH client ${ACTIVE_SSH_CLIENT_IP} to port ${ACTIVE_SSH_PORT}/tcp in UFW."
-    sudo ufw allow from "${ACTIVE_SSH_CLIENT_IP}" to any port "${ACTIVE_SSH_PORT}" proto tcp || true
-  fi
-fi
-
-# If port forwarding rules were provided, allow the external ports through UFW
-if [ -n "$PF_RULES_RAW" ]; then
-  IFS=',' read -ra RULES2 <<< "$PF_RULES_RAW"
-  for r in "${RULES2[@]}"; do
-    if [[ "$r" =~ ^([0-9]{1,5}):([0-9]{1,5})(:([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+))?$ ]]; then
-      EXT_PORT="${BASH_REMATCH[1]}"
-      sudo ufw allow "${EXT_PORT}/tcp" || true
-      sudo ufw allow "${EXT_PORT}/udp" || true
-    fi
-  done
-fi
-
-# Allow HTTP (port 80) so Caddy can serve the IP
-sudo ufw allow 80/tcp
-
-# Ensure forwarding policy accepts forwarded packets
-sudo sed -i 's/^DEFAULT_FORWARD_POLICY=.*/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw || true
-if ! grep -q '^net/ipv4/ip_forward=1' /etc/ufw/sysctl.conf 2>/dev/null; then
-  echo 'net/ipv4/ip_forward=1' | sudo tee -a /etc/ufw/sysctl.conf >/dev/null
-fi
-
-UFW_AUTO_ENABLE="${UFW_AUTO_ENABLE:-0}"
-if [ "${UFW_AUTO_ENABLE}" = "1" ]; then
-  # Enable UFW only when explicitly requested to avoid SSH lockouts on custom setups.
-  sudo ufw --force enable || true
-  sudo ufw reload || true
-  echo "UFW enabled and configured."
-else
-  if sudo ufw status 2>/dev/null | grep -q "Status: active"; then
-    sudo ufw reload || true
-    echo "UFW is already active; rules were updated and reloaded."
-  else
-    echo "UFW rules prepared, but firewall was not auto-enabled to avoid SSH disconnects."
-    echo "Enable later with: sudo ufw --force enable"
-    echo "Or auto-enable during install with: UFW_AUTO_ENABLE=1"
-  fi
-fi
-
 # Final notes
 echo
 SSH_CLIENT_SUMMARY="${ACTIVE_SSH_CLIENT_IP:-unknown}"
