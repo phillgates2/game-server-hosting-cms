@@ -564,57 +564,121 @@ DRIZZLE
 chown "$GSM_USER:$GSM_USER" drizzle.config.json
 
 log "Installing npm packages (this may take a minute)..."
-su - "$GSM_USER" -c "cd $INSTALL_DIR && npm ci --omit=dev 2>&1 | tail -3"
-ok "Dependencies installed"
+# Full install INCLUDING devDependencies — typescript, tailwindcss, postcss,
+# drizzle-kit, etc. are all required to build the production bundle.
+# After the build, we prune devDeps to save disk space.
+su - "$GSM_USER" -c "cd $INSTALL_DIR && npm ci 2>&1" > /tmp/gsm-npm-install.log 2>&1
+NPM_EXIT=$?
+tail -5 /tmp/gsm-npm-install.log
+
+if [[ $NPM_EXIT -ne 0 ]]; then
+  # npm ci requires a lockfile and exact match — fall back to npm install
+  warn "npm ci failed (exit $NPM_EXIT), falling back to npm install..."
+  su - "$GSM_USER" -c "cd $INSTALL_DIR && npm install 2>&1" > /tmp/gsm-npm-install.log 2>&1
+  NPM_EXIT=$?
+  tail -5 /tmp/gsm-npm-install.log
+  if [[ $NPM_EXIT -ne 0 ]]; then
+    err "npm install also failed! Full log: /tmp/gsm-npm-install.log"
+    tail -20 /tmp/gsm-npm-install.log
+    die "Cannot continue without dependencies."
+  fi
+fi
+
+# Verify critical devDependencies are actually installed
+if ! su - "$GSM_USER" -c "cd $INSTALL_DIR && test -f node_modules/.bin/tsc && test -f node_modules/.bin/next"; then
+  err "Critical packages (typescript, next) are missing from node_modules."
+  err "This usually means 'npm ci' skipped devDependencies."
+  die "Check /tmp/gsm-npm-install.log for details."
+fi
+ok "Dependencies installed (full log: /tmp/gsm-npm-install.log)"
+
+# Push database schema BEFORE building — drizzle-kit is a devDependency
+log "Pushing database schema..."
+su - "$GSM_USER" -c "cd $INSTALL_DIR && npx drizzle-kit push 2>&1" > /tmp/gsm-drizzle-push.log 2>&1
+DRIZZLE_EXIT=$?
+tail -3 /tmp/gsm-drizzle-push.log
+if [[ $DRIZZLE_EXIT -ne 0 ]]; then
+  warn "drizzle-kit push failed (exit $DRIZZLE_EXIT) — schema may not be applied"
+  warn "You can retry later: cd $INSTALL_DIR && npx drizzle-kit push"
+  tail -10 /tmp/gsm-drizzle-push.log
+else
+  ok "Database schema applied"
+fi
 
 log "Building production bundle..."
-su - "$GSM_USER" -c "cd $INSTALL_DIR && npx next build 2>&1 | tail -5"
-ok "Production build complete"
+su - "$GSM_USER" -c "cd $INSTALL_DIR && npx next build" > /tmp/gsm-next-build.log 2>&1
+BUILD_EXIT=$?
+tail -8 /tmp/gsm-next-build.log
+if [[ $BUILD_EXIT -ne 0 ]]; then
+  err "Build failed (exit code $BUILD_EXIT)! Full log: /tmp/gsm-next-build.log"
+  echo "─── Last 30 lines ───"
+  tail -30 /tmp/gsm-next-build.log
+  die "Cannot continue without a successful build."
+fi
+ok "Production build complete (log: /tmp/gsm-next-build.log)"
+
+# Remove devDependencies to save disk space (typescript, eslint, tailwind, etc.
+# are no longer needed after the build is done)
+log "Pruning devDependencies to save disk space..."
+su - "$GSM_USER" -c "cd $INSTALL_DIR && npm prune --omit=dev 2>&1" | tail -3
+ok "DevDependencies pruned"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  STEP 8: Initialize database & run panel install
 # ═══════════════════════════════════════════════════════════════════════════════
 step "Initializing database"
 
-# Push schema with drizzle-kit
-log "Pushing database schema..."
-su - "$GSM_USER" -c "cd $INSTALL_DIR && npx drizzle-kit push 2>&1 | tail -3"
-ok "Database schema applied"
-
 # Start the app temporarily to run the install API
-log "Running panel installation (creating admin user, roles, seeds)..."
-su - "$GSM_USER" -c "cd $INSTALL_DIR && PORT=$PANEL_PORT node .next/standalone/server.js &" 2>/dev/null
-TEMP_PID=$!
+log "Starting temporary server for panel setup..."
+su - "$GSM_USER" -c "cd $INSTALL_DIR && PORT=$PANEL_PORT npx next start > /tmp/gsm-temp-server.log 2>&1 &
+echo \$!" > /tmp/gsm-temp-pid
+TEMP_PID=$(cat /tmp/gsm-temp-pid 2>/dev/null || echo "")
 
-# Wait for server to be ready
-for i in $(seq 1 30); do
+# Wait for server to be ready (up to 60 seconds)
+SERVER_READY="false"
+for i in $(seq 1 60); do
   if curl -sf "http://127.0.0.1:$PANEL_PORT/api/health" > /dev/null 2>&1; then
+    SERVER_READY="true"
     break
   fi
   sleep 1
 done
 
-# Call the install API
-INSTALL_RESPONSE=$(curl -sf -X POST "http://127.0.0.1:$PANEL_PORT/api/install" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"adminUsername\": \"$ADMIN_USER\",
-    \"adminEmail\": \"$ADMIN_EMAIL\",
-    \"adminPassword\": \"$ADMIN_PASS\",
-    \"panelName\": \"$PANEL_NAME\"
-  }" 2>&1) || true
-
-# Stop temporary server
-kill "$TEMP_PID" 2>/dev/null || true
-wait "$TEMP_PID" 2>/dev/null || true
-
-if echo "$INSTALL_RESPONSE" | grep -q '"ok":true'; then
-  ok "Panel installed successfully"
-else
-  # If the API approach fails, the panel's web wizard will handle it on first visit
-  warn "API install returned: $INSTALL_RESPONSE"
+if [[ "$SERVER_READY" != "true" ]]; then
+  warn "Server did not respond within 60 seconds"
+  warn "Temp server log:"
+  tail -15 /tmp/gsm-temp-server.log 2>/dev/null || true
   warn "You can complete setup via the web install wizard on first visit"
+else
+  log "Server is up — calling install API..."
+
+  # Call the install API
+  INSTALL_RESPONSE=$(curl -sf --max-time 30 -X POST "http://127.0.0.1:$PANEL_PORT/api/install" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"adminUsername\": \"$ADMIN_USER\",
+      \"adminEmail\": \"$ADMIN_EMAIL\",
+      \"adminPassword\": \"$ADMIN_PASS\",
+      \"panelName\": \"$PANEL_NAME\"
+    }" 2>&1) || true
+
+  if echo "$INSTALL_RESPONSE" | grep -q '"ok":true'; then
+    ok "Panel installed successfully"
+  else
+    warn "API install returned: $INSTALL_RESPONSE"
+    warn "You can complete setup via the web install wizard on first visit"
+  fi
 fi
+
+# Stop the temporary server
+if [[ -n "$TEMP_PID" ]]; then
+  # Kill the Next.js process and any children
+  su - "$GSM_USER" -c "kill $TEMP_PID 2>/dev/null" || true
+  sleep 1
+fi
+# Also kill any leftover next processes on the panel port
+fuser -k "$PANEL_PORT/tcp" 2>/dev/null || true
+sleep 1
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  STEP 9: Set up PM2 & systemd
