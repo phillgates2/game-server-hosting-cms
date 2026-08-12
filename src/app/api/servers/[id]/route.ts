@@ -4,6 +4,7 @@ import { gameServers, gameDefinitions, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { sendDiscordWebhook } from "@/lib/discord";
+import { allowServerPorts, denyServerPorts, updateServerPorts } from "@/lib/firewall";
 import { eq } from "drizzle-orm";
 import { rm } from "node:fs/promises";
 import { resolve, relative } from "node:path";
@@ -114,6 +115,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ipv4: gameServers.ipv4,
         ipv6: gameServers.ipv6,
         port: gameServers.port,
+        queryPort: gameServers.queryPort,
+        rconPort: gameServers.rconPort,
         discordWebhook: gameServers.discordWebhook,
         gameName: gameDefinitions.name,
       })
@@ -127,6 +130,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .set({ ...body, updatedAt: new Date() })
       .where(eq(gameServers.id, Number(id)))
       .returning();
+
+    // Update firewall rules if any port changed
+    if (current) {
+      const portChanged = (body.port !== undefined && Number(body.port) !== current.port)
+        || (body.queryPort !== undefined && Number(body.queryPort) !== current.queryPort)
+        || (body.rconPort !== undefined && Number(body.rconPort) !== current.rconPort);
+
+      if (portChanged) {
+        updateServerPorts(
+          Number(id),
+          updated.name,
+          { port: current.port, queryPort: current.queryPort, rconPort: current.rconPort },
+          { port: updated.port, queryPort: updated.queryPort, rconPort: updated.rconPort },
+        ).catch((e) => console.warn("[firewall] Failed to update ports:", e));
+      }
+    }
 
     if (current?.discordWebhook && body.status && body.status !== current.status) {
       let event: "server_started" | "server_stopped" | "server_restarted" | null = null;
@@ -175,6 +194,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         installPath: gameServers.installPath,
         discordWebhook: gameServers.discordWebhook,
         port: gameServers.port,
+        queryPort: gameServers.queryPort,
+        rconPort: gameServers.rconPort,
         gameName: gameDefinitions.name,
         nodeIsLocal: nodes.isLocal,
         nodeBasePath: nodes.gameServerPath,
@@ -239,6 +260,13 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     }
 
     await db.delete(gameServers).where(eq(gameServers.id, Number(id)));
+
+    // Remove firewall rules for the deleted server (best-effort)
+    denyServerPorts({
+      port: server.port,
+      queryPort: server.queryPort,
+      rconPort: server.rconPort,
+    }).catch((e) => console.warn("[firewall] Failed to remove ports:", e));
 
     if (server.discordWebhook) {
       await sendDiscordWebhook(server.discordWebhook, {

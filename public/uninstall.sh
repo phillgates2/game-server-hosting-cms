@@ -3,9 +3,11 @@
 #  GameServer Manager — Uninstaller
 # ═══════════════════════════════════════════════════════════════════════════════
 #
-#  Usage:  sudo bash uninstall.sh [--purge]
+#  Usage:  sudo bash uninstall.sh [OPTIONS]
 #
-#  --purge    Also remove the PostgreSQL database, system user, and Caddy
+#  Options:
+#    --purge          Remove everything: database, system user, Caddy, SteamCMD
+#    --keep-servers   Keep game server files when purging (default: removed)
 #
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -28,11 +30,15 @@ INSTALL_DIR="/opt/gsm-panel"
 GSM_USER="gsm"
 DB_NAME="gsm_panel"
 DB_USER="gsm"
+STEAMCMD_DIR="/opt/steamcmd"
+GAMESERVERS_DIR="/opt/gameservers"
 PURGE="false"
+KEEP_SERVERS="false"
 
 for arg in "$@"; do
   case "$arg" in
-    --purge) PURGE="true" ;;
+    --purge)        PURGE="true" ;;
+    --keep-servers) KEEP_SERVERS="true" ;;
   esac
 done
 
@@ -50,7 +56,17 @@ echo -e "${RED}╚════════════════════�
 echo ""
 
 if [[ "$PURGE" == "true" ]]; then
-  warn "PURGE mode: database, user, Caddy config, and all data will be removed!"
+  warn "PURGE mode enabled!"
+  warn "  - Database '$DB_NAME' will be dropped"
+  warn "  - System user '$GSM_USER' will be removed"
+  warn "  - Caddy configuration will be removed"
+  warn "  - SteamCMD at '$STEAMCMD_DIR' will be removed"
+  if [[ "$KEEP_SERVERS" != "true" ]]; then
+    warn "  - Game servers at '$GAMESERVERS_DIR' will be DELETED"
+  else
+    log "  - Game servers at '$GAMESERVERS_DIR' will be KEPT"
+  fi
+  echo ""
 fi
 
 read -rp "Are you sure you want to uninstall? [y/N]: " confirm
@@ -66,7 +82,6 @@ ok "Panel stopped"
 if [[ -f /etc/caddy/Caddyfile ]]; then
   if grep -q "gsm-panel\|GameServer Manager" /etc/caddy/Caddyfile 2>/dev/null; then
     log "Removing Caddy configuration..."
-    # Replace Caddyfile with empty default
     echo "# Caddy — default config (GSM panel removed)" > /etc/caddy/Caddyfile
     systemctl reload caddy 2>/dev/null || true
     ok "Caddy configuration removed"
@@ -84,6 +99,11 @@ if [[ -d "$INSTALL_DIR" ]]; then
   log "Removing $INSTALL_DIR..."
   rm -rf "$INSTALL_DIR"
   ok "Application files removed"
+fi
+
+# Remove SteamCMD symlink
+if [[ -L /usr/local/bin/steamcmd ]]; then
+  rm -f /usr/local/bin/steamcmd
 fi
 
 if [[ "$PURGE" == "true" ]]; then
@@ -105,8 +125,27 @@ if [[ "$PURGE" == "true" ]]; then
     ok "Caddy removed"
   fi
 
+  # Remove SteamCMD
+  if [[ -d "$STEAMCMD_DIR" ]]; then
+    log "Removing SteamCMD at $STEAMCMD_DIR..."
+    rm -rf "$STEAMCMD_DIR"
+    ok "SteamCMD removed"
+  fi
+
+  # Remove game servers (unless --keep-servers)
+  if [[ -d "$GAMESERVERS_DIR" && "$KEEP_SERVERS" != "true" ]]; then
+    log "Removing game servers at $GAMESERVERS_DIR..."
+    rm -rf "$GAMESERVERS_DIR"
+    ok "Game servers removed"
+  elif [[ -d "$GAMESERVERS_DIR" ]]; then
+    warn "Game servers at $GAMESERVERS_DIR were kept (--keep-servers)"
+  fi
+
   # Remove system user
   log "Removing system user '$GSM_USER'..."
+  # Kill any remaining processes
+  pkill -u "$GSM_USER" 2>/dev/null || true
+  sleep 1
   userdel -r "$GSM_USER" 2>/dev/null || true
   ok "System user removed"
 fi
@@ -115,8 +154,16 @@ echo ""
 echo -e "${GREEN}[✓] GameServer Manager has been uninstalled.${NC}"
 if [[ "$PURGE" != "true" ]]; then
   echo ""
-  echo "  Database '$DB_NAME' and user '$GSM_USER' were kept."
-  echo "  Caddy remains installed (config was cleared)."
-  echo "  To fully remove everything:  sudo bash uninstall.sh --purge"
+  echo "  The following were kept:"
+  echo "    - Database '$DB_NAME'"
+  echo "    - System user '$GSM_USER'"
+  echo "    - SteamCMD at '$STEAMCMD_DIR'"
+  echo "    - Game servers at '$GAMESERVERS_DIR'"
+  echo ""
+  echo "  To fully remove everything:"
+  echo "    sudo bash uninstall.sh --purge"
+  echo ""
+  echo "  To remove everything but keep game server files:"
+  echo "    sudo bash uninstall.sh --purge --keep-servers"
 fi
 echo ""

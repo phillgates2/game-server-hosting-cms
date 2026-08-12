@@ -21,15 +21,16 @@
 #    1. Installs system dependencies (Node.js 22, PostgreSQL 16, Git, PM2)
 #    2. Creates a dedicated 'gsm' system user
 #    3. Creates the PostgreSQL database & role
-#    4. Clones the GameServer Manager repository
-#    5. Installs npm packages & builds the production app
-#    6. Generates a secure JWT secret
-#    7. Runs the panel's database install (schema + admin user + seeds)
-#    8. Sets up PM2 with systemd for auto-start on boot
-#    9. (Optional) Configures Caddy reverse proxy with automatic HTTPS
+#    4. Installs SteamCMD for Steam-based game servers
+#    5. Clones the GameServer Manager repository
+#    6. Installs npm packages & builds the production app
+#    7. Generates a secure JWT secret
+#    8. Runs the panel's database install (schema + admin user + seeds)
+#    9. Sets up PM2 with systemd for auto-start on boot
+#   10. (Optional) Configures Caddy reverse proxy with automatic HTTPS
 #
 #  Supported OS: Ubuntu 22.04+, Debian 12+
-#  Minimum: 1 vCPU, 1 GB RAM, 10 GB disk
+#  Minimum: 1 vCPU, 2 GB RAM, 20 GB disk (more for game servers)
 #
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -74,45 +75,54 @@ ADMIN_PASS=""
 DOMAIN=""
 JWT_SECRET=""
 SETUP_CADDY="false"
+SKIP_STEAMCMD="false"
+STEAMCMD_DIR="/opt/steamcmd"
+GAMESERVERS_DIR="/opt/gameservers"
 NONINTERACTIVE="false"
 NODE_MAJOR="22"
 
 # ── Parse command-line arguments ──────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --admin-user)     ADMIN_USER="$2";    shift 2 ;;
-    --admin-email)    ADMIN_EMAIL="$2";   shift 2 ;;
-    --admin-pass)     ADMIN_PASS="$2";    shift 2 ;;
-    --panel-name)     PANEL_NAME="$2";    shift 2 ;;
-    --domain)         DOMAIN="$2";        shift 2 ;;
-    --port)           PANEL_PORT="$2";    shift 2 ;;
-    --db-name)        DB_NAME="$2";       shift 2 ;;
-    --db-user)        DB_USER="$2";       shift 2 ;;
-    --db-pass)        DB_PASS="$2";       shift 2 ;;
-    --install-dir)    INSTALL_DIR="$2";   shift 2 ;;
-    --jwt-secret)     JWT_SECRET="$2";    shift 2 ;;
-    --caddy)          SETUP_CADDY="true"; shift   ;;
-    --noninteractive) NONINTERACTIVE="true"; shift ;;
-    -y)               NONINTERACTIVE="true"; shift ;;
+    --admin-user)       ADMIN_USER="$2";      shift 2 ;;
+    --admin-email)      ADMIN_EMAIL="$2";     shift 2 ;;
+    --admin-pass)       ADMIN_PASS="$2";      shift 2 ;;
+    --panel-name)       PANEL_NAME="$2";      shift 2 ;;
+    --domain)           DOMAIN="$2";          shift 2 ;;
+    --port)             PANEL_PORT="$2";      shift 2 ;;
+    --db-name)          DB_NAME="$2";         shift 2 ;;
+    --db-user)          DB_USER="$2";         shift 2 ;;
+    --db-pass)          DB_PASS="$2";         shift 2 ;;
+    --install-dir)      INSTALL_DIR="$2";     shift 2 ;;
+    --jwt-secret)       JWT_SECRET="$2";      shift 2 ;;
+    --steamcmd-dir)     STEAMCMD_DIR="$2";    shift 2 ;;
+    --gameservers-dir)  GAMESERVERS_DIR="$2"; shift 2 ;;
+    --caddy)            SETUP_CADDY="true";   shift   ;;
+    --no-steamcmd)      SKIP_STEAMCMD="true"; shift   ;;
+    --noninteractive)   NONINTERACTIVE="true"; shift ;;
+    -y)                 NONINTERACTIVE="true"; shift ;;
     --help|-h)
       banner
       echo "Usage: bash install.sh [OPTIONS]"
       echo ""
       echo "Options:"
-      echo "  --admin-user     USERNAME    Admin username (default: prompted)"
-      echo "  --admin-email    EMAIL       Admin email (default: prompted)"
-      echo "  --admin-pass     PASSWORD    Admin password (default: prompted)"
-      echo "  --panel-name     NAME        Panel display name (default: GameServer Manager)"
-      echo "  --domain         DOMAIN      Domain name for Caddy reverse proxy (e.g., gs.example.com)"
-      echo "  --port           PORT        Panel port (default: 3000)"
-      echo "  --db-name        NAME        PostgreSQL database name (default: gsm_panel)"
-      echo "  --db-user        USER        PostgreSQL user (default: gsm)"
-      echo "  --db-pass        PASSWORD    PostgreSQL password (default: auto-generated)"
-      echo "  --install-dir    PATH        Installation directory (default: /opt/gsm-panel)"
-      echo "  --jwt-secret     SECRET      JWT signing secret (default: auto-generated)"
-      echo "  --caddy                      Set up Caddy reverse proxy with automatic HTTPS"
-      echo "  --noninteractive, -y         Skip all prompts; use defaults/flags"
-      echo "  --help, -h                   Show this help"
+      echo "  --admin-user       USERNAME    Admin username (default: prompted)"
+      echo "  --admin-email      EMAIL       Admin email (default: prompted)"
+      echo "  --admin-pass       PASSWORD    Admin password (default: prompted)"
+      echo "  --panel-name       NAME        Panel display name (default: GameServer Manager)"
+      echo "  --domain           DOMAIN      Domain name for Caddy reverse proxy"
+      echo "  --port             PORT        Panel port (default: 3000)"
+      echo "  --db-name          NAME        PostgreSQL database name (default: gsm_panel)"
+      echo "  --db-user          USER        PostgreSQL user (default: gsm)"
+      echo "  --db-pass          PASSWORD    PostgreSQL password (default: auto-generated)"
+      echo "  --install-dir      PATH        Panel installation directory (default: /opt/gsm-panel)"
+      echo "  --steamcmd-dir     PATH        SteamCMD installation directory (default: /opt/steamcmd)"
+      echo "  --gameservers-dir  PATH        Game servers directory (default: /opt/gameservers)"
+      echo "  --jwt-secret       SECRET      JWT signing secret (default: auto-generated)"
+      echo "  --caddy                        Set up Caddy reverse proxy with automatic HTTPS"
+      echo "  --no-steamcmd                  Skip SteamCMD installation"
+      echo "  --noninteractive, -y           Skip all prompts; use defaults/flags"
+      echo "  --help, -h                     Show this help"
       echo ""
       echo "One-liner:"
       echo "  bash <(curl -fsSL https://your-domain.com/install.sh)"
@@ -219,15 +229,25 @@ if [[ "$NONINTERACTIVE" != "true" ]]; then
     fi
   fi
 
+  read -rp "  Game servers directory [$GAMESERVERS_DIR]: " input
+  GAMESERVERS_DIR="${input:-$GAMESERVERS_DIR}"
+
+  read -rp "  Install SteamCMD for Steam games? [Y/n]: " input
+  if [[ "${input,,}" == "n" ]]; then
+    SKIP_STEAMCMD="true"
+  fi
+
   echo ""
   echo -e "${BOLD}Review Configuration${NC}"
   echo "───────────────────────────────────────────"
-  echo "  Admin:       $ADMIN_USER ($ADMIN_EMAIL)"
-  echo "  Panel:       $PANEL_NAME"
-  echo "  Port:        $PANEL_PORT"
-  echo "  Domain:      ${DOMAIN:-<none — access via IP>}"
-  echo "  Caddy:       $SETUP_CADDY"
-  echo "  Install to:  $INSTALL_DIR"
+  echo "  Admin:           $ADMIN_USER ($ADMIN_EMAIL)"
+  echo "  Panel:           $PANEL_NAME"
+  echo "  Port:            $PANEL_PORT"
+  echo "  Domain:          ${DOMAIN:-<none — access via IP>}"
+  echo "  Caddy:           $SETUP_CADDY"
+  echo "  SteamCMD:        $([ "$SKIP_STEAMCMD" == "true" ] && echo "skip" || echo "$STEAMCMD_DIR")"
+  echo "  Game Servers:    $GAMESERVERS_DIR"
+  echo "  Panel Install:   $INSTALL_DIR"
   echo "───────────────────────────────────────────"
   echo ""
   read -rp "  Proceed with installation? [Y/n]: " input
@@ -253,7 +273,7 @@ if [[ -z "$JWT_SECRET" ]]; then
   JWT_SECRET="$(openssl rand -base64 48 | tr -d '=/+')"
 fi
 
-TOTAL_STEPS=9
+TOTAL_STEPS=10
 STEP=0
 
 step() {
@@ -276,7 +296,7 @@ log "Installing base packages..."
 apt-get install -y -qq \
   curl wget gnupg2 ca-certificates lsb-release \
   git build-essential software-properties-common \
-  ufw fail2ban \
+  ufw fail2ban tar gzip unzip \
   > /dev/null 2>&1
 ok "Base packages installed"
 
@@ -358,8 +378,131 @@ else
   ok "System user '$GSM_USER' created"
 fi
 
+# Create game servers directory
+mkdir -p "$GAMESERVERS_DIR"
+chown "$GSM_USER:$GSM_USER" "$GAMESERVERS_DIR"
+chmod 755 "$GAMESERVERS_DIR"
+ok "Game servers directory: $GAMESERVERS_DIR"
+
 # ═══════════════════════════════════════════════════════════════════════════════
-#  STEP 5: Clone repository
+#  STEP 5: SteamCMD
+# ═══════════════════════════════════════════════════════════════════════════════
+step "Installing SteamCMD"
+
+if [[ "$SKIP_STEAMCMD" == "true" ]]; then
+  warn "SteamCMD installation skipped (--no-steamcmd)"
+  ok "Skipping SteamCMD"
+else
+  # Install 32-bit libraries required by SteamCMD
+  log "Installing 32-bit libraries for SteamCMD..."
+
+  # Enable i386 architecture
+  dpkg --add-architecture i386
+  apt-get update -qq
+
+  # Install required 32-bit libraries
+  apt-get install -y -qq \
+    lib32gcc-s1 \
+    lib32stdc++6 \
+    libc6-i386 \
+    > /dev/null 2>&1 || {
+      # Fallback for older naming
+      apt-get install -y -qq lib32gcc1 lib32stdc++6 libc6-i386 > /dev/null 2>&1 || true
+    }
+
+  ok "32-bit libraries installed"
+
+  # Create SteamCMD directory
+  mkdir -p "$STEAMCMD_DIR"
+  cd "$STEAMCMD_DIR"
+
+  # Download and extract SteamCMD
+  if [[ ! -f "$STEAMCMD_DIR/steamcmd.sh" ]]; then
+    log "Downloading SteamCMD..."
+    curl -fsSL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" -o steamcmd_linux.tar.gz
+    tar -xzf steamcmd_linux.tar.gz
+    rm -f steamcmd_linux.tar.gz
+    ok "SteamCMD downloaded and extracted"
+  else
+    ok "SteamCMD already installed"
+  fi
+
+  # Set ownership
+  chown -R "$GSM_USER:$GSM_USER" "$STEAMCMD_DIR"
+  chmod +x "$STEAMCMD_DIR/steamcmd.sh"
+
+  # Run SteamCMD once to complete installation and update itself
+  log "Running SteamCMD first-time setup (this may take a moment)..."
+  su - "$GSM_USER" -c "cd $STEAMCMD_DIR && ./steamcmd.sh +quit" > /dev/null 2>&1 || true
+  ok "SteamCMD ready at $STEAMCMD_DIR"
+
+  # Create a convenient symlink
+  if [[ ! -L /usr/local/bin/steamcmd ]]; then
+    ln -sf "$STEAMCMD_DIR/steamcmd.sh" /usr/local/bin/steamcmd
+    ok "Symlink created: /usr/local/bin/steamcmd"
+  fi
+
+  # Create a helper script for common game installs
+  cat > "$STEAMCMD_DIR/install-game.sh" <<'STEAMHELPER'
+#!/usr/bin/env bash
+# SteamCMD Game Installation Helper
+# Usage: ./install-game.sh <app_id> <install_dir> [beta_branch]
+#
+# Examples:
+#   ./install-game.sh 740 /opt/gameservers/csgo          # CS:GO
+#   ./install-game.sh 730 /opt/gameservers/cs2           # CS2
+#   ./install-game.sh 896660 /opt/gameservers/valheim    # Valheim
+#   ./install-game.sh 376030 /opt/gameservers/ark        # ARK
+#   ./install-game.sh 258550 /opt/gameservers/rust       # Rust
+
+set -e
+
+APP_ID="${1:-}"
+INSTALL_DIR="${2:-}"
+BETA="${3:-}"
+
+if [[ -z "$APP_ID" || -z "$INSTALL_DIR" ]]; then
+  echo "Usage: $0 <app_id> <install_dir> [beta_branch]"
+  echo ""
+  echo "Common App IDs:"
+  echo "  730     Counter-Strike 2"
+  echo "  740     Counter-Strike: Global Offensive"
+  echo "  896660  Valheim Dedicated Server"
+  echo "  376030  ARK: Survival Evolved"
+  echo "  258550  Rust Dedicated Server"
+  echo "  443030  Conan Exiles Dedicated Server"
+  echo "  1007    DayZ Server"
+  echo "  232250  Team Fortress 2 Dedicated Server"
+  echo "  4020    Garry's Mod Dedicated Server"
+  echo "  294420  7 Days to Die Dedicated Server"
+  echo "  233780  Arma 3 Dedicated Server"
+  echo "  2394010 Palworld Dedicated Server"
+  exit 1
+fi
+
+STEAMCMD_DIR="$(dirname "$0")"
+mkdir -p "$INSTALL_DIR"
+
+BETA_ARG=""
+if [[ -n "$BETA" ]]; then
+  BETA_ARG="-beta $BETA"
+fi
+
+echo "Installing Steam App $APP_ID to $INSTALL_DIR..."
+"$STEAMCMD_DIR/steamcmd.sh" \
+  +force_install_dir "$INSTALL_DIR" \
+  +login anonymous \
+  +app_update "$APP_ID" $BETA_ARG validate \
+  +quit
+
+echo "Done! Game installed to $INSTALL_DIR"
+STEAMHELPER
+  chmod +x "$STEAMCMD_DIR/install-game.sh"
+  chown "$GSM_USER:$GSM_USER" "$STEAMCMD_DIR/install-game.sh"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  STEP 6: Clone repository
 # ═══════════════════════════════════════════════════════════════════════════════
 step "Cloning GameServer Manager"
 
@@ -379,7 +522,7 @@ chown -R "$GSM_USER:$GSM_USER" "$INSTALL_DIR"
 ok "Source code ready at $INSTALL_DIR"
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  STEP 6: Configure environment & install dependencies
+#  STEP 7: Configure environment & install dependencies
 # ═══════════════════════════════════════════════════════════════════════════════
 step "Installing dependencies & building"
 
@@ -392,6 +535,10 @@ DATABASE_URL=$DATABASE_URL
 JWT_SECRET=$JWT_SECRET
 NODE_ENV=production
 PORT=$PANEL_PORT
+
+# Paths
+STEAMCMD_PATH=$STEAMCMD_DIR
+GAMESERVERS_PATH=$GAMESERVERS_DIR
 
 # SMTP (optional — configure for email notifications)
 # SMTP_HOST=smtp.example.com
@@ -425,7 +572,7 @@ su - "$GSM_USER" -c "cd $INSTALL_DIR && npx next build 2>&1 | tail -5"
 ok "Production build complete"
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  STEP 7: Initialize database & run panel install
+#  STEP 8: Initialize database & run panel install
 # ═══════════════════════════════════════════════════════════════════════════════
 step "Initializing database"
 
@@ -470,7 +617,7 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  STEP 8: Set up PM2 & systemd
+#  STEP 9: Set up PM2 & systemd
 # ═══════════════════════════════════════════════════════════════════════════════
 step "Configuring PM2 process manager"
 
@@ -513,7 +660,7 @@ env PATH=$PATH:/usr/bin pm2 startup systemd -u "$GSM_USER" --hp "/home/$GSM_USER
 ok "PM2 configured — panel running as 'gsm-panel'"
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  STEP 9: Caddy reverse proxy (optional)
+#  STEP 10: Caddy reverse proxy (optional)
 # ═══════════════════════════════════════════════════════════════════════════════
 step "Configuring web server"
 
@@ -532,10 +679,6 @@ if [[ "$SETUP_CADDY" == "true" && -n "$DOMAIN" ]]; then
   ok "Caddy $(caddy version | head -1) installed"
 
   # Write Caddyfile
-  # Caddy handles HTTPS automatically — no Certbot or manual certs needed.
-  # If a domain is provided, Caddy will obtain and renew Let's Encrypt
-  # certificates automatically. If the domain is an IP or localhost,
-  # Caddy serves over plain HTTP.
   log "Writing Caddyfile for $DOMAIN..."
   cat > /etc/caddy/Caddyfile <<CADDYEOF
 # GameServer Manager — Caddy reverse proxy
@@ -604,16 +747,137 @@ fi
 #  Configure firewall
 # ═══════════════════════════════════════════════════════════════════════════════
 log "Configuring firewall..."
-ufw allow ssh > /dev/null 2>&1 || true
-if [[ "$SETUP_CADDY" == "true" ]]; then
-  # Caddy needs ports 80 (HTTP) and 443 (HTTPS) for automatic certificates
-  ufw allow 80/tcp > /dev/null 2>&1 || true
-  ufw allow 443/tcp > /dev/null 2>&1 || true
-else
-  ufw allow "$PANEL_PORT/tcp" > /dev/null 2>&1 || true
+
+# ── SSH: detect the real port to avoid locking yourself out ───────────────────
+SSH_PORT="22"
+if [[ -f /etc/ssh/sshd_config ]]; then
+  # Read the Port directive (may be commented or absent → default 22)
+  DETECTED_PORT=$(grep -E "^[[:space:]]*Port[[:space:]]+" /etc/ssh/sshd_config 2>/dev/null \
+    | awk '{print $2}' | head -1)
+  if [[ -n "$DETECTED_PORT" && "$DETECTED_PORT" =~ ^[0-9]+$ ]]; then
+    SSH_PORT="$DETECTED_PORT"
+  fi
 fi
+
+# Also check for include-style drop-in configs (Ubuntu 24.04+, Debian 12+)
+if [[ -d /etc/ssh/sshd_config.d ]]; then
+  for cfg in /etc/ssh/sshd_config.d/*.conf; do
+    [[ -f "$cfg" ]] || continue
+    DROP_PORT=$(grep -E "^[[:space:]]*Port[[:space:]]+" "$cfg" 2>/dev/null \
+      | awk '{print $2}' | head -1)
+    if [[ -n "$DROP_PORT" && "$DROP_PORT" =~ ^[0-9]+$ ]]; then
+      SSH_PORT="$DROP_PORT"
+    fi
+  done
+fi
+
+# Check the SSH_CONNECTION env var as a final safeguard — this tells us
+# the port the *current* session connected on
+if [[ -n "${SSH_CONNECTION:-}" ]]; then
+  CONN_PORT=$(echo "$SSH_CONNECTION" | awk '{print $4}')
+  if [[ -n "$CONN_PORT" && "$CONN_PORT" =~ ^[0-9]+$ && "$CONN_PORT" != "$SSH_PORT" ]]; then
+    warn "Current SSH session is on port $CONN_PORT (sshd_config says $SSH_PORT) — allowing both"
+    ufw allow "$CONN_PORT/tcp" comment "SSH (active session)" > /dev/null 2>&1 || true
+  fi
+fi
+
+# Allow SSH *before* enabling UFW so we never lock out the current session
+ufw allow "$SSH_PORT/tcp" comment "SSH" > /dev/null 2>&1 || true
+if [[ "$SSH_PORT" != "22" ]]; then
+  log "SSH detected on port $SSH_PORT (non-default)"
+fi
+ok "SSH port $SSH_PORT allowed"
+
+# ── Panel / Caddy ────────────────────────────────────────────────────────────
+if [[ "$SETUP_CADDY" == "true" ]]; then
+  ufw allow 80/tcp  comment "HTTP  (Caddy)" > /dev/null 2>&1 || true
+  ufw allow 443/tcp comment "HTTPS (Caddy)" > /dev/null 2>&1 || true
+else
+  ufw allow "$PANEL_PORT/tcp" comment "GSM Panel" > /dev/null 2>&1 || true
+fi
+
+# ── Game server ports (every game in the template library) ───────────────────
+
+# Source Engine — CS2, TF2, GMod, L4D2  (27015 game + query, range covers TV/RCON)
+ufw allow 27015:27030/tcp comment "Source engine"         > /dev/null 2>&1 || true
+ufw allow 27015:27030/udp comment "Source engine"         > /dev/null 2>&1 || true
+
+# Minecraft Java (25565) + Bedrock (19132)
+ufw allow 25565/tcp     comment "Minecraft Java"          > /dev/null 2>&1 || true
+ufw allow 25565/udp     comment "Minecraft Java"          > /dev/null 2>&1 || true
+ufw allow 19132/udp     comment "Minecraft Bedrock"       > /dev/null 2>&1 || true
+
+# Rust (28015 game, 28016 RCON)
+ufw allow 28015/tcp     comment "Rust"                    > /dev/null 2>&1 || true
+ufw allow 28015/udp     comment "Rust"                    > /dev/null 2>&1 || true
+ufw allow 28016/tcp     comment "Rust RCON"               > /dev/null 2>&1 || true
+
+# ARK / Satisfactory / Terraria — Unreal-based (7777-7778 + 15000 beacon)
+ufw allow 7777:7778/tcp comment "ARK/Satisfactory/Terraria" > /dev/null 2>&1 || true
+ufw allow 7777:7778/udp comment "ARK/Satisfactory/Terraria" > /dev/null 2>&1 || true
+ufw allow 15000/udp     comment "Satisfactory beacon"     > /dev/null 2>&1 || true
+
+# Valheim (2456 game, 2457 query, 2458 reserved)
+ufw allow 2456:2458/tcp comment "Valheim"                 > /dev/null 2>&1 || true
+ufw allow 2456:2458/udp comment "Valheim"                 > /dev/null 2>&1 || true
+
+# 7 Days to Die (26900 game, 26901-26902 aux)
+ufw allow 26900:26902/tcp comment "7 Days to Die"         > /dev/null 2>&1 || true
+ufw allow 26900:26902/udp comment "7 Days to Die"         > /dev/null 2>&1 || true
+
+# Palworld (8211 game + 25575 RCON)
+ufw allow 8211/tcp      comment "Palworld"                > /dev/null 2>&1 || true
+ufw allow 8211/udp      comment "Palworld"                > /dev/null 2>&1 || true
+
+# Enshrouded (15636-15637)
+ufw allow 15636:15637/tcp comment "Enshrouded"            > /dev/null 2>&1 || true
+ufw allow 15636:15637/udp comment "Enshrouded"            > /dev/null 2>&1 || true
+
+# Insurgency: Sandstorm (27102 game + 27131 query)
+ufw allow 27102/tcp     comment "Insurgency: Sandstorm"   > /dev/null 2>&1 || true
+ufw allow 27102/udp     comment "Insurgency: Sandstorm"   > /dev/null 2>&1 || true
+ufw allow 27131/udp     comment "Insurgency query"        > /dev/null 2>&1 || true
+
+# Squad (7787 game, 7787 query alt, 21114 RCON)
+ufw allow 7787/tcp      comment "Squad"                   > /dev/null 2>&1 || true
+ufw allow 7787/udp      comment "Squad"                   > /dev/null 2>&1 || true
+
+# Arma 3 (2302-2306 game + steam)
+ufw allow 2302:2306/udp comment "Arma 3"                  > /dev/null 2>&1 || true
+
+# ET: Legacy / Wolfenstein: ET / Quake Live (27960)
+ufw allow 27960/tcp     comment "ET:Legacy/QuakeLive"     > /dev/null 2>&1 || true
+ufw allow 27960/udp     comment "ET:Legacy/QuakeLive"     > /dev/null 2>&1 || true
+
+# OpenRA (1234)
+ufw allow 1234/tcp      comment "OpenRA"                  > /dev/null 2>&1 || true
+ufw allow 1234/udp      comment "OpenRA"                  > /dev/null 2>&1 || true
+
+# Xonotic (26000)
+ufw allow 26000/tcp     comment "Xonotic"                 > /dev/null 2>&1 || true
+ufw allow 26000/udp     comment "Xonotic"                 > /dev/null 2>&1 || true
+
+# V Rising (9876-9877)
+ufw allow 9876:9877/tcp comment "V Rising"                > /dev/null 2>&1 || true
+ufw allow 9876:9877/udp comment "V Rising"                > /dev/null 2>&1 || true
+
+# Project Zomboid (16261-16262)
+ufw allow 16261:16262/tcp comment "Project Zomboid"       > /dev/null 2>&1 || true
+ufw allow 16261:16262/udp comment "Project Zomboid"       > /dev/null 2>&1 || true
+
+# Factorio (34197)
+ufw allow 34197/udp     comment "Factorio"                > /dev/null 2>&1 || true
+
+# Don't Starve Together (10999-11000)
+ufw allow 10999:11000/udp comment "Don't Starve Together" > /dev/null 2>&1 || true
+
+# Assetto Corsa (9600 TCP + UDP, 8081 HTTP)
+ufw allow 9600/tcp      comment "Assetto Corsa"           > /dev/null 2>&1 || true
+ufw allow 9600/udp      comment "Assetto Corsa"           > /dev/null 2>&1 || true
+
+# ── Enable UFW ───────────────────────────────────────────────────────────────
 ufw --force enable > /dev/null 2>&1 || true
-ok "Firewall configured"
+ok "Firewall configured (SSH $SSH_PORT + panel + all game server ports)"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Done!
@@ -643,24 +907,34 @@ if [[ "$NONINTERACTIVE" == "true" && -n "$ADMIN_PASS" ]]; then
   echo -e "  ${BOLD}Admin Password:${NC}  $ADMIN_PASS"
 fi
 echo ""
-echo -e "  ${BOLD}Install Dir:${NC}     $INSTALL_DIR"
+echo -e "  ${BOLD}Panel Dir:${NC}       $INSTALL_DIR"
 echo -e "  ${BOLD}Database:${NC}        $DB_NAME (user: $DB_USER)"
+echo -e "  ${BOLD}Game Servers:${NC}    $GAMESERVERS_DIR"
+if [[ "$SKIP_STEAMCMD" != "true" ]]; then
+  echo -e "  ${BOLD}SteamCMD:${NC}        $STEAMCMD_DIR"
+fi
 echo -e "  ${BOLD}Logs (panel):${NC}    /var/log/gsm-panel/"
 if [[ "$SETUP_CADDY" == "true" ]]; then
   echo -e "  ${BOLD}Logs (caddy):${NC}    /var/log/caddy/"
 fi
 echo ""
-echo -e "  ${CYAN}Management commands:${NC}"
+echo -e "  ${CYAN}Panel management:${NC}"
 echo -e "    pm2 status              # View panel status"
 echo -e "    pm2 logs gsm-panel      # View live logs"
 echo -e "    pm2 restart gsm-panel   # Restart panel"
 echo -e "    pm2 stop gsm-panel      # Stop panel"
+if [[ "$SKIP_STEAMCMD" != "true" ]]; then
+  echo ""
+  echo -e "  ${CYAN}SteamCMD usage:${NC}"
+  echo -e "    steamcmd +login anonymous +quit                  # Test SteamCMD"
+  echo -e "    $STEAMCMD_DIR/install-game.sh 730 $GAMESERVERS_DIR/cs2     # Install CS2"
+  echo -e "    $STEAMCMD_DIR/install-game.sh 896660 $GAMESERVERS_DIR/valheim  # Install Valheim"
+fi
 if [[ "$SETUP_CADDY" == "true" ]]; then
   echo ""
   echo -e "  ${CYAN}Caddy commands:${NC}"
   echo -e "    systemctl status caddy      # Caddy status"
   echo -e "    systemctl restart caddy     # Restart Caddy"
-  echo -e "    caddy validate --config /etc/caddy/Caddyfile  # Validate config"
   echo -e "    journalctl -u caddy         # Caddy logs"
 fi
 echo ""
@@ -681,6 +955,8 @@ DB_USER=$DB_USER
 PANEL_PORT=$PANEL_PORT
 DOMAIN=$DOMAIN
 REVERSE_PROXY=caddy
+STEAMCMD_DIR=$STEAMCMD_DIR
+GAMESERVERS_DIR=$GAMESERVERS_DIR
 INFOEOF
 chmod 600 "$INSTALL_DIR/.install-info"
 

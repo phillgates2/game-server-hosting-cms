@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { gameServers, gameDefinitions, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
+import { allowServerPorts } from "@/lib/firewall";
 import { eq } from "drizzle-orm";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -105,14 +106,19 @@ export async function POST(req: NextRequest) {
       await mkdir(finalInstallPath, { recursive: true }).catch(() => {});
     }
 
+    const serverPort = Number(port);
+    const serverQueryPort = body.queryPort ? Number(body.queryPort) : serverPort + 1;
+    const serverRconPort = body.rconPort ? Number(body.rconPort) : null;
+
     const [server] = await db
       .insert(gameServers)
       .values({
         name,
         gameId: Number(gameId),
         nodeId: nodeId ? Number(nodeId) : null,
-        port: Number(port),
-        queryPort: body.queryPort ? Number(body.queryPort) : Number(port) + 1,
+        port: serverPort,
+        queryPort: serverQueryPort,
+        rconPort: serverRconPort,
         ipv4: ipv4 || "0.0.0.0",
         ipv6: ipv6 || null,
         installPath: finalInstallPath,
@@ -127,6 +133,13 @@ export async function POST(req: NextRequest) {
         discordNotifyCrash: body.discordNotifyCrash ?? true,
       })
       .returning();
+
+    // Open firewall ports for the new server (best-effort, non-blocking)
+    allowServerPorts(server.id, name, {
+      port: serverPort,
+      queryPort: serverQueryPort,
+      rconPort: serverRconPort,
+    }).catch((e) => console.warn("[firewall] Failed to open ports:", e));
 
     return NextResponse.json({ server }, { status: 201 });
   } catch (e: unknown) {
