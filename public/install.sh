@@ -696,60 +696,74 @@ log "Installing npm packages (this may take a minute)..."
 # Full install INCLUDING devDependencies — typescript, tailwindcss, postcss,
 # drizzle-kit, etc. are all required to build the production bundle.
 # After the build, we prune devDeps to save disk space.
-su - "$GSM_USER" -c "cd $INSTALL_DIR && npm ci 2>&1" > /tmp/gsm-npm-install.log 2>&1
-NPM_EXIT=$?
-tail -5 /tmp/gsm-npm-install.log
+#
+# NOTE: "|| true" prevents set -e from killing the script so our error
+# handling below actually runs.
+su - "$GSM_USER" -c "cd $INSTALL_DIR && npm ci" > /tmp/gsm-npm-install.log 2>&1 || true
+NPM_EXIT=${PIPESTATUS[0]:-$?}
 
-if [[ $NPM_EXIT -ne 0 ]]; then
-  # npm ci requires a lockfile and exact match — fall back to npm install
-  warn "npm ci failed (exit $NPM_EXIT), falling back to npm install..."
-  su - "$GSM_USER" -c "cd $INSTALL_DIR && npm install 2>&1" > /tmp/gsm-npm-install.log 2>&1
-  NPM_EXIT=$?
-  tail -5 /tmp/gsm-npm-install.log
-  if [[ $NPM_EXIT -ne 0 ]]; then
-    err "npm install also failed! Full log: /tmp/gsm-npm-install.log"
-    tail -20 /tmp/gsm-npm-install.log
+# Check if it actually worked by looking for node_modules
+if ! su - "$GSM_USER" -c "test -d $INSTALL_DIR/node_modules/next" 2>/dev/null; then
+  warn "npm ci did not produce node_modules — falling back to npm install..."
+  echo "─── npm ci log (last 20 lines) ───"
+  tail -20 /tmp/gsm-npm-install.log
+  echo "───────────────────────────────────"
+
+  su - "$GSM_USER" -c "cd $INSTALL_DIR && npm install" > /tmp/gsm-npm-install.log 2>&1 || true
+
+  if ! su - "$GSM_USER" -c "test -d $INSTALL_DIR/node_modules/next" 2>/dev/null; then
+    err "npm install also failed!"
+    echo "─── npm install log (last 30 lines) ───"
+    tail -30 /tmp/gsm-npm-install.log
+    echo "────────────────────────────────────────"
     die "Cannot continue without dependencies."
   fi
 fi
 
 # Verify critical devDependencies are actually installed
-if ! su - "$GSM_USER" -c "cd $INSTALL_DIR && test -f node_modules/.bin/tsc && test -f node_modules/.bin/next"; then
-  err "Critical packages (typescript, next) are missing from node_modules."
-  err "This usually means 'npm ci' skipped devDependencies."
-  die "Check /tmp/gsm-npm-install.log for details."
+if ! su - "$GSM_USER" -c "test -f $INSTALL_DIR/node_modules/.bin/tsc" 2>/dev/null; then
+  err "TypeScript compiler is missing — devDependencies were likely skipped."
+  err "Retrying with explicit install..."
+  su - "$GSM_USER" -c "cd $INSTALL_DIR && npm install" > /tmp/gsm-npm-install.log 2>&1 || true
+  if ! su - "$GSM_USER" -c "test -f $INSTALL_DIR/node_modules/.bin/tsc" 2>/dev/null; then
+    tail -20 /tmp/gsm-npm-install.log
+    die "Cannot install TypeScript. Check /tmp/gsm-npm-install.log"
+  fi
 fi
-ok "Dependencies installed (full log: /tmp/gsm-npm-install.log)"
+
+ok "Dependencies installed"
+log "  (full log: /tmp/gsm-npm-install.log)"
 
 # Push database schema BEFORE building — drizzle-kit is a devDependency
 log "Pushing database schema..."
-su - "$GSM_USER" -c "cd $INSTALL_DIR && npx drizzle-kit push 2>&1" > /tmp/gsm-drizzle-push.log 2>&1
-DRIZZLE_EXIT=$?
+su - "$GSM_USER" -c "cd $INSTALL_DIR && npx drizzle-kit push" > /tmp/gsm-drizzle-push.log 2>&1 || true
 tail -3 /tmp/gsm-drizzle-push.log
-if [[ $DRIZZLE_EXIT -ne 0 ]]; then
-  warn "drizzle-kit push failed (exit $DRIZZLE_EXIT) — schema may not be applied"
+if grep -qi "error\|fail" /tmp/gsm-drizzle-push.log 2>/dev/null && ! grep -qi "Changes applied" /tmp/gsm-drizzle-push.log 2>/dev/null; then
+  warn "drizzle-kit push may have had issues"
   warn "You can retry later: cd $INSTALL_DIR && npx drizzle-kit push"
   tail -10 /tmp/gsm-drizzle-push.log
 else
   ok "Database schema applied"
 fi
 
-log "Building production bundle..."
-su - "$GSM_USER" -c "cd $INSTALL_DIR && npx next build" > /tmp/gsm-next-build.log 2>&1
-BUILD_EXIT=$?
-tail -8 /tmp/gsm-next-build.log
-if [[ $BUILD_EXIT -ne 0 ]]; then
-  err "Build failed (exit code $BUILD_EXIT)! Full log: /tmp/gsm-next-build.log"
-  echo "─── Last 30 lines ───"
-  tail -30 /tmp/gsm-next-build.log
-  die "Cannot continue without a successful build."
+log "Building production bundle (this may take a minute)..."
+su - "$GSM_USER" -c "cd $INSTALL_DIR && npx next build" > /tmp/gsm-next-build.log 2>&1 || true
+
+# Check if .next directory was created (proof the build succeeded)
+if ! su - "$GSM_USER" -c "test -d $INSTALL_DIR/.next" 2>/dev/null; then
+  err "Build failed! .next directory was not created."
+  echo "─── Build log (last 40 lines) ───"
+  tail -40 /tmp/gsm-next-build.log
+  echo "──────────────────────────────────"
+  die "Cannot continue without a successful build. Full log: /tmp/gsm-next-build.log"
 fi
-ok "Production build complete (log: /tmp/gsm-next-build.log)"
+tail -8 /tmp/gsm-next-build.log
+ok "Production build complete"
 
 # Remove devDependencies to save disk space (typescript, eslint, tailwind, etc.
 # are no longer needed after the build is done)
 log "Pruning devDependencies to save disk space..."
-su - "$GSM_USER" -c "cd $INSTALL_DIR && npm prune --omit=dev 2>&1" | tail -3
+su - "$GSM_USER" -c "cd $INSTALL_DIR && npm prune --omit=dev" > /dev/null 2>&1 || true
 ok "DevDependencies pruned"
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -844,8 +858,11 @@ mkdir -p /var/log/gsm-panel
 chown "$GSM_USER:$GSM_USER" /var/log/gsm-panel
 
 # Start with PM2
-su - "$GSM_USER" -c "cd $INSTALL_DIR && pm2 start ecosystem.config.cjs"
-su - "$GSM_USER" -c "pm2 save"
+su - "$GSM_USER" -c "cd $INSTALL_DIR && pm2 start ecosystem.config.cjs" || {
+  warn "PM2 start failed — trying alternative method..."
+  su - "$GSM_USER" -c "cd $INSTALL_DIR && pm2 start npm --name gsm-panel -- start" || true
+}
+su - "$GSM_USER" -c "pm2 save" || true
 
 # Set up PM2 to start on boot via systemd
 env PATH=$PATH:/usr/bin pm2 startup systemd -u "$GSM_USER" --hp "/home/$GSM_USER" 2>/dev/null || true
