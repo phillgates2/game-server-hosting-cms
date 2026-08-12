@@ -290,14 +290,52 @@ step "Installing system dependencies"
 export DEBIAN_FRONTEND=noninteractive
 
 log "Updating package lists..."
-apt-get update -qq
+apt-get update -qq || {
+  err "apt-get update failed"
+  apt-get update
+  die "Cannot continue without package lists"
+}
 
 log "Installing base packages..."
-apt-get install -y -qq \
-  curl wget gnupg2 ca-certificates lsb-release \
-  git build-essential software-properties-common \
-  ufw fail2ban tar gzip unzip \
-  > /dev/null 2>&1
+# Core packages (required)
+CORE_PKGS="curl wget ca-certificates gnupg lsb-release git tar gzip unzip psmisc"
+# Build tools (required for native npm modules)
+BUILD_PKGS="build-essential"
+# Security (optional but recommended)
+SECURITY_PKGS="ufw fail2ban"
+# Ubuntu-only package — skip on Debian
+if [[ "$OS_ID" == "ubuntu" ]]; then
+  EXTRA_PKGS="software-properties-common"
+else
+  EXTRA_PKGS=""
+fi
+
+# Install core packages first (fail if these are missing)
+log "  → Core packages..."
+if ! apt-get install -y $CORE_PKGS > /tmp/gsm-apt-core.log 2>&1; then
+  err "Failed to install core packages!"
+  cat /tmp/gsm-apt-core.log
+  die "Cannot continue without core packages: $CORE_PKGS"
+fi
+
+# Build tools
+log "  → Build tools..."
+if ! apt-get install -y $BUILD_PKGS > /tmp/gsm-apt-build.log 2>&1; then
+  warn "Failed to install build-essential — native npm modules may fail"
+  cat /tmp/gsm-apt-build.log
+fi
+
+# Security packages (non-fatal if missing)
+log "  → Security packages (ufw, fail2ban)..."
+apt-get install -y $SECURITY_PKGS > /tmp/gsm-apt-security.log 2>&1 || {
+  warn "Some security packages could not be installed (non-fatal)"
+}
+
+# Ubuntu extras
+if [[ -n "$EXTRA_PKGS" ]]; then
+  apt-get install -y $EXTRA_PKGS > /dev/null 2>&1 || true
+fi
+
 ok "Base packages installed"
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -305,26 +343,60 @@ ok "Base packages installed"
 # ═══════════════════════════════════════════════════════════════════════════════
 step "Installing Node.js $NODE_MAJOR"
 
+install_nodejs() {
+  log "Adding NodeSource repository..."
+  if ! curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" -o /tmp/nodesource_setup.sh; then
+    err "Failed to download NodeSource setup script"
+    return 1
+  fi
+  
+  if ! bash /tmp/nodesource_setup.sh > /tmp/gsm-nodesource.log 2>&1; then
+    err "NodeSource setup failed!"
+    cat /tmp/gsm-nodesource.log
+    return 1
+  fi
+  
+  log "Installing Node.js..."
+  if ! apt-get install -y nodejs > /tmp/gsm-nodejs-install.log 2>&1; then
+    err "Failed to install Node.js!"
+    cat /tmp/gsm-nodejs-install.log
+    return 1
+  fi
+  return 0
+}
+
 if command -v node &>/dev/null; then
   CURRENT_NODE="$(node -v | sed 's/v//' | cut -d. -f1)"
   if [[ "$CURRENT_NODE" -ge "$NODE_MAJOR" ]]; then
     ok "Node.js $(node -v) already installed"
   else
     warn "Node.js v$CURRENT_NODE found, upgrading to v$NODE_MAJOR..."
-    curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - > /dev/null 2>&1
-    apt-get install -y -qq nodejs > /dev/null 2>&1
+    if ! install_nodejs; then
+      die "Failed to install Node.js $NODE_MAJOR"
+    fi
     ok "Node.js $(node -v) installed"
   fi
 else
-  curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - > /dev/null 2>&1
-  apt-get install -y -qq nodejs > /dev/null 2>&1
+  if ! install_nodejs; then
+    die "Failed to install Node.js $NODE_MAJOR"
+  fi
   ok "Node.js $(node -v) installed"
+fi
+
+# Verify Node.js is working
+if ! node --version > /dev/null 2>&1; then
+  die "Node.js installation verification failed"
 fi
 
 # Install PM2 globally
 if ! command -v pm2 &>/dev/null; then
-  npm install -g pm2 > /dev/null 2>&1
-  ok "PM2 installed"
+  log "Installing PM2..."
+  if ! npm install -g pm2 > /tmp/gsm-pm2-install.log 2>&1; then
+    warn "PM2 installation failed — you can install it manually later"
+    cat /tmp/gsm-pm2-install.log
+  else
+    ok "PM2 installed"
+  fi
 else
   ok "PM2 already installed"
 fi
@@ -335,18 +407,64 @@ fi
 step "Installing & configuring PostgreSQL"
 
 if ! command -v psql &>/dev/null; then
-  # Add PostgreSQL APT repo for latest version
+  log "Adding PostgreSQL APT repository..."
+  
+  # Get the codename — Debian 13 (Trixie) may need special handling
+  CODENAME=$(lsb_release -cs 2>/dev/null || echo "")
+  if [[ -z "$CODENAME" ]]; then
+    # Fallback: read from os-release
+    CODENAME=$(grep VERSION_CODENAME /etc/os-release 2>/dev/null | cut -d= -f2 || echo "bookworm")
+  fi
+  
+  # Debian 13 (Trixie) may not have packages yet — fall back to bookworm
+  if [[ "$CODENAME" == "trixie" ]]; then
+    warn "Debian 13 (Trixie) detected — using Bookworm PostgreSQL packages"
+    CODENAME="bookworm"
+  fi
+  
+  # Add PostgreSQL APT repo
   curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
     | gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg 2>/dev/null
-  echo "deb [signed-by=/usr/share/keyrings/postgresql-archive-keyring.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+  echo "deb [signed-by=/usr/share/keyrings/postgresql-archive-keyring.gpg] https://apt.postgresql.org/pub/repos/apt ${CODENAME}-pgdg main" \
     > /etc/apt/sources.list.d/pgdg.list
+  
+  log "Updating package lists..."
   apt-get update -qq
-  apt-get install -y -qq postgresql postgresql-contrib > /dev/null 2>&1
+  
+  log "Installing PostgreSQL..."
+  if ! apt-get install -y postgresql postgresql-contrib > /tmp/gsm-postgresql-install.log 2>&1; then
+    err "PostgreSQL installation failed!"
+    cat /tmp/gsm-postgresql-install.log
+    
+    # Try without the official repo (use distro's version)
+    warn "Trying distro's PostgreSQL package..."
+    rm -f /etc/apt/sources.list.d/pgdg.list
+    apt-get update -qq
+    if ! apt-get install -y postgresql postgresql-contrib > /tmp/gsm-postgresql-install.log 2>&1; then
+      cat /tmp/gsm-postgresql-install.log
+      die "Cannot install PostgreSQL"
+    fi
+  fi
 fi
 
 # Ensure PostgreSQL is running
-systemctl enable --now postgresql > /dev/null 2>&1
-ok "PostgreSQL $(psql --version | grep -oP '\d+\.\d+') running"
+if command -v systemctl &>/dev/null; then
+  systemctl enable postgresql > /dev/null 2>&1 || true
+  systemctl start postgresql > /dev/null 2>&1 || true
+else
+  # Non-systemd fallback (e.g., containers)
+  service postgresql start > /dev/null 2>&1 || true
+fi
+
+# Verify PostgreSQL is running
+sleep 2
+if ! su - postgres -c "psql -c 'SELECT 1'" > /dev/null 2>&1; then
+  err "PostgreSQL is installed but not responding"
+  die "Please start PostgreSQL manually: systemctl start postgresql"
+fi
+
+PG_VERSION=$(psql --version 2>/dev/null | grep -oP '\d+' | head -1 || echo "?")
+ok "PostgreSQL $PG_VERSION running"
 
 # Create database user & database
 log "Creating database role '$DB_USER' and database '$DB_NAME'..."
@@ -400,17 +518,28 @@ else
   dpkg --add-architecture i386
   apt-get update -qq
 
-  # Install required 32-bit libraries
-  apt-get install -y -qq \
-    lib32gcc-s1 \
-    lib32stdc++6 \
-    libc6-i386 \
-    > /dev/null 2>&1 || {
-      # Fallback for older naming
-      apt-get install -y -qq lib32gcc1 lib32stdc++6 libc6-i386 > /dev/null 2>&1 || true
-    }
+  # Try multiple package name variants (different across distro versions)
+  STEAM_LIBS_INSTALLED="false"
+  
+  # Modern naming (Debian 11+, Ubuntu 20.04+)
+  if apt-get install -y lib32gcc-s1 lib32stdc++6 > /tmp/gsm-steamlibs.log 2>&1; then
+    STEAM_LIBS_INSTALLED="true"
+  # Older naming (Debian 10, Ubuntu 18.04)
+  elif apt-get install -y lib32gcc1 lib32stdc++6 > /tmp/gsm-steamlibs.log 2>&1; then
+    STEAM_LIBS_INSTALLED="true"
+  # Minimal fallback — just libc6:i386
+  elif apt-get install -y libc6:i386 > /tmp/gsm-steamlibs.log 2>&1; then
+    warn "Only installed libc6:i386 — some games may have issues"
+    STEAM_LIBS_INSTALLED="true"
+  fi
 
-  ok "32-bit libraries installed"
+  if [[ "$STEAM_LIBS_INSTALLED" != "true" ]]; then
+    warn "Could not install 32-bit libraries — SteamCMD may not work"
+    warn "Log: /tmp/gsm-steamlibs.log"
+    cat /tmp/gsm-steamlibs.log
+  else
+    ok "32-bit libraries installed"
+  fi
 
   # Create SteamCMD directory
   mkdir -p "$STEAMCMD_DIR"
@@ -731,16 +860,32 @@ step "Configuring web server"
 if [[ "$SETUP_CADDY" == "true" && -n "$DOMAIN" ]]; then
   log "Installing Caddy..."
 
-  # Install Caddy via official APT repository
-  apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https > /dev/null 2>&1
+  # Install prerequisites
+  apt-get install -y debian-keyring debian-archive-keyring apt-transport-https > /tmp/gsm-caddy-prereq.log 2>&1 || {
+    warn "Some Caddy prerequisites could not be installed (may be fine)"
+  }
+
+  # Add Caddy APT repository
+  log "Adding Caddy APT repository..."
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
     | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
     > /etc/apt/sources.list.d/caddy-stable.list
+  
   apt-get update -qq
-  apt-get install -y -qq caddy > /dev/null 2>&1
+  
+  log "Installing Caddy..."
+  if ! apt-get install -y caddy > /tmp/gsm-caddy-install.log 2>&1; then
+    err "Caddy installation failed!"
+    cat /tmp/gsm-caddy-install.log
+    warn "You can set up Caddy manually later"
+    SETUP_CADDY="false"
+  else
+    ok "Caddy $(caddy version 2>/dev/null | head -1 || echo '?') installed"
+  fi
+fi
 
-  ok "Caddy $(caddy version | head -1) installed"
+if [[ "$SETUP_CADDY" == "true" && -n "$DOMAIN" ]]; then
 
   # Write Caddyfile
   log "Writing Caddyfile for $DOMAIN..."
