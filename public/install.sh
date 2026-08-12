@@ -179,6 +179,121 @@ esac
 
 log "Detected OS: $OS_ID $OS_VERSION"
 
+# ── LXC / Container network fix ──────────────────────────────────────────────
+# ASUSTOR Linux Center (and some other NAS platforms) run Debian inside LXC
+# containers and inject an internal gateway (e.g. 10.172.5.1 on eth1) that
+# takes priority over the real LAN gateway. This breaks outbound internet
+# access and causes npm/curl/apt to hang or fail.
+#
+# Detect and fix this automatically.
+if [[ -f /proc/1/environ ]] && grep -qa "container=lxc" /proc/1/environ 2>/dev/null \
+   || [[ -f /.dockerenv ]] \
+   || grep -qsai "lxc\|docker\|container" /proc/1/cgroup 2>/dev/null; then
+  
+  IS_CONTAINER="true"
+  log "Running inside a container (LXC/Docker detected)"
+
+  # Check for the ASUSTOR-style bad gateway: a default route via 10.x.x.x on
+  # a secondary interface that shadows the real LAN gateway
+  BAD_GW=$(ip route show default 2>/dev/null \
+    | grep -oP 'default via 10\.\d+\.\d+\.\d+ dev eth[1-9]' | head -1 || true)
+  GOOD_GW=$(ip route show default 2>/dev/null \
+    | grep -oP 'default via 192\.168\.\d+\.\d+ dev eth0' | head -1 || true)
+
+  if [[ -n "$BAD_GW" ]]; then
+    warn "Detected conflicting container gateway: $BAD_GW"
+
+    if [[ -n "$GOOD_GW" ]]; then
+      log "Good LAN gateway also present: $GOOD_GW"
+    fi
+
+    # Try to reach the internet through the current routing table
+    if ! curl -sf --max-time 5 "https://deb.nodesource.com" > /dev/null 2>&1; then
+      warn "Internet is unreachable — fixing container routing..."
+
+      # Extract the bad gateway IP and interface
+      BAD_GW_IP=$(echo "$BAD_GW" | grep -oP '10\.\d+\.\d+\.\d+' || true)
+      BAD_GW_DEV=$(echo "$BAD_GW" | grep -oP 'eth[1-9]' || true)
+
+      if [[ -n "$BAD_GW_IP" && -n "$BAD_GW_DEV" ]]; then
+        ip route del default via "$BAD_GW_IP" dev "$BAD_GW_DEV" 2>/dev/null || true
+        log "Removed bad gateway: $BAD_GW_IP via $BAD_GW_DEV"
+      fi
+
+      # If no good gateway exists, try to detect the LAN gateway from eth0
+      if [[ -z "$GOOD_GW" ]]; then
+        ETH0_GW=$(ip route show 2>/dev/null \
+          | grep -oP '\d+\.\d+\.\d+\.\d+' \
+          | grep -E '^192\.168\.|^10\.0\.|^172\.(1[6-9]|2[0-9]|3[01])\.' \
+          | head -1 || true)
+        if [[ -n "$ETH0_GW" ]]; then
+          ip route add default via "$ETH0_GW" dev eth0 2>/dev/null || true
+          log "Added LAN gateway: $ETH0_GW via eth0"
+        fi
+      fi
+
+      # Verify the fix worked
+      sleep 2
+      if curl -sf --max-time 5 "https://deb.nodesource.com" > /dev/null 2>&1; then
+        ok "Container networking fixed — internet is reachable"
+
+        # Install the persistent fix as a systemd service
+        if command -v systemctl &>/dev/null; then
+          log "Installing persistent routing fix for container reboots..."
+
+          cat > /usr/local/bin/fix-container-routing.sh <<'ROUTEFIX'
+#!/bin/bash
+# Fix ASUSTOR/NAS Linux Center container default gateway conflict
+# Installed by GameServer Manager installer
+sleep 10
+# Remove any 10.x.x.x default routes on secondary interfaces
+for route in $(ip route show default 2>/dev/null | grep -oP 'default via 10\.\d+\.\d+\.\d+ dev eth[1-9]'); do
+  GW_IP=$(echo "$route" | grep -oP '10\.\d+\.\d+\.\d+')
+  GW_DEV=$(echo "$route" | grep -oP 'eth[1-9]')
+  ip route del default via "$GW_IP" dev "$GW_DEV" 2>/dev/null || true
+done
+# Ensure a default route exists via eth0
+if ! ip route show default | grep -q 'dev eth0'; then
+  GATEWAY=$(ip route show 2>/dev/null | grep -oP 'default via \S+' | head -1 | awk '{print $3}')
+  if [ -n "$GATEWAY" ]; then
+    ip route add default via "$GATEWAY" dev eth0 2>/dev/null || true
+  fi
+fi
+ROUTEFIX
+          chmod +x /usr/local/bin/fix-container-routing.sh
+
+          cat > /etc/systemd/system/fix-container-routing.service <<'ROUTESVC'
+[Unit]
+Description=Fix container default gateway conflict (ASUSTOR/NAS LXC)
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/fix-container-routing.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+ROUTESVC
+
+          systemctl daemon-reload 2>/dev/null || true
+          systemctl enable fix-container-routing.service 2>/dev/null || true
+          ok "Persistent routing fix installed (survives reboots)"
+        fi
+      else
+        warn "Routing fix did not restore internet access"
+        warn "You may need to manually configure your container's network"
+        warn "Current routing table:"
+        ip route show 2>/dev/null || true
+      fi
+    else
+      log "Internet is reachable despite container gateway — no fix needed"
+    fi
+  fi
+else
+  IS_CONTAINER="false"
+fi
+
 # ── Interactive prompts (if not all values provided) ──────────────────────────
 if [[ "$NONINTERACTIVE" != "true" ]]; then
   echo ""
@@ -779,8 +894,14 @@ TEMP_PID=$(cat /tmp/gsm-temp-pid 2>/dev/null || echo "")
 
 # Wait for server to be ready (up to 60 seconds)
 SERVER_READY="false"
+sleep 3  # give Next.js a moment to fully start
 for i in $(seq 1 60); do
   if curl -sf "http://127.0.0.1:$PANEL_PORT/api/health" > /dev/null 2>&1; then
+    SERVER_READY="true"
+    break
+  fi
+  # Also try localhost (some systems resolve differently)
+  if curl -sf "http://localhost:$PANEL_PORT/api/health" > /dev/null 2>&1; then
     SERVER_READY="true"
     break
   fi
@@ -795,15 +916,14 @@ if [[ "$SERVER_READY" != "true" ]]; then
 else
   log "Server is up — calling install API..."
 
-  # Call the install API
+  # Call the install API (try both 127.0.0.1 and localhost)
+  INSTALL_PAYLOAD="{\"adminUsername\":\"$ADMIN_USER\",\"adminEmail\":\"$ADMIN_EMAIL\",\"adminPassword\":\"$ADMIN_PASS\",\"panelName\":\"$PANEL_NAME\"}"
+  INSTALL_RESPONSE=$(curl -sf --max-time 30 -X POST "http://localhost:$PANEL_PORT/api/install" \
+    -H "Content-Type: application/json" \
+    -d "$INSTALL_PAYLOAD" 2>&1) || \
   INSTALL_RESPONSE=$(curl -sf --max-time 30 -X POST "http://127.0.0.1:$PANEL_PORT/api/install" \
     -H "Content-Type: application/json" \
-    -d "{
-      \"adminUsername\": \"$ADMIN_USER\",
-      \"adminEmail\": \"$ADMIN_EMAIL\",
-      \"adminPassword\": \"$ADMIN_PASS\",
-      \"panelName\": \"$PANEL_NAME\"
-    }" 2>&1) || true
+    -d "$INSTALL_PAYLOAD" 2>&1) || true
 
   if echo "$INSTALL_RESPONSE" | grep -q '"ok":true'; then
     ok "Panel installed successfully"
@@ -974,136 +1094,103 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════════
 log "Configuring firewall..."
 
-# ── SSH: detect the real port to avoid locking yourself out ───────────────────
-SSH_PORT="22"
-if [[ -f /etc/ssh/sshd_config ]]; then
-  # Read the Port directive (may be commented or absent → default 22)
-  DETECTED_PORT=$(grep -E "^[[:space:]]*Port[[:space:]]+" /etc/ssh/sshd_config 2>/dev/null \
-    | awk '{print $2}' | head -1)
-  if [[ -n "$DETECTED_PORT" && "$DETECTED_PORT" =~ ^[0-9]+$ ]]; then
-    SSH_PORT="$DETECTED_PORT"
-  fi
-fi
-
-# Also check for include-style drop-in configs (Ubuntu 24.04+, Debian 12+)
-if [[ -d /etc/ssh/sshd_config.d ]]; then
-  for cfg in /etc/ssh/sshd_config.d/*.conf; do
-    [[ -f "$cfg" ]] || continue
-    DROP_PORT=$(grep -E "^[[:space:]]*Port[[:space:]]+" "$cfg" 2>/dev/null \
-      | awk '{print $2}' | head -1)
-    if [[ -n "$DROP_PORT" && "$DROP_PORT" =~ ^[0-9]+$ ]]; then
-      SSH_PORT="$DROP_PORT"
-    fi
-  done
-fi
-
-# Check the SSH_CONNECTION env var as a final safeguard — this tells us
-# the port the *current* session connected on
-if [[ -n "${SSH_CONNECTION:-}" ]]; then
-  CONN_PORT=$(echo "$SSH_CONNECTION" | awk '{print $4}')
-  if [[ -n "$CONN_PORT" && "$CONN_PORT" =~ ^[0-9]+$ && "$CONN_PORT" != "$SSH_PORT" ]]; then
-    warn "Current SSH session is on port $CONN_PORT (sshd_config says $SSH_PORT) — allowing both"
-    ufw allow "$CONN_PORT/tcp" comment "SSH (active session)" > /dev/null 2>&1 || true
-  fi
-fi
-
-# Allow SSH *before* enabling UFW so we never lock out the current session
-ufw allow "$SSH_PORT/tcp" comment "SSH" > /dev/null 2>&1 || true
-if [[ "$SSH_PORT" != "22" ]]; then
-  log "SSH detected on port $SSH_PORT (non-default)"
-fi
-ok "SSH port $SSH_PORT allowed"
-
-# ── Panel / Caddy ────────────────────────────────────────────────────────────
-if [[ "$SETUP_CADDY" == "true" ]]; then
-  ufw allow 80/tcp  comment "HTTP  (Caddy)" > /dev/null 2>&1 || true
-  ufw allow 443/tcp comment "HTTPS (Caddy)" > /dev/null 2>&1 || true
+# Check if UFW is available
+if ! command -v ufw &>/dev/null; then
+  warn "UFW is not installed — skipping firewall configuration"
+  warn "You should manually configure your firewall to allow:"
+  warn "  - SSH (port 22 or your custom port)"
+  warn "  - Panel (port $PANEL_PORT)"
+  warn "  - Game server ports as needed"
+  ok "Firewall step skipped (no UFW)"
 else
-  ufw allow "$PANEL_PORT/tcp" comment "GSM Panel" > /dev/null 2>&1 || true
+  # ── SSH: detect the real port to avoid locking yourself out ─────────────────
+  SSH_PORT="22"
+  if [[ -f /etc/ssh/sshd_config ]]; then
+    DETECTED_PORT=$(grep -E "^[[:space:]]*Port[[:space:]]+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1 || true)
+    if [[ -n "${DETECTED_PORT:-}" && "${DETECTED_PORT:-}" =~ ^[0-9]+$ ]]; then
+      SSH_PORT="$DETECTED_PORT"
+    fi
+  fi
+
+  # Also check for drop-in configs (Ubuntu 24.04+, Debian 12+)
+  if [[ -d /etc/ssh/sshd_config.d ]]; then
+    for cfg in /etc/ssh/sshd_config.d/*.conf; do
+      [[ -f "$cfg" ]] || continue
+      DROP_PORT=$(grep -E "^[[:space:]]*Port[[:space:]]+" "$cfg" 2>/dev/null | awk '{print $2}' | head -1 || true)
+      if [[ -n "${DROP_PORT:-}" && "${DROP_PORT:-}" =~ ^[0-9]+$ ]]; then
+        SSH_PORT="$DROP_PORT"
+      fi
+    done
+  fi
+
+  # Check the current SSH session port as a safeguard
+  if [[ -n "${SSH_CONNECTION:-}" ]]; then
+    CONN_PORT=$(echo "$SSH_CONNECTION" | awk '{print $4}' || true)
+    if [[ -n "${CONN_PORT:-}" && "${CONN_PORT:-}" =~ ^[0-9]+$ && "$CONN_PORT" != "$SSH_PORT" ]]; then
+      warn "Current SSH session is on port $CONN_PORT (sshd_config says $SSH_PORT) — allowing both"
+      ufw allow "$CONN_PORT/tcp" comment "SSH (active session)" > /dev/null 2>&1 || true
+    fi
+  fi
+
+  # Allow SSH *before* enabling UFW
+  ufw allow "$SSH_PORT/tcp" comment "SSH" > /dev/null 2>&1 || true
+  if [[ "$SSH_PORT" != "22" ]]; then
+    log "SSH detected on port $SSH_PORT (non-default)"
+  fi
+
+  # Panel / Caddy
+  if [[ "$SETUP_CADDY" == "true" ]]; then
+    ufw allow 80/tcp  comment "HTTP  (Caddy)" > /dev/null 2>&1 || true
+    ufw allow 443/tcp comment "HTTPS (Caddy)" > /dev/null 2>&1 || true
+  else
+    ufw allow "$PANEL_PORT/tcp" comment "GSM Panel" > /dev/null 2>&1 || true
+  fi
+
+  # Game server ports (every game in the template library)
+  ufw allow 27015:27030/tcp comment "Source engine"         > /dev/null 2>&1 || true
+  ufw allow 27015:27030/udp comment "Source engine"         > /dev/null 2>&1 || true
+  ufw allow 25565/tcp     comment "Minecraft Java"          > /dev/null 2>&1 || true
+  ufw allow 25565/udp     comment "Minecraft Java"          > /dev/null 2>&1 || true
+  ufw allow 19132/udp     comment "Minecraft Bedrock"       > /dev/null 2>&1 || true
+  ufw allow 28015/tcp     comment "Rust"                    > /dev/null 2>&1 || true
+  ufw allow 28015/udp     comment "Rust"                    > /dev/null 2>&1 || true
+  ufw allow 28016/tcp     comment "Rust RCON"               > /dev/null 2>&1 || true
+  ufw allow 7777:7778/tcp comment "ARK/Satisfactory/Terraria" > /dev/null 2>&1 || true
+  ufw allow 7777:7778/udp comment "ARK/Satisfactory/Terraria" > /dev/null 2>&1 || true
+  ufw allow 15000/udp     comment "Satisfactory beacon"     > /dev/null 2>&1 || true
+  ufw allow 2456:2458/tcp comment "Valheim"                 > /dev/null 2>&1 || true
+  ufw allow 2456:2458/udp comment "Valheim"                 > /dev/null 2>&1 || true
+  ufw allow 26900:26902/tcp comment "7 Days to Die"         > /dev/null 2>&1 || true
+  ufw allow 26900:26902/udp comment "7 Days to Die"         > /dev/null 2>&1 || true
+  ufw allow 8211/tcp      comment "Palworld"                > /dev/null 2>&1 || true
+  ufw allow 8211/udp      comment "Palworld"                > /dev/null 2>&1 || true
+  ufw allow 15636:15637/tcp comment "Enshrouded"            > /dev/null 2>&1 || true
+  ufw allow 15636:15637/udp comment "Enshrouded"            > /dev/null 2>&1 || true
+  ufw allow 27102/tcp     comment "Insurgency: Sandstorm"   > /dev/null 2>&1 || true
+  ufw allow 27102/udp     comment "Insurgency: Sandstorm"   > /dev/null 2>&1 || true
+  ufw allow 27131/udp     comment "Insurgency query"        > /dev/null 2>&1 || true
+  ufw allow 7787/tcp      comment "Squad"                   > /dev/null 2>&1 || true
+  ufw allow 7787/udp      comment "Squad"                   > /dev/null 2>&1 || true
+  ufw allow 2302:2306/udp comment "Arma 3"                  > /dev/null 2>&1 || true
+  ufw allow 27960/tcp     comment "ET:Legacy/QuakeLive"     > /dev/null 2>&1 || true
+  ufw allow 27960/udp     comment "ET:Legacy/QuakeLive"     > /dev/null 2>&1 || true
+  ufw allow 1234/tcp      comment "OpenRA"                  > /dev/null 2>&1 || true
+  ufw allow 1234/udp      comment "OpenRA"                  > /dev/null 2>&1 || true
+  ufw allow 26000/tcp     comment "Xonotic"                 > /dev/null 2>&1 || true
+  ufw allow 26000/udp     comment "Xonotic"                 > /dev/null 2>&1 || true
+  ufw allow 9876:9877/tcp comment "V Rising"                > /dev/null 2>&1 || true
+  ufw allow 9876:9877/udp comment "V Rising"                > /dev/null 2>&1 || true
+  ufw allow 16261:16262/tcp comment "Project Zomboid"       > /dev/null 2>&1 || true
+  ufw allow 16261:16262/udp comment "Project Zomboid"       > /dev/null 2>&1 || true
+  ufw allow 34197/udp     comment "Factorio"                > /dev/null 2>&1 || true
+  ufw allow 10999:11000/udp comment "Don't Starve Together" > /dev/null 2>&1 || true
+  ufw allow 9600/tcp      comment "Assetto Corsa"           > /dev/null 2>&1 || true
+  ufw allow 9600/udp      comment "Assetto Corsa"           > /dev/null 2>&1 || true
+
+  # Enable UFW
+  ufw --force enable > /dev/null 2>&1 || true
+  ok "Firewall configured (SSH $SSH_PORT + panel + all game server ports)"
 fi
-
-# ── Game server ports (every game in the template library) ───────────────────
-
-# Source Engine — CS2, TF2, GMod, L4D2  (27015 game + query, range covers TV/RCON)
-ufw allow 27015:27030/tcp comment "Source engine"         > /dev/null 2>&1 || true
-ufw allow 27015:27030/udp comment "Source engine"         > /dev/null 2>&1 || true
-
-# Minecraft Java (25565) + Bedrock (19132)
-ufw allow 25565/tcp     comment "Minecraft Java"          > /dev/null 2>&1 || true
-ufw allow 25565/udp     comment "Minecraft Java"          > /dev/null 2>&1 || true
-ufw allow 19132/udp     comment "Minecraft Bedrock"       > /dev/null 2>&1 || true
-
-# Rust (28015 game, 28016 RCON)
-ufw allow 28015/tcp     comment "Rust"                    > /dev/null 2>&1 || true
-ufw allow 28015/udp     comment "Rust"                    > /dev/null 2>&1 || true
-ufw allow 28016/tcp     comment "Rust RCON"               > /dev/null 2>&1 || true
-
-# ARK / Satisfactory / Terraria — Unreal-based (7777-7778 + 15000 beacon)
-ufw allow 7777:7778/tcp comment "ARK/Satisfactory/Terraria" > /dev/null 2>&1 || true
-ufw allow 7777:7778/udp comment "ARK/Satisfactory/Terraria" > /dev/null 2>&1 || true
-ufw allow 15000/udp     comment "Satisfactory beacon"     > /dev/null 2>&1 || true
-
-# Valheim (2456 game, 2457 query, 2458 reserved)
-ufw allow 2456:2458/tcp comment "Valheim"                 > /dev/null 2>&1 || true
-ufw allow 2456:2458/udp comment "Valheim"                 > /dev/null 2>&1 || true
-
-# 7 Days to Die (26900 game, 26901-26902 aux)
-ufw allow 26900:26902/tcp comment "7 Days to Die"         > /dev/null 2>&1 || true
-ufw allow 26900:26902/udp comment "7 Days to Die"         > /dev/null 2>&1 || true
-
-# Palworld (8211 game + 25575 RCON)
-ufw allow 8211/tcp      comment "Palworld"                > /dev/null 2>&1 || true
-ufw allow 8211/udp      comment "Palworld"                > /dev/null 2>&1 || true
-
-# Enshrouded (15636-15637)
-ufw allow 15636:15637/tcp comment "Enshrouded"            > /dev/null 2>&1 || true
-ufw allow 15636:15637/udp comment "Enshrouded"            > /dev/null 2>&1 || true
-
-# Insurgency: Sandstorm (27102 game + 27131 query)
-ufw allow 27102/tcp     comment "Insurgency: Sandstorm"   > /dev/null 2>&1 || true
-ufw allow 27102/udp     comment "Insurgency: Sandstorm"   > /dev/null 2>&1 || true
-ufw allow 27131/udp     comment "Insurgency query"        > /dev/null 2>&1 || true
-
-# Squad (7787 game, 7787 query alt, 21114 RCON)
-ufw allow 7787/tcp      comment "Squad"                   > /dev/null 2>&1 || true
-ufw allow 7787/udp      comment "Squad"                   > /dev/null 2>&1 || true
-
-# Arma 3 (2302-2306 game + steam)
-ufw allow 2302:2306/udp comment "Arma 3"                  > /dev/null 2>&1 || true
-
-# ET: Legacy / Wolfenstein: ET / Quake Live (27960)
-ufw allow 27960/tcp     comment "ET:Legacy/QuakeLive"     > /dev/null 2>&1 || true
-ufw allow 27960/udp     comment "ET:Legacy/QuakeLive"     > /dev/null 2>&1 || true
-
-# OpenRA (1234)
-ufw allow 1234/tcp      comment "OpenRA"                  > /dev/null 2>&1 || true
-ufw allow 1234/udp      comment "OpenRA"                  > /dev/null 2>&1 || true
-
-# Xonotic (26000)
-ufw allow 26000/tcp     comment "Xonotic"                 > /dev/null 2>&1 || true
-ufw allow 26000/udp     comment "Xonotic"                 > /dev/null 2>&1 || true
-
-# V Rising (9876-9877)
-ufw allow 9876:9877/tcp comment "V Rising"                > /dev/null 2>&1 || true
-ufw allow 9876:9877/udp comment "V Rising"                > /dev/null 2>&1 || true
-
-# Project Zomboid (16261-16262)
-ufw allow 16261:16262/tcp comment "Project Zomboid"       > /dev/null 2>&1 || true
-ufw allow 16261:16262/udp comment "Project Zomboid"       > /dev/null 2>&1 || true
-
-# Factorio (34197)
-ufw allow 34197/udp     comment "Factorio"                > /dev/null 2>&1 || true
-
-# Don't Starve Together (10999-11000)
-ufw allow 10999:11000/udp comment "Don't Starve Together" > /dev/null 2>&1 || true
-
-# Assetto Corsa (9600 TCP + UDP, 8081 HTTP)
-ufw allow 9600/tcp      comment "Assetto Corsa"           > /dev/null 2>&1 || true
-ufw allow 9600/udp      comment "Assetto Corsa"           > /dev/null 2>&1 || true
-
-# ── Enable UFW ───────────────────────────────────────────────────────────────
-ufw --force enable > /dev/null 2>&1 || true
-ok "Firewall configured (SSH $SSH_PORT + panel + all game server ports)"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Done!
