@@ -1053,7 +1053,51 @@ su - "$GSM_USER" -c "pm2 save" || true
 # Set up PM2 to start on boot via systemd
 env PATH=$PATH:/usr/bin pm2 startup systemd -u "$GSM_USER" --hp "/home/$GSM_USER" 2>/dev/null || true
 
+# Create a wrapper script so root (and other users) can manage the gsm PM2 instance
+# without needing to `su - gsm` first
+cat > /usr/local/bin/gsm <<'GSMWRAPPER'
+#!/bin/bash
+# GameServer Manager — PM2 helper
+# Runs pm2 commands against the gsm user's PM2 daemon
+GSM_USER="gsm"
+
+case "${1:-}" in
+  status|list|ls)
+    su - "$GSM_USER" -c "pm2 status" ;;
+  logs|log)
+    su - "$GSM_USER" -c "pm2 logs gsm-panel ${*:2}" ;;
+  restart)
+    su - "$GSM_USER" -c "pm2 restart gsm-panel" ;;
+  stop)
+    su - "$GSM_USER" -c "pm2 stop gsm-panel" ;;
+  start)
+    su - "$GSM_USER" -c "pm2 start gsm-panel" ;;
+  reload)
+    su - "$GSM_USER" -c "pm2 reload gsm-panel" ;;
+  monit|monitor)
+    su - "$GSM_USER" -c "pm2 monit" ;;
+  *)
+    echo "GameServer Manager — Panel Management"
+    echo ""
+    echo "Usage: gsm <command>"
+    echo ""
+    echo "Commands:"
+    echo "  status    Show panel process status"
+    echo "  logs      View live panel logs (Ctrl+C to exit)"
+    echo "  restart   Restart the panel"
+    echo "  stop      Stop the panel"
+    echo "  start     Start the panel"
+    echo "  reload    Graceful reload"
+    echo "  monit     Live monitoring dashboard"
+    echo ""
+    echo "Direct PM2 access:  su - gsm -c 'pm2 <command>'"
+    ;;
+esac
+GSMWRAPPER
+chmod +x /usr/local/bin/gsm
+
 ok "PM2 configured — panel running as 'gsm-panel'"
+log "'gsm' command installed — run 'gsm status' from any user"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  STEP 10: Caddy reverse proxy (optional)
@@ -1291,17 +1335,45 @@ else
   ACCESS_URL="http://$SERVER_IP:$PANEL_PORT"
 fi
 
+# ── Post-install connectivity check ───────────────────────────────────────────
+log "Checking panel connectivity..."
+sleep 3
+
+PANEL_LOCAL_OK="false"
+if curl -sf --max-time 5 "http://localhost:$PANEL_PORT/api/health" > /dev/null 2>&1 \
+   || curl -sf --max-time 5 "http://127.0.0.1:$PANEL_PORT/api/health" > /dev/null 2>&1; then
+  PANEL_LOCAL_OK="true"
+fi
+
+# Detect the container/server's LAN IP for the summary
+if [[ -n "${LAN_IP:-}" ]]; then
+  SERVER_LAN_IP="$LAN_IP"
+else
+  SERVER_LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "unknown")
+fi
+
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║${NC}  ${BOLD}🎉  Installation Complete!${NC}                                 ${GREEN}║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  ${BOLD}Panel URL:${NC}       $ACCESS_URL"
+echo -e "  ${BOLD}LAN IP:${NC}          $SERVER_LAN_IP"
+echo -e "  ${BOLD}Local test:${NC}      http://localhost:$PANEL_PORT"
 echo -e "  ${BOLD}Admin User:${NC}      $ADMIN_USER"
 echo -e "  ${BOLD}Admin Email:${NC}     $ADMIN_EMAIL"
 if [[ "$NONINTERACTIVE" == "true" && -n "$ADMIN_PASS" ]]; then
   echo -e "  ${BOLD}Admin Password:${NC}  $ADMIN_PASS"
 fi
+echo ""
+
+if [[ "$PANEL_LOCAL_OK" == "true" ]]; then
+  ok "Panel is running and responding on localhost:$PANEL_PORT"
+else
+  warn "Panel is not responding on localhost:$PANEL_PORT yet"
+  warn "It may still be starting up — check:  gsm logs"
+fi
+
 echo ""
 echo -e "  ${BOLD}Panel Dir:${NC}       $INSTALL_DIR"
 echo -e "  ${BOLD}Database:${NC}        $DB_NAME (user: $DB_USER)"
@@ -1314,11 +1386,13 @@ if [[ "$SETUP_CADDY" == "true" ]]; then
   echo -e "  ${BOLD}Logs (caddy):${NC}    /var/log/caddy/"
 fi
 echo ""
-echo -e "  ${CYAN}Panel management:${NC}"
-echo -e "    pm2 status              # View panel status"
-echo -e "    pm2 logs gsm-panel      # View live logs"
-echo -e "    pm2 restart gsm-panel   # Restart panel"
-echo -e "    pm2 stop gsm-panel      # Stop panel"
+echo -e "  ${CYAN}Panel management (works as any user):${NC}"
+echo -e "    gsm status      # View panel process status"
+echo -e "    gsm logs        # View live logs (Ctrl+C to exit)"
+echo -e "    gsm restart     # Restart the panel"
+echo -e "    gsm stop        # Stop the panel"
+echo -e "    gsm start       # Start the panel"
+echo -e "    gsm monit       # Live monitoring dashboard"
 if [[ "$SKIP_STEAMCMD" != "true" ]]; then
   echo ""
   echo -e "  ${CYAN}SteamCMD usage:${NC}"
@@ -1335,14 +1409,26 @@ if [[ "$SETUP_CADDY" == "true" ]]; then
 fi
 echo ""
 echo -e "  ${CYAN}Update to latest version:${NC}"
-echo -e "    cd $INSTALL_DIR && git pull && npm ci && npx next build && pm2 restart gsm-panel"
+echo -e "    cd $INSTALL_DIR && git pull && npm ci && npx next build && gsm restart"
 echo ""
+
+if [[ "$SETUP_CADDY" == "true" && -n "$DOMAIN" ]]; then
+  echo -e "  ${YELLOW}${BOLD}⚠  Router Port Forwarding Required:${NC}"
+  echo -e "     Forward these ports on your router to ${BOLD}$SERVER_LAN_IP${NC}:"
+  echo -e "       TCP 80   → $SERVER_LAN_IP:80    (Caddy HTTP / ACME challenge)"
+  echo -e "       TCP 443  → $SERVER_LAN_IP:443   (Caddy HTTPS)"
+  echo -e ""
+  echo -e "     Without port forwarding, https://$DOMAIN will show ERR_CONNECTION_REFUSED."
+  echo -e "     On your LAN, you can test directly: http://$SERVER_LAN_IP:$PANEL_PORT"
+  echo ""
+fi
 
 # Save install details to a file for reference
 cat > "$INSTALL_DIR/.install-info" <<INFOEOF
 # GameServer Manager — Install Details
 # Generated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
 PANEL_URL=$ACCESS_URL
+PANEL_LAN_URL=http://$SERVER_LAN_IP:$PANEL_PORT
 ADMIN_USER=$ADMIN_USER
 ADMIN_EMAIL=$ADMIN_EMAIL
 INSTALL_DIR=$INSTALL_DIR
@@ -1350,6 +1436,7 @@ DB_NAME=$DB_NAME
 DB_USER=$DB_USER
 PANEL_PORT=$PANEL_PORT
 DOMAIN=$DOMAIN
+SERVER_LAN_IP=$SERVER_LAN_IP
 REVERSE_PROXY=caddy
 STEAMCMD_DIR=$STEAMCMD_DIR
 GAMESERVERS_DIR=$GAMESERVERS_DIR
