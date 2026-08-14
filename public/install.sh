@@ -181,90 +181,103 @@ log "Detected OS: $OS_ID $OS_VERSION"
 
 # ── LXC / Container network fix ──────────────────────────────────────────────
 # ASUSTOR Linux Center (and some other NAS platforms) run Debian inside LXC
-# containers and inject an internal gateway (e.g. 10.172.5.1 on eth1) that
-# takes priority over the real LAN gateway. This breaks outbound internet
-# access and causes npm/curl/apt to hang or fail.
+# containers and inject an internal gateway (e.g. 10.172.5.1 on eth1) that can
+# steal the default route from the real LAN gateway on eth0.
 #
-# Detect and fix this automatically.
+# For game server hosting and port forwarding, we ALWAYS want the default route
+# to prefer the LAN gateway on eth0.
 if [[ -f /proc/1/environ ]] && grep -qa "container=lxc" /proc/1/environ 2>/dev/null \
    || [[ -f /.dockerenv ]] \
    || grep -qsai "lxc\|docker\|container" /proc/1/cgroup 2>/dev/null; then
-  
+
   IS_CONTAINER="true"
   log "Running inside a container (LXC/Docker detected)"
 
-  # Check for the ASUSTOR-style bad gateway: a default route via 10.x.x.x on
-  # a secondary interface that shadows the real LAN gateway
-  BAD_GW=$(ip route show default 2>/dev/null \
-    | grep -oP 'default via 10\.\d+\.\d+\.\d+ dev eth[1-9]' | head -1 || true)
-  GOOD_GW=$(ip route show default 2>/dev/null \
-    | grep -oP 'default via 192\.168\.\d+\.\d+ dev eth0' | head -1 || true)
+  detect_lan_gateway() {
+    local gw=""
+    local eth0_cidr=""
+    local eth0_ip=""
+    local prefix=""
 
-  if [[ -n "$BAD_GW" ]]; then
-    warn "Detected conflicting container gateway: $BAD_GW"
-
-    if [[ -n "$GOOD_GW" ]]; then
-      log "Good LAN gateway also present: $GOOD_GW"
+    # Best case: a default route already exists via eth0
+    gw=$(ip route show default dev eth0 2>/dev/null | awk '/default via/ {print $3; exit}' || true)
+    if [[ -n "$gw" ]]; then
+      echo "$gw"
+      return 0
     fi
 
-    # Try to reach the internet through the current routing table
-    if ! curl -sf --max-time 5 "https://deb.nodesource.com" > /dev/null 2>&1; then
-      warn "Internet is unreachable — fixing container routing..."
-
-      # Extract the bad gateway IP and interface
-      BAD_GW_IP=$(echo "$BAD_GW" | grep -oP '10\.\d+\.\d+\.\d+' || true)
-      BAD_GW_DEV=$(echo "$BAD_GW" | grep -oP 'eth[1-9]' || true)
-
-      if [[ -n "$BAD_GW_IP" && -n "$BAD_GW_DEV" ]]; then
-        ip route del default via "$BAD_GW_IP" dev "$BAD_GW_DEV" 2>/dev/null || true
-        log "Removed bad gateway: $BAD_GW_IP via $BAD_GW_DEV"
+    # Next best: detect from DHCP lease file if present
+    if [[ -d /var/lib/dhcp ]]; then
+      gw=$(grep -RhoP 'option routers\s+\K[0-9.]+' /var/lib/dhcp 2>/dev/null | head -1 || true)
+      if [[ -n "$gw" ]]; then
+        echo "$gw"
+        return 0
       fi
+    fi
 
-      # If no good gateway exists, try to detect the LAN gateway from eth0
-      if [[ -z "$GOOD_GW" ]]; then
-        ETH0_GW=$(ip route show 2>/dev/null \
-          | grep -oP '\d+\.\d+\.\d+\.\d+' \
-          | grep -E '^192\.168\.|^10\.0\.|^172\.(1[6-9]|2[0-9]|3[01])\.' \
-          | head -1 || true)
-        if [[ -n "$ETH0_GW" ]]; then
-          ip route add default via "$ETH0_GW" dev eth0 2>/dev/null || true
-          log "Added LAN gateway: $ETH0_GW via eth0"
-        fi
-      fi
+    # Last resort: guess x.x.x.1 from eth0 private RFC1918 address
+    eth0_cidr=$(ip -4 -o addr show dev eth0 2>/dev/null | awk '{print $4}' | head -1 || true)
+    eth0_ip=${eth0_cidr%/*}
+    if [[ -n "$eth0_ip" && "$eth0_ip" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+      prefix="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+      echo "${prefix}.1"
+      return 0
+    fi
 
-      # Verify the fix worked
-      sleep 2
-      if curl -sf --max-time 5 "https://deb.nodesource.com" > /dev/null 2>&1; then
-        ok "Container networking fixed — internet is reachable"
+    return 1
+  }
 
-        # Install the persistent fix as a systemd service
-        if command -v systemctl &>/dev/null; then
-          log "Installing persistent routing fix for container reboots..."
+  LAN_GW=$(detect_lan_gateway || true)
+  BAD_GW=$(ip route show default 2>/dev/null | grep -oP 'default via 10\.\d+\.\d+\.\d+ dev eth[1-9]' | head -1 || true)
 
-          cat > /usr/local/bin/fix-container-routing.sh <<'ROUTEFIX'
-#!/bin/bash
-# Fix ASUSTOR/NAS Linux Center container default gateway conflict
-# Installed by GameServer Manager installer
-sleep 10
-# Remove any 10.x.x.x default routes on secondary interfaces
-for route in $(ip route show default 2>/dev/null | grep -oP 'default via 10\.\d+\.\d+\.\d+ dev eth[1-9]'); do
-  GW_IP=$(echo "$route" | grep -oP '10\.\d+\.\d+\.\d+')
-  GW_DEV=$(echo "$route" | grep -oP 'eth[1-9]')
-  ip route del default via "$GW_IP" dev "$GW_DEV" 2>/dev/null || true
-done
-# Ensure a default route exists via eth0
-if ! ip route show default | grep -q 'dev eth0'; then
-  GATEWAY=$(ip route show 2>/dev/null | grep -oP 'default via \S+' | head -1 | awk '{print $3}')
-  if [ -n "$GATEWAY" ]; then
-    ip route add default via "$GATEWAY" dev eth0 2>/dev/null || true
+  if [[ -n "$BAD_GW" ]]; then
+    warn "Detected conflicting secondary default route: $BAD_GW"
   fi
+
+  if [[ -n "$LAN_GW" ]]; then
+    log "Preferred LAN gateway: $LAN_GW via eth0"
+
+    # Force the LAN gateway to be the default route.
+    ip route replace default via "$LAN_GW" dev eth0 metric 10 2>/dev/null || true
+
+    # Remove any competing defaults on secondary interfaces (eth1, eth2, ...)
+    while read -r _ _ via _ dev _; do
+      if [[ -n "${via:-}" && -n "${dev:-}" && "$dev" != "eth0" ]]; then
+        ip route del default via "$via" dev "$dev" 2>/dev/null || true
+      fi
+    done < <(ip route show default 2>/dev/null || true)
+
+    # Re-assert eth0 as default once more after cleanup
+    ip route replace default via "$LAN_GW" dev eth0 metric 10 2>/dev/null || true
+
+    # Install the persistent fix as a systemd service so container reboots keep
+    # the LAN gateway as the default route.
+    if command -v systemctl &>/dev/null; then
+      log "Installing persistent routing fix for container reboots..."
+
+      cat > /usr/local/bin/fix-container-routing.sh <<ROUTEFIX
+#!/bin/bash
+# Force LAN gateway on eth0 for ASUSTOR/NAS Linux Center containers
+sleep 10
+LAN_GW="$LAN_GW"
+
+# Remove any default routes on secondary interfaces
+while read -r _ _ via _ dev _; do
+  if [[ -n "\${via:-}" && -n "\${dev:-}" && "\$dev" != "eth0" ]]; then
+    ip route del default via "\$via" dev "\$dev" 2>/dev/null || true
+  fi
+done < <(ip route show default 2>/dev/null || true)
+
+# Always force eth0 to own the default route for LAN / port forwarding
+if [[ -n "\$LAN_GW" ]]; then
+  ip route replace default via "\$LAN_GW" dev eth0 metric 10 2>/dev/null || true
 fi
 ROUTEFIX
-          chmod +x /usr/local/bin/fix-container-routing.sh
+      chmod +x /usr/local/bin/fix-container-routing.sh
 
-          cat > /etc/systemd/system/fix-container-routing.service <<'ROUTESVC'
+      cat > /etc/systemd/system/fix-container-routing.service <<'ROUTESVC'
 [Unit]
-Description=Fix container default gateway conflict (ASUSTOR/NAS LXC)
+Description=Force LAN gateway on eth0 for LXC container networking
 After=network.target
 
 [Service]
@@ -276,19 +289,19 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 ROUTESVC
 
-          systemctl daemon-reload 2>/dev/null || true
-          systemctl enable fix-container-routing.service 2>/dev/null || true
-          ok "Persistent routing fix installed (survives reboots)"
-        fi
-      else
-        warn "Routing fix did not restore internet access"
-        warn "You may need to manually configure your container's network"
-        warn "Current routing table:"
-        ip route show 2>/dev/null || true
-      fi
-    else
-      log "Internet is reachable despite container gateway — no fix needed"
+      systemctl daemon-reload 2>/dev/null || true
+      systemctl enable fix-container-routing.service 2>/dev/null || true
+      ok "Persistent routing fix installed (LAN gateway always preferred)"
     fi
+
+    # Quick verification output for admins
+    log "Current default route(s):"
+    ip route show default 2>/dev/null || true
+  else
+    warn "Could not detect a LAN gateway on eth0 automatically"
+    warn "Container install will continue, but you may need to create a manual routing override"
+    warn "Current routing table:"
+    ip route show 2>/dev/null || true
   fi
 else
   IS_CONTAINER="false"

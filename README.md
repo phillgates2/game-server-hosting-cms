@@ -8,17 +8,18 @@ Built with **Next.js 16**, **PostgreSQL**, **Drizzle ORM**, and **Tailwind CSS**
 
 ## ⚡ One-Liner Install
 
-Run this on a fresh **Ubuntu 22.04+** or **Debian 12+** server:
+Run this on a fresh **Ubuntu 22.04+** or **Debian 12+** server (bare-metal, VM, or LXC container):
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/public/install.sh)
 ```
 
 The interactive installer will:
-- Prompt for admin credentials
+- Detect and fix LXC container networking (ASUSTOR, Proxmox, etc.)
 - Install **Node.js 22**, **PostgreSQL**, **PM2**
 - Install **SteamCMD** with 32-bit libraries for Steam game servers
 - Set up the panel with automatic database configuration
+- Open firewall ports for every supported game template
 - Optionally configure **Caddy** for automatic HTTPS
 
 ### Non-Interactive Install
@@ -57,6 +58,45 @@ bash <(curl -fsSL https://raw.githubusercontent.com/phillgates2/game-server-host
 
 ---
 
+## 🐳 LXC / Container Support
+
+The installer automatically detects LXC and Docker containers and fixes a common networking issue found on **ASUSTOR Linux Center**, **Proxmox**, and similar NAS/hypervisor platforms.
+
+### The Problem
+
+NAS platforms like ASUSTOR inject an internal gateway (e.g. `10.172.5.1` on `eth1`) into the container's routing table at boot. This internal route can shadow the real LAN gateway on `eth0`, which breaks:
+- Outbound internet access (package installs, git clone, etc.)
+- **Inbound port forwarding** from your router to game servers
+
+### What the Installer Does
+
+1. **Detects the container** — checks `/proc/1/environ`, `/.dockerenv`, and cgroup markers
+2. **Finds the LAN gateway** — from existing `eth0` route, DHCP lease, or subnet guessing
+3. **Forces `eth0` as default** — `ip route replace default via <LAN_GW> dev eth0 metric 10`
+4. **Removes competing routes** — strips all secondary-interface default routes (`eth1`, `eth2`, etc.)
+5. **Installs a persistent systemd service** — so the fix survives container reboots
+
+### Persistent Boot Fix
+
+The installer creates:
+- `/usr/local/bin/fix-container-routing.sh` — runs at boot with a 10-second delay (waits for the NAS platform to finish injecting routes, then overrides them)
+- `/etc/systemd/system/fix-container-routing.service` — systemd oneshot service enabled on `multi-user.target`
+
+### Manual Fix (if not using the installer)
+
+```bash
+# See current routes
+ip route show default
+
+# Remove the internal gateway
+sudo ip route del default via 10.172.5.1 dev eth1
+
+# Force your LAN router as default
+sudo ip route replace default via 192.168.50.1 dev eth0 metric 10
+```
+
+---
+
 ## 🎮 SteamCMD
 
 The installer automatically sets up [SteamCMD](https://developer.valvesoftware.com/wiki/SteamCMD) for downloading and updating Steam-based game servers.
@@ -64,7 +104,7 @@ The installer automatically sets up [SteamCMD](https://developer.valvesoftware.c
 ### What's Installed
 
 - **SteamCMD** at `/opt/steamcmd`
-- **32-bit libraries** (`lib32gcc-s1`, `lib32stdc++6`, `libc6-i386`)
+- **32-bit libraries** (`lib32gcc-s1`, `lib32stdc++6`)
 - **Helper script** for easy game installation
 - **Symlink** at `/usr/local/bin/steamcmd`
 
@@ -140,6 +180,73 @@ journalctl -u caddy             # View logs
 
 ---
 
+## 🔥 Automatic Firewall Management
+
+### Installer — Opens All Game Ports
+
+The installer detects your SSH port (including non-standard ports) and allows it **before** enabling UFW. It then opens TCP+UDP for every game in the template library:
+
+| Port | Protocol | Service |
+|------|----------|---------|
+| Auto-detected | TCP | SSH (reads `sshd_config` + active session) |
+| 80 | TCP | HTTP (Caddy) |
+| 443 | TCP | HTTPS (Caddy) |
+| 3000 | TCP | Panel (if no Caddy) |
+| 25565 | TCP/UDP | Minecraft Java |
+| 19132 | UDP | Minecraft Bedrock |
+| 27015–27030 | TCP/UDP | Source engine (CS2, TF2, GMod, L4D2) |
+| 28015 | TCP/UDP | Rust |
+| 28016 | TCP | Rust RCON |
+| 7777–7778 | TCP/UDP | ARK / Satisfactory / Terraria |
+| 15000 | UDP | Satisfactory beacon |
+| 2456–2458 | TCP/UDP | Valheim |
+| 26900–26902 | TCP/UDP | 7 Days to Die |
+| 8211 | TCP/UDP | Palworld |
+| 15636–15637 | TCP/UDP | Enshrouded |
+| 27102 | TCP/UDP | Insurgency: Sandstorm |
+| 27131 | UDP | Insurgency query |
+| 7787 | TCP/UDP | Squad |
+| 2302–2306 | UDP | Arma 3 |
+| 27960 | TCP/UDP | ET: Legacy / Quake Live |
+| 1234 | TCP/UDP | OpenRA |
+| 26000 | TCP/UDP | Xonotic |
+| 9876–9877 | TCP/UDP | V Rising |
+| 16261–16262 | TCP/UDP | Project Zomboid |
+| 34197 | UDP | Factorio |
+| 10999–11000 | UDP | Don't Starve Together |
+| 9600 | TCP/UDP | Assetto Corsa |
+
+> If UFW is not available (e.g. some LXC containers), the firewall step is skipped with a warning.
+
+### Runtime — Dynamic Port Management
+
+When you create, update, or delete game servers through the panel, firewall rules are **automatically managed**:
+
+- **Create server** → `ufw allow <port>/tcp` + `ufw allow <port>/udp` (game port, query port, RCON port)
+- **Change server port** → old port rules removed, new port rules added
+- **Delete server** → port rules cleaned up
+
+Each rule is tagged with `GSM:<serverId> <serverName>` so `ufw status` shows which server owns which port.
+
+### Firewall API
+
+Admins can view and manage firewall rules from the panel:
+
+```
+GET  /api/firewall          # View UFW status + panel-managed rules
+POST /api/firewall          # Manually allow/deny a port
+     { "action": "allow", "port": 27015, "comment": "My server" }
+```
+
+To open additional ports manually:
+
+```bash
+sudo ufw allow 12345/tcp
+sudo ufw allow 12345/udp
+```
+
+---
+
 ## 🧰 Management Commands
 
 ### Panel
@@ -199,6 +306,8 @@ sudo bash /opt/gsm-panel/public/uninstall.sh --purge --keep-servers
 | 🎨 **Themes** | 5 built-in themes + custom theme editor |
 | 🌐 **IPv6** | Full IPv6 support for servers and nodes |
 | 🛡️ **Install Wizard** | Web-based first-run setup |
+| 🔥 **Auto Firewall** | Ports opened/closed automatically when servers are created/deleted |
+| 🐳 **LXC/Container Support** | Auto-fixes NAS container networking for port forwarding |
 
 ---
 
@@ -244,7 +353,8 @@ Then visit `http://your-server:3000` to complete setup via the install wizard.
 
 | Requirement | Minimum |
 |-------------|---------|
-| OS | Ubuntu 22.04+ / Debian 12+ |
+| OS | Ubuntu 22.04+ / Debian 12+ (incl. Debian 13 Trixie) |
+| Platform | Bare-metal, VM, LXC container (ASUSTOR, Proxmox, etc.) |
 | Node.js | 22.x |
 | PostgreSQL | 14+ |
 | RAM | 2 GB (more for game servers) |
@@ -270,46 +380,23 @@ Then visit `http://your-server:3000` to complete setup via the install wizard.
 
 ---
 
-## 🔥 Firewall Ports
+## 🐞 Installer Debug Logs
 
-The installer automatically detects your SSH port (including non-standard ports) and allows it **before** enabling UFW, so you'll never be locked out. It then opens ports for every game in the template library:
+If the installer fails at any step, check these log files on the server:
 
-| Port | Protocol | Service |
-|------|----------|---------|
-| Auto-detected | TCP | SSH (reads from `sshd_config` + active session) |
-| 80 | TCP | HTTP (Caddy) |
-| 443 | TCP | HTTPS (Caddy) |
-| 3000 | TCP | Panel (if no Caddy) |
-| 25565 | TCP/UDP | Minecraft Java |
-| 19132 | UDP | Minecraft Bedrock |
-| 27015-27030 | TCP/UDP | Source engine (CS2, TF2, GMod, L4D2) |
-| 28015 | TCP/UDP | Rust |
-| 28016 | TCP | Rust RCON |
-| 7777-7778 | TCP/UDP | ARK / Satisfactory / Terraria |
-| 15000 | UDP | Satisfactory beacon |
-| 2456-2458 | TCP/UDP | Valheim |
-| 26900-26902 | TCP/UDP | 7 Days to Die |
-| 8211 | TCP/UDP | Palworld |
-| 15636-15637 | TCP/UDP | Enshrouded |
-| 27102 | TCP/UDP | Insurgency: Sandstorm |
-| 27131 | UDP | Insurgency query |
-| 7787 | TCP/UDP | Squad |
-| 2302-2306 | UDP | Arma 3 |
-| 27960 | TCP/UDP | ET: Legacy / Quake Live |
-| 1234 | TCP/UDP | OpenRA |
-| 26000 | TCP/UDP | Xonotic |
-| 9876-9877 | TCP/UDP | V Rising |
-| 16261-16262 | TCP/UDP | Project Zomboid |
-| 34197 | UDP | Factorio |
-| 10999-11000 | UDP | Don't Starve Together |
-| 9600 | TCP/UDP | Assetto Corsa |
-
-To open additional ports:
-
-```bash
-sudo ufw allow 12345/tcp
-sudo ufw allow 12345/udp
-```
+| File | Step |
+|------|------|
+| `/tmp/gsm-apt-core.log` | System packages |
+| `/tmp/gsm-nodesource.log` | Node.js repo setup |
+| `/tmp/gsm-nodejs-install.log` | Node.js installation |
+| `/tmp/gsm-pm2-install.log` | PM2 installation |
+| `/tmp/gsm-postgresql-install.log` | PostgreSQL installation |
+| `/tmp/gsm-steamlibs.log` | SteamCMD 32-bit libraries |
+| `/tmp/gsm-npm-install.log` | npm dependencies |
+| `/tmp/gsm-drizzle-push.log` | Database schema push |
+| `/tmp/gsm-next-build.log` | Next.js production build |
+| `/tmp/gsm-caddy-install.log` | Caddy installation |
+| `/tmp/gsm-temp-server.log` | Temporary server (install API) |
 
 ---
 
