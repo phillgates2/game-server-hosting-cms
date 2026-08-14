@@ -1,7 +1,6 @@
 "use client";
 
 import { Suspense, useEffect, useState, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import InstallWizard from "@/components/InstallWizard";
 import LoginForm from "@/components/LoginForm";
@@ -20,10 +19,8 @@ interface AuthUser {
 }
 
 function HomeContent() {
-  const searchParams = useSearchParams();
   const [state, setState] = useState<AppState>("loading");
   const [user, setUser] = useState<AuthUser | null>(null);
-  const forceFrontpage = searchParams.get("view") === "frontpage";
 
   const checkStatus = useCallback(async () => {
     try {
@@ -33,34 +30,24 @@ function HomeContent() {
       if (!installData.installed) { setState("install"); return; }
 
       // Installed — check if user is logged in
-      let meUser: AuthUser | null = null;
       const meRes = await fetch("/api/auth/me");
       if (meRes.ok) {
         const meData = await meRes.json();
         if (meData.user) {
-          meUser = meData.user as AuthUser;
-          setUser(meUser);
+          setUser(meData.user as AuthUser);
         }
       } else {
         setUser(null);
       }
 
-      if (forceFrontpage) {
-        setState("public");
-        return;
-      }
-
-      if (meUser) {
-        setState("dashboard");
-        return;
-      }
-
-      // Not logged in — show public site
+      // Always show the public site — users click "Control Panel" to
+      // enter the dashboard.  This keeps the public homepage as the
+      // default landing page for everyone.
       setState("public");
     } catch {
       setState("install");
     }
-  }, [forceFrontpage]);
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -74,11 +61,13 @@ function HomeContent() {
       const meRes = await fetch("/api/auth/me");
       if (meRes.ok) {
         const meData = await meRes.json();
-        if (meData.user) { setUser(meData.user); setState("dashboard"); return; }
+        if (meData.user) { setUser(meData.user); setState("public"); return; }
       }
     } catch { /* fall through */ }
     setUser(u);
-    setState("dashboard");
+    // Stay on the public site after login — user clicks "Control Panel"
+    // when they're ready to manage servers
+    setState("public");
   }
 
   function handleLogout() {
@@ -104,7 +93,7 @@ function HomeContent() {
   }
 
   if (state === "dashboard" && user) {
-    return <ErrorBoundary name="Dashboard"><Dashboard user={user} onLogout={handleLogout} /></ErrorBoundary>;
+    return <ErrorBoundary name="Dashboard"><Dashboard user={user} onLogout={handleLogout} onGoHome={() => setState("public")} /></ErrorBoundary>;
   }
 
   return (

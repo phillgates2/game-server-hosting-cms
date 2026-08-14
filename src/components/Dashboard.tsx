@@ -23,14 +23,14 @@ import LadderPanel from "./panels/LadderPanel";
 import { ThemeToggleButton } from "./ThemeToggle";
 import { NotificationBell } from "./NotificationCenter";
 import { LanguageSelector } from "@/lib/i18n";
-import Link from "next/link";
+
 import { useRouter } from "next/navigation";
 
 interface AuthUser {
   id: number; username: string; role: string;
   roleName?: string; roleColor?: string; roleIcon?: string;
 }
-interface Props { user: AuthUser; onLogout: () => void }
+interface Props { user: AuthUser; onLogout: () => void; onGoHome?: () => void }
 
 type Tab = "overview" | "servers" | "files" | "rcon" | "nodes" | "games" | "audit" | "monitor" | "forum" | "cms" | "ladder" | "users" | "roles" | "profile" | "database" | "activity" | "scheduler" | "apikeys";
 
@@ -80,7 +80,7 @@ const TAB_META: Record<Tab, { title: string; subtitle: string }> = {
     apikeys: { title: "API Keys", subtitle: "Generate personal keys for external tools and scripts." },
   };
 
-export default function Dashboard({ user, onLogout }: Props) {
+export default function Dashboard({ user, onLogout, onGoHome }: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("overview");
   const [openGroup, setOpenGroup] = useState<string | null>(null);
@@ -171,7 +171,7 @@ export default function Dashboard({ user, onLogout }: Props) {
     }));
     const extras = [
       { id: "logout", icon: "🚪", title: "Log out", subtitle: "Return to the public site.", section: "Account", shortcut: undefined, action: () => { setPaletteOpen(false); handleLogout(); } },
-      { id: "go-home", icon: "🏠", title: "Homepage", subtitle: "Open the public frontpage.", section: "Navigation", shortcut: undefined, action: () => { setPaletteOpen(false); router.push("/?view=frontpage#frontpage"); } },
+      { id: "go-home", icon: "🏠", title: "Homepage", subtitle: "Open the public frontpage.", section: "Navigation", shortcut: undefined, action: () => { setPaletteOpen(false); if (onGoHome) onGoHome(); else router.push("/"); } },
     ];
     const all = [...base, ...extras];
     const q = paletteQuery.trim().toLowerCase();
@@ -264,7 +264,7 @@ export default function Dashboard({ user, onLogout }: Props) {
                     )}
                   </div>
                 ))}
-                <Link href="/?view=frontpage#frontpage" className="nav-button gaming-chip menu-chip-opaque px-3 py-2 rounded-lg text-xs uppercase tracking-[0.14em] text-text-secondary hover:text-text-primary">Frontpage</Link>
+                <button onClick={onGoHome || (() => router.push("/"))} className="nav-button gaming-chip menu-chip-opaque px-3 py-2 rounded-lg text-xs uppercase tracking-[0.14em] text-text-secondary hover:text-text-primary">Frontpage</button>
               </nav>
 
               <div className="flex items-center gap-2">

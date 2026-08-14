@@ -61,6 +61,16 @@ All notable changes to GameServer Manager are documented here.
 - **Improved error output** — all steps log to `/tmp/gsm-*.log` files; failures display the last 20–40 lines of the relevant log instead of failing silently.
 - **Temp server fix** — uses `npx next start` instead of `node .next/standalone/server.js`; health check tries both `127.0.0.1` and `localhost`; 3-second startup delay; proper cleanup with `fuser -k`.
 
+### 🔄 Updater Script
+- **One-liner updater** — `bash <(curl -fsSL .../update.sh)` or `gsm update` to update the panel to the latest version.
+- **Pre-update backup** — automatically backs up `.env`, `drizzle.config.json`, `ecosystem.config.cjs`, `.install-info`, current git commit, and a full `pg_dump` of the database before updating.
+- **Backup rotation** — keeps the last 5 backups in `/opt/gsm-panel-backups/`, prunes older ones automatically.
+- **Rollback** — `update.sh --rollback` restores the last backup including config files and git checkout.
+- **Changelog preview** — shows new commits before applying the update.
+- **Branch support** — `--branch staging` to pull from a non-default branch.
+- **Health check** — verifies the panel responds on `/api/health` after restart.
+- **`gsm update` command** — added to the `gsm` wrapper so `gsm update` works from any user.
+
 ### 🔧 Install Wizard Fix
 - **Fixed `POST /api/install` crash** — the settings table query that checks if the panel is already installed now has a try-catch wrapper, so the install wizard works on a completely fresh database where tables don't exist yet.
 

@@ -272,13 +272,47 @@ pm2 stop gsm-panel      # Stop panel
 
 ### Update to Latest Version
 
+One-liner (from any server):
 ```bash
-cd /opt/gsm-panel
-git pull
-npm ci
-npx next build
-pm2 restart gsm-panel
+bash <(curl -fsSL https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/public/update.sh)
 ```
+
+Or use the `gsm` command:
+```bash
+gsm update
+```
+
+Or from the install directory:
+```bash
+sudo bash /opt/gsm-panel/public/update.sh
+```
+
+The updater will:
+1. **Backup** — saves `.env`, configs, database dump, and current git commit
+2. **Pull** — fetches latest code from GitHub
+3. **Install** — runs `npm ci` with devDependencies
+4. **Migrate** — applies any new database schema changes via `drizzle-kit push`
+5. **Build** — runs `npx next build`
+6. **Prune** — removes devDependencies after build
+7. **Restart** — restarts via PM2 and verifies health check
+
+### Updater Options
+
+| Flag | Description |
+|------|-------------|
+| `--force` | Skip confirmation prompts |
+| `--no-backup` | Skip pre-update backup |
+| `--branch NAME` | Pull from a specific branch (default: `main`) |
+| `--rollback` | Restore the last backup |
+
+### Rollback
+
+If an update breaks something:
+```bash
+sudo bash /opt/gsm-panel/public/update.sh --rollback
+```
+
+This restores the `.env`, configs, and git commit from the last backup. Backups include a full database dump. The last 5 backups are kept automatically.
 
 ### Uninstall
 

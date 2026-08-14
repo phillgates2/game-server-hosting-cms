@@ -1068,6 +1068,9 @@ case "${1:-}" in
     su - "$GSM_USER" -c "pm2 logs gsm-panel ${*:2}" ;;
   restart)
     su - "$GSM_USER" -c "pm2 restart gsm-panel" ;;
+  update)
+    bash "$0/../public/update.sh" ${@:2} 2>/dev/null \
+      || bash /opt/gsm-panel/public/update.sh ${@:2} ;;
   stop)
     su - "$GSM_USER" -c "pm2 stop gsm-panel" ;;
   start)
@@ -1088,6 +1091,7 @@ case "${1:-}" in
     echo "  stop      Stop the panel"
     echo "  start     Start the panel"
     echo "  reload    Graceful reload"
+    echo "  update    Update panel to latest version"
     echo "  monit     Live monitoring dashboard"
     echo ""
     echo "Direct PM2 access:  su - gsm -c 'pm2 <command>'"
