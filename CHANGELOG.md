@@ -8,10 +8,11 @@ All notable changes to GameServer Manager are documented here.
 
 ### 🐳 LXC / Container Support
 - **Auto-detect LXC and Docker containers** at install time via `/proc/1/environ`, `/.dockerenv`, and cgroup markers.
-- **Force LAN gateway on `eth0`** — the installer now always prefers the LAN gateway for the container's default route, ensuring port forwarding from your router works correctly.
-- **Remove conflicting internal gateways** — strips secondary-interface default routes (`eth1`, `eth2`, etc.) injected by ASUSTOR Linux Center and similar NAS platforms (e.g. `10.172.5.1 via eth1`).
+- **Subnet-scored interface detection** — scans all interfaces and scores them by IP range: `192.168.x.x` (100), `172.16–31.x.x` (80), general `10.x.x.x` (30), `10.0.3.x` LXC bridge (5), `10.172.x.x` ASUSTOR internal (2). Picks the highest-scoring interface as the real LAN — works correctly even when the LAN is on `eth1` (ASUSTOR) instead of `eth0`.
+- **Force LAN gateway** — always sets the detected LAN interface as the default route (`metric 10`), regardless of which `ethN` device it's on, ensuring port forwarding from your router works correctly.
+- **Remove conflicting internal gateways** — strips default routes on every interface except the detected LAN device, including ASUSTOR's injected `10.172.5.1` management gateway.
 - **Persistent boot fix** — installs a systemd oneshot service (`fix-container-routing.service`) that re-applies the LAN gateway preference on every container reboot, with a 10-second delay to let the host platform finish its own network setup first.
-- **Smart gateway detection** — finds the correct LAN gateway from existing `eth0` routes, DHCP lease files, or subnet-based guessing (`x.x.x.1`).
+- **Internet verification** — tests outbound connectivity after applying the routing fix and warns if the internet is still unreachable.
 
 ### 🔥 Automatic Firewall Management
 - **Dynamic port rules** — creating a game server now automatically opens its game port, query port, and RCON port in UFW (TCP + UDP). Deleting a server removes the rules. Changing a server's port updates the rules.

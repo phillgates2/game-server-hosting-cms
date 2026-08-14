@@ -64,17 +64,26 @@ The installer automatically detects LXC and Docker containers and fixes a common
 
 ### The Problem
 
-NAS platforms like ASUSTOR inject an internal gateway (e.g. `10.172.5.1` on `eth1`) into the container's routing table at boot. This internal route can shadow the real LAN gateway on `eth0`, which breaks:
-- Outbound internet access (package installs, git clone, etc.)
-- **Inbound port forwarding** from your router to game servers
+NAS platforms like ASUSTOR inject internal gateways (e.g. `10.172.5.1`) into the container's routing table at boot. The real LAN interface can be on **any** interface — not necessarily `eth0`. For example, on ASUSTOR:
+- `eth0` = `10.0.3.x` (LXC internal bridge — **not** the real LAN)
+- `eth1` = `192.168.50.x` (your real LAN, bridged to your physical NIC)
+- ASUSTOR injects `10.172.5.1` as a default via `eth1` (internal management)
+
+This breaks both outbound internet access and **inbound port forwarding** from your router to game servers.
 
 ### What the Installer Does
 
 1. **Detects the container** — checks `/proc/1/environ`, `/.dockerenv`, and cgroup markers
-2. **Finds the LAN gateway** — from existing `eth0` route, DHCP lease, or subnet guessing
-3. **Forces `eth0` as default** — `ip route replace default via <LAN_GW> dev eth0 metric 10`
-4. **Removes competing routes** — strips all secondary-interface default routes (`eth1`, `eth2`, etc.)
-5. **Installs a persistent systemd service** — so the fix survives container reboots
+2. **Scans all interfaces** — enumerates every interface's IP and scores them:
+   - `192.168.x.x` → score 100 (home/office LAN)
+   - `172.16–31.x.x` → score 80 (corporate LAN)
+   - `10.x.x.x` → score 30 (possible LAN, but could be internal)
+   - `10.0.3.x` → score 5 (LXC bridge — almost never the real LAN)
+   - `10.172.x.x` → score 2 (ASUSTOR internal — never the real LAN)
+3. **Picks the highest-scoring interface** as the LAN device
+4. **Forces that interface as default** — `ip route replace default via <GATEWAY> dev <LAN_DEV> metric 10`
+5. **Removes competing default routes** on every other interface
+6. **Installs a persistent systemd service** — so the fix survives container reboots
 
 ### Persistent Boot Fix
 
@@ -85,14 +94,15 @@ The installer creates:
 ### Manual Fix (if not using the installer)
 
 ```bash
-# See current routes
+# See current routes and interfaces
+ip -4 -o addr show
 ip route show default
 
-# Remove the internal gateway
+# Remove the internal gateway (adjust IPs for your setup)
 sudo ip route del default via 10.172.5.1 dev eth1
 
-# Force your LAN router as default
-sudo ip route replace default via 192.168.50.1 dev eth0 metric 10
+# Force your LAN router as default (adjust interface + IP)
+sudo ip route replace default via 192.168.50.1 dev eth1 metric 10
 ```
 
 ---

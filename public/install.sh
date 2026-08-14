@@ -181,11 +181,13 @@ log "Detected OS: $OS_ID $OS_VERSION"
 
 # ── LXC / Container network fix ──────────────────────────────────────────────
 # ASUSTOR Linux Center (and some other NAS platforms) run Debian inside LXC
-# containers and inject an internal gateway (e.g. 10.172.5.1 on eth1) that can
-# steal the default route from the real LAN gateway on eth0.
+# containers with multiple interfaces.  The real LAN (for port forwarding)
+# can be on ANY interface — not necessarily eth0.  ASUSTOR also injects an
+# internal management gateway that can steal the default route.
 #
-# For game server hosting and port forwarding, we ALWAYS want the default route
-# to prefer the LAN gateway on eth0.
+# Strategy: find the interface carrying a routable private IP on the same
+# subnet as the physical LAN router (usually 192.168.x.x or a user-chosen
+# subnet), make THAT the default route, and remove everything else.
 if [[ -f /proc/1/environ ]] && grep -qa "container=lxc" /proc/1/environ 2>/dev/null \
    || [[ -f /.dockerenv ]] \
    || grep -qsai "lxc\|docker\|container" /proc/1/cgroup 2>/dev/null; then
@@ -193,92 +195,137 @@ if [[ -f /proc/1/environ ]] && grep -qa "container=lxc" /proc/1/environ 2>/dev/n
   IS_CONTAINER="true"
   log "Running inside a container (LXC/Docker detected)"
 
-  detect_lan_gateway() {
-    local gw=""
-    local eth0_cidr=""
-    local eth0_ip=""
-    local prefix=""
+  # ── Find the real LAN interface and gateway ────────────────────────────────
+  # We score each interface.  192.168.x.x and 172.16-31.x.x score highest
+  # because they are almost always the home/office LAN.  10.x.x.x scores
+  # lower because NAS platforms use 10.0.3.x (LXC bridge) and 10.172.x.x
+  # (internal management) — both of which are NOT the real LAN.
+  LAN_DEV=""
+  LAN_GW=""
+  LAN_IP=""
+  BEST_SCORE=0
 
-    # Best case: a default route already exists via eth0
-    gw=$(ip route show default dev eth0 2>/dev/null | awk '/default via/ {print $3; exit}' || true)
-    if [[ -n "$gw" ]]; then
-      echo "$gw"
-      return 0
-    fi
+  while IFS= read -r line; do
+    iface=$(echo "$line" | awk '{print $2}' | tr -d ':' || true)
+    cidr=$(echo "$line" | awk '{print $4}' || true)
+    ip_addr=${cidr%/*}
 
-    # Next best: detect from DHCP lease file if present
-    if [[ -d /var/lib/dhcp ]]; then
-      gw=$(grep -RhoP 'option routers\s+\K[0-9.]+' /var/lib/dhcp 2>/dev/null | head -1 || true)
-      if [[ -n "$gw" ]]; then
-        echo "$gw"
-        return 0
+    [[ -z "$ip_addr" || -z "$iface" ]] && continue
+    # Skip loopback
+    [[ "$iface" == "lo" ]] && continue
+
+    score=0
+    # 192.168.x.x — almost always the real home/office LAN
+    if [[ "$ip_addr" =~ ^192\.168\. ]]; then
+      score=100
+    # 172.16-31.x.x — common corporate/prosumer LAN
+    elif [[ "$ip_addr" =~ ^172\.(1[6-9]|2[0-9]|3[01])\. ]]; then
+      score=80
+    # 10.x.x.x — could be LAN but also could be LXC bridge or NAS internal
+    elif [[ "$ip_addr" =~ ^10\. ]]; then
+      # 10.0.3.x is the standard LXC bridge — very low score
+      if [[ "$ip_addr" =~ ^10\.0\.3\. ]]; then
+        score=5
+      # 10.172.x.x is ASUSTOR internal — very low score
+      elif [[ "$ip_addr" =~ ^10\.172\. ]]; then
+        score=2
+      else
+        score=30
       fi
     fi
 
-    # Last resort: guess x.x.x.1 from eth0 private RFC1918 address
-    eth0_cidr=$(ip -4 -o addr show dev eth0 2>/dev/null | awk '{print $4}' | head -1 || true)
-    eth0_ip=${eth0_cidr%/*}
-    if [[ -n "$eth0_ip" && "$eth0_ip" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-      prefix="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
-      echo "${prefix}.1"
-      return 0
+    if [[ $score -gt $BEST_SCORE ]]; then
+      BEST_SCORE=$score
+      LAN_DEV="$iface"
+      LAN_IP="$ip_addr"
+      # Guess gateway as x.x.x.1
+      if [[ "$ip_addr" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
+        LAN_GW="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.1"
+      fi
     fi
+  done < <(ip -4 -o addr show 2>/dev/null || true)
 
-    return 1
-  }
-
-  LAN_GW=$(detect_lan_gateway || true)
-  BAD_GW=$(ip route show default 2>/dev/null | grep -oP 'default via 10\.\d+\.\d+\.\d+ dev eth[1-9]' | head -1 || true)
-
-  if [[ -n "$BAD_GW" ]]; then
-    warn "Detected conflicting secondary default route: $BAD_GW"
+  # Override gateway guess with an existing default route on the chosen device
+  if [[ -n "$LAN_DEV" ]]; then
+    EXISTING_GW=$(ip route show default dev "$LAN_DEV" 2>/dev/null \
+      | awk '/default via/ {print $3; exit}' || true)
+    if [[ -n "$EXISTING_GW" ]]; then
+      LAN_GW="$EXISTING_GW"
+    fi
   fi
 
-  if [[ -n "$LAN_GW" ]]; then
-    log "Preferred LAN gateway: $LAN_GW via eth0"
+  # Also check DHCP leases for a router option
+  if [[ -z "$LAN_GW" && -d /var/lib/dhcp ]]; then
+    LAN_GW=$(grep -RhoP 'option routers\s+\K[0-9.]+' /var/lib/dhcp 2>/dev/null | head -1 || true)
+  fi
 
-    # Force the LAN gateway to be the default route.
-    ip route replace default via "$LAN_GW" dev eth0 metric 10 2>/dev/null || true
+  # Show what we found
+  if [[ -n "$LAN_DEV" && -n "$LAN_GW" ]]; then
+    log "Detected LAN: $LAN_IP on $LAN_DEV → gateway $LAN_GW (score $BEST_SCORE)"
+  fi
 
-    # Remove any competing defaults on secondary interfaces (eth1, eth2, ...)
-    while read -r _ _ via _ dev _; do
-      if [[ -n "${via:-}" && -n "${dev:-}" && "$dev" != "eth0" ]]; then
-        ip route del default via "$via" dev "$dev" 2>/dev/null || true
+  # Show all current defaults for context
+  log "Current default route(s) before fix:"
+  ip route show default 2>/dev/null || true
+
+  if [[ -n "$LAN_DEV" && -n "$LAN_GW" && $BEST_SCORE -ge 30 ]]; then
+    # Force the LAN gateway as the preferred default route
+    ip route replace default via "$LAN_GW" dev "$LAN_DEV" metric 10 2>/dev/null || true
+
+    # Remove any competing default routes on OTHER interfaces
+    while IFS= read -r route_line; do
+      r_via=$(echo "$route_line" | grep -oP 'via \K[0-9.]+' || true)
+      r_dev=$(echo "$route_line" | grep -oP 'dev \K\S+' || true)
+      if [[ -n "$r_via" && -n "$r_dev" && "$r_dev" != "$LAN_DEV" ]]; then
+        ip route del default via "$r_via" dev "$r_dev" 2>/dev/null || true
+        log "Removed competing default: $r_via via $r_dev"
       fi
     done < <(ip route show default 2>/dev/null || true)
 
-    # Re-assert eth0 as default once more after cleanup
-    ip route replace default via "$LAN_GW" dev eth0 metric 10 2>/dev/null || true
+    # Re-assert our preferred route after cleanup
+    ip route replace default via "$LAN_GW" dev "$LAN_DEV" metric 10 2>/dev/null || true
 
-    # Install the persistent fix as a systemd service so container reboots keep
-    # the LAN gateway as the default route.
+    ok "Default route set to $LAN_GW via $LAN_DEV"
+
+    # Verify internet access
+    sleep 1
+    if curl -sf --max-time 5 "http://deb.debian.org" > /dev/null 2>&1 \
+       || curl -sf --max-time 5 "http://google.com" > /dev/null 2>&1; then
+      ok "Internet is reachable"
+    else
+      warn "Internet may not be reachable — check your router/NAT config"
+    fi
+
+    # Install the persistent fix as a systemd service
     if command -v systemctl &>/dev/null; then
       log "Installing persistent routing fix for container reboots..."
 
       cat > /usr/local/bin/fix-container-routing.sh <<ROUTEFIX
 #!/bin/bash
-# Force LAN gateway on eth0 for ASUSTOR/NAS Linux Center containers
+# Force LAN gateway for ASUSTOR/NAS Linux Center containers
+# Installed by GameServer Manager installer
+# LAN interface: $LAN_DEV  Gateway: $LAN_GW
 sleep 10
-LAN_GW="$LAN_GW"
 
-# Remove any default routes on secondary interfaces
-while read -r _ _ via _ dev _; do
-  if [[ -n "\${via:-}" && -n "\${dev:-}" && "\$dev" != "eth0" ]]; then
-    ip route del default via "\$via" dev "\$dev" 2>/dev/null || true
+# Remove default routes on every interface EXCEPT $LAN_DEV
+while IFS= read -r route_line; do
+  r_via=\$(echo "\$route_line" | grep -oP 'via \K[0-9.]+' || true)
+  r_dev=\$(echo "\$route_line" | grep -oP 'dev \K\S+' || true)
+  if [[ -n "\$r_via" && -n "\$r_dev" && "\$r_dev" != "$LAN_DEV" ]]; then
+    ip route del default via "\$r_via" dev "\$r_dev" 2>/dev/null || true
   fi
 done < <(ip route show default 2>/dev/null || true)
 
-# Always force eth0 to own the default route for LAN / port forwarding
-if [[ -n "\$LAN_GW" ]]; then
-  ip route replace default via "\$LAN_GW" dev eth0 metric 10 2>/dev/null || true
-fi
+# Force LAN gateway as the default
+ip route replace default via "$LAN_GW" dev "$LAN_DEV" metric 10 2>/dev/null || true
 ROUTEFIX
       chmod +x /usr/local/bin/fix-container-routing.sh
 
       cat > /etc/systemd/system/fix-container-routing.service <<'ROUTESVC'
 [Unit]
-Description=Force LAN gateway on eth0 for LXC container networking
-After=network.target
+Description=Force LAN gateway for LXC container networking
+After=network.target network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot
@@ -291,15 +338,21 @@ ROUTESVC
 
       systemctl daemon-reload 2>/dev/null || true
       systemctl enable fix-container-routing.service 2>/dev/null || true
-      ok "Persistent routing fix installed (LAN gateway always preferred)"
+      ok "Persistent routing fix installed (survives reboots)"
     fi
 
-    # Quick verification output for admins
-    log "Current default route(s):"
+    log "Final default route(s):"
     ip route show default 2>/dev/null || true
   else
-    warn "Could not detect a LAN gateway on eth0 automatically"
-    warn "Container install will continue, but you may need to create a manual routing override"
+    if [[ $BEST_SCORE -lt 30 && -n "$LAN_DEV" ]]; then
+      warn "Best interface found was $LAN_DEV ($LAN_IP) but confidence is low (score $BEST_SCORE)"
+      warn "This looks like an internal bridge, not your real LAN"
+    fi
+    warn "Could not confidently detect the LAN gateway"
+    warn "The installer will continue, but port forwarding may not work"
+    warn "You may need to manually set the default route:"
+    warn "  ip route replace default via <YOUR_ROUTER_IP> dev <LAN_INTERFACE>"
+    warn ""
     warn "Current routing table:"
     ip route show 2>/dev/null || true
   fi
