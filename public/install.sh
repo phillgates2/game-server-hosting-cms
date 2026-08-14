@@ -1135,28 +1135,31 @@ fi
 if [[ "$SETUP_CADDY" == "true" && -n "$DOMAIN" ]]; then
 
   # Write Caddyfile
+  # The Caddyfile has TWO server blocks:
+  #   1. The domain with automatic HTTPS (for external access)
+  #   2. A plain HTTP listener on :PANEL_PORT (for LAN / direct access)
+  # This way the panel is ALWAYS reachable on the LAN IP even if the
+  # ACME challenge fails or the domain isn't set up yet.
   log "Writing Caddyfile for $DOMAIN..."
   cat > /etc/caddy/Caddyfile <<CADDYEOF
 # GameServer Manager — Caddy reverse proxy
-# Automatic HTTPS is handled by Caddy (Let's Encrypt)
 
+# ── HTTPS via domain (automatic Let's Encrypt) ──────────────
+# Requires port 80+443 forwarded on your router to this server.
+# If the ACME challenge fails, Caddy keeps retrying in the background.
 $DOMAIN {
     reverse_proxy 127.0.0.1:$PANEL_PORT {
-        # WebSocket support (for live logs, RCON, etc.)
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
     }
 
-    # File upload limit (for server file manager)
     request_body {
         max_size 256MB
     }
 
-    # Compression
     encode gzip zstd
 
-    # Security headers
     header {
         X-Content-Type-Options nosniff
         X-Frame-Options SAMEORIGIN
@@ -1164,13 +1167,29 @@ $DOMAIN {
         -Server
     }
 
-    # Logging
     log {
         output file /var/log/caddy/gsm-panel.log {
             roll_size 10mb
             roll_keep 5
         }
     }
+}
+
+# ── Plain HTTP on port 8080 (LAN direct access — always works) ──
+# Access from your LAN: http://<server-ip>:8080
+# No SSL, no domain required. Works even if ACME challenge fails.
+:8080 {
+    reverse_proxy 127.0.0.1:$PANEL_PORT {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto http
+    }
+
+    request_body {
+        max_size 256MB
+    }
+
+    encode gzip zstd
 }
 CADDYEOF
 
@@ -1186,8 +1205,24 @@ CADDYEOF
   # Enable and start Caddy
   systemctl enable caddy > /dev/null 2>&1
   systemctl restart caddy
-  ok "Caddy running — automatic HTTPS enabled for $DOMAIN"
-  log "Caddy will automatically obtain and renew SSL certificates from Let's Encrypt"
+  ok "Caddy started"
+
+  # Wait a moment then check if Caddy is actually running
+  sleep 2
+  if systemctl is-active caddy > /dev/null 2>&1; then
+    ok "Caddy is running"
+  else
+    warn "Caddy may have failed to start — checking logs..."
+    journalctl -u caddy --no-pager -n 15 2>/dev/null || true
+  fi
+
+  # Check if the HTTP fallback port is reachable
+  if curl -sf --max-time 3 "http://localhost:8080/api/health" > /dev/null 2>&1; then
+    ok "Caddy HTTP fallback is working on port 8080"
+  fi
+
+  log "Caddy will attempt to obtain SSL certificate for $DOMAIN"
+  log "If ACME fails (port 80 not forwarded), use http://<LAN-IP>:8080 instead"
 
 elif [[ -n "$DOMAIN" ]]; then
   warn "Domain '$DOMAIN' provided but Caddy setup was skipped"
@@ -1323,7 +1358,7 @@ fi
 #  Done!
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Determine access URL
+# Determine access URLs
 if [[ -n "$DOMAIN" ]]; then
   if [[ "$SETUP_CADDY" == "true" ]]; then
     ACCESS_URL="https://$DOMAIN"
@@ -1333,6 +1368,18 @@ if [[ -n "$DOMAIN" ]]; then
 else
   SERVER_IP=$(hostname -I | awk '{print $1}')
   ACCESS_URL="http://$SERVER_IP:$PANEL_PORT"
+fi
+
+# LAN fallback URL (always works, no SSL, no domain needed)
+if [[ -n "${LAN_IP:-}" ]]; then
+  SERVER_LAN_IP_FINAL="$LAN_IP"
+else
+  SERVER_LAN_IP_FINAL=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "unknown")
+fi
+if [[ "$SETUP_CADDY" == "true" ]]; then
+  LAN_URL="http://$SERVER_LAN_IP_FINAL:8080"
+else
+  LAN_URL="http://$SERVER_LAN_IP_FINAL:$PANEL_PORT"
 fi
 
 # ── Post-install connectivity check ───────────────────────────────────────────
@@ -1358,8 +1405,7 @@ echo -e "${GREEN}║${NC}  ${BOLD}🎉  Installation Complete!${NC}             
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  ${BOLD}Panel URL:${NC}       $ACCESS_URL"
-echo -e "  ${BOLD}LAN IP:${NC}          $SERVER_LAN_IP"
-echo -e "  ${BOLD}Local test:${NC}      http://localhost:$PANEL_PORT"
+echo -e "  ${BOLD}LAN Access:${NC}      ${GREEN}$LAN_URL${NC}  ← ${BOLD}use this first${NC}"
 echo -e "  ${BOLD}Admin User:${NC}      $ADMIN_USER"
 echo -e "  ${BOLD}Admin Email:${NC}     $ADMIN_EMAIL"
 if [[ "$NONINTERACTIVE" == "true" && -n "$ADMIN_PASS" ]]; then
@@ -1413,13 +1459,19 @@ echo -e "    cd $INSTALL_DIR && git pull && npm ci && npx next build && gsm rest
 echo ""
 
 if [[ "$SETUP_CADDY" == "true" && -n "$DOMAIN" ]]; then
-  echo -e "  ${YELLOW}${BOLD}⚠  Router Port Forwarding Required:${NC}"
-  echo -e "     Forward these ports on your router to ${BOLD}$SERVER_LAN_IP${NC}:"
-  echo -e "       TCP 80   → $SERVER_LAN_IP:80    (Caddy HTTP / ACME challenge)"
-  echo -e "       TCP 443  → $SERVER_LAN_IP:443   (Caddy HTTPS)"
-  echo -e ""
-  echo -e "     Without port forwarding, https://$DOMAIN will show ERR_CONNECTION_REFUSED."
-  echo -e "     On your LAN, you can test directly: http://$SERVER_LAN_IP:$PANEL_PORT"
+  echo -e "  ${CYAN}${BOLD}📡 Access your panel:${NC}"
+  echo -e "     ${GREEN}$LAN_URL${NC}  ← works right now on your LAN (no SSL)"
+  echo -e "     $ACCESS_URL  ← works after router port forwarding"
+  echo ""
+  echo -e "  ${YELLOW}${BOLD}⚠  For HTTPS ($DOMAIN) to work, forward on your router:${NC}"
+  echo -e "     TCP 80   → $SERVER_LAN_IP_FINAL:80    (Let's Encrypt ACME challenge)"
+  echo -e "     TCP 443  → $SERVER_LAN_IP_FINAL:443   (HTTPS traffic)"
+  echo ""
+  echo -e "  ${CYAN}Troubleshooting ERR_CONNECTION_REFUSED:${NC}"
+  echo -e "     1. Open ${GREEN}$LAN_URL${NC} in your browser first — if this works, the panel is fine"
+  echo -e "     2. Forward TCP 80+443 on your router to $SERVER_LAN_IP_FINAL"
+  echo -e "     3. Check Caddy logs:  journalctl -u caddy --no-pager -n 30"
+  echo -e "     4. Some ISPs block port 80 — try the LAN URL instead"
   echo ""
 fi
 
@@ -1428,7 +1480,7 @@ cat > "$INSTALL_DIR/.install-info" <<INFOEOF
 # GameServer Manager — Install Details
 # Generated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
 PANEL_URL=$ACCESS_URL
-PANEL_LAN_URL=http://$SERVER_LAN_IP:$PANEL_PORT
+PANEL_LAN_URL=$LAN_URL
 ADMIN_USER=$ADMIN_USER
 ADMIN_EMAIL=$ADMIN_EMAIL
 INSTALL_DIR=$INSTALL_DIR
@@ -1436,7 +1488,7 @@ DB_NAME=$DB_NAME
 DB_USER=$DB_USER
 PANEL_PORT=$PANEL_PORT
 DOMAIN=$DOMAIN
-SERVER_LAN_IP=$SERVER_LAN_IP
+SERVER_LAN_IP=$SERVER_LAN_IP_FINAL
 REVERSE_PROXY=caddy
 STEAMCMD_DIR=$STEAMCMD_DIR
 GAMESERVERS_DIR=$GAMESERVERS_DIR
