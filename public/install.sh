@@ -1160,8 +1160,21 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════════
 log "Configuring firewall..."
 
-# Check if UFW is available
-if ! command -v ufw &>/dev/null; then
+# ── Skip UFW entirely inside containers ──────────────────────────────────────
+# Enabling UFW inside an LXC container fights with the host's iptables/nftables
+# and will drop SSH connections.  The host OS (ASUSTOR, Proxmox, etc.) manages
+# the firewall.  Port forwarding is done on the router, not inside the container.
+if [[ "${IS_CONTAINER:-false}" == "true" ]]; then
+  log "Container detected — skipping UFW firewall configuration"
+  log "Your host OS / router handles the firewall and port forwarding"
+  log "Ensure your router forwards the following ports to this container's IP:"
+  log "  - TCP $PANEL_PORT (panel)"
+  if [[ "$SETUP_CADDY" == "true" ]]; then
+    log "  - TCP 80 + 443 (Caddy HTTPS)"
+  fi
+  log "  - Game server ports as needed (see README for full list)"
+  ok "Firewall step skipped (container — host manages firewall)"
+elif ! command -v ufw &>/dev/null; then
   warn "UFW is not installed — skipping firewall configuration"
   warn "You should manually configure your firewall to allow:"
   warn "  - SSH (port 22 or your custom port)"
@@ -1169,7 +1182,9 @@ if ! command -v ufw &>/dev/null; then
   warn "  - Game server ports as needed"
   ok "Firewall step skipped (no UFW)"
 else
-  # ── SSH: detect the real port to avoid locking yourself out ─────────────────
+  # ── Bare-metal / VM: configure UFW ─────────────────────────────────────────
+
+  # Detect SSH port to avoid locking ourselves out
   SSH_PORT="22"
   if [[ -f /etc/ssh/sshd_config ]]; then
     DETECTED_PORT=$(grep -E "^[[:space:]]*Port[[:space:]]+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1 || true)
@@ -1178,7 +1193,7 @@ else
     fi
   fi
 
-  # Also check for drop-in configs (Ubuntu 24.04+, Debian 12+)
+  # Check drop-in configs (Ubuntu 24.04+, Debian 12+)
   if [[ -d /etc/ssh/sshd_config.d ]]; then
     for cfg in /etc/ssh/sshd_config.d/*.conf; do
       [[ -f "$cfg" ]] || continue
@@ -1189,7 +1204,7 @@ else
     done
   fi
 
-  # Check the current SSH session port as a safeguard
+  # Check current SSH session port as a safeguard
   if [[ -n "${SSH_CONNECTION:-}" ]]; then
     CONN_PORT=$(echo "$SSH_CONNECTION" | awk '{print $4}' || true)
     if [[ -n "${CONN_PORT:-}" && "${CONN_PORT:-}" =~ ^[0-9]+$ && "$CONN_PORT" != "$SSH_PORT" ]]; then
@@ -1198,10 +1213,12 @@ else
     fi
   fi
 
-  # Allow SSH *before* enabling UFW
+  # Allow SSH FIRST — before anything else and before enabling UFW
   ufw allow "$SSH_PORT/tcp" comment "SSH" > /dev/null 2>&1 || true
+  # Also always allow port 22 as a safety net even if sshd is on another port
+  ufw allow 22/tcp comment "SSH (fallback)" > /dev/null 2>&1 || true
   if [[ "$SSH_PORT" != "22" ]]; then
-    log "SSH detected on port $SSH_PORT (non-default)"
+    log "SSH detected on port $SSH_PORT (non-default) — both 22 and $SSH_PORT allowed"
   fi
 
   # Panel / Caddy

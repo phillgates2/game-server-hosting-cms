@@ -13,6 +13,7 @@ All notable changes to GameServer Manager are documented here.
 - **Remove conflicting internal gateways** — strips default routes on every interface except the detected LAN device, including ASUSTOR's injected `10.172.5.1` management gateway.
 - **Persistent boot fix** — installs a systemd oneshot service (`fix-container-routing.service`) that re-applies the LAN gateway preference on every container reboot, with a 10-second delay to let the host platform finish its own network setup first.
 - **Internet verification** — tests outbound connectivity after applying the routing fix and warns if the internet is still unreachable.
+- **UFW skipped in containers** — `ufw --force enable` inside an LXC container conflicts with the host's iptables/nftables and drops SSH connections. The installer now detects containers and skips UFW entirely, printing a reminder of which ports to forward on the router instead. UFW is only configured and enabled on bare-metal/VM installs.
 
 ### 🔥 Automatic Firewall Management
 - **Dynamic port rules** — creating a game server now automatically opens its game port, query port, and RCON port in UFW (TCP + UDP). Deleting a server removes the rules. Changing a server's port updates the rules.
@@ -44,6 +45,7 @@ All notable changes to GameServer Manager are documented here.
 - **Auto-detect SSH port** — reads from `/etc/ssh/sshd_config`, drop-in configs in `/etc/ssh/sshd_config.d/*.conf`, and the active `$SSH_CONNECTION` environment variable.
 - **Allow SSH before enabling UFW** — prevents lockouts even on non-standard SSH ports.
 - **Dual-port safety** — if the active session is on a different port than sshd_config specifies, both ports are allowed.
+- **Port 22 safety net** — port 22 is always allowed in addition to the detected SSH port, preventing lockouts if the detection is wrong.
 
 ### 🐧 Debian 13 (Trixie) Support
 - **PostgreSQL fallback** — the official PGDG repo uses Bookworm packages that have unmet dependencies on Trixie (`libicu72`); installer now falls back to Debian's built-in PostgreSQL 17 package.

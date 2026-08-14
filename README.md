@@ -226,7 +226,9 @@ The installer detects your SSH port (including non-standard ports) and allows it
 | 10999–11000 | UDP | Don't Starve Together |
 | 9600 | TCP/UDP | Assetto Corsa |
 
-> If UFW is not available (e.g. some LXC containers), the firewall step is skipped with a warning.
+> **Containers:** UFW is **never enabled** inside LXC/Docker containers. The host OS and your router manage the firewall — enabling UFW inside a container conflicts with the host's iptables/nftables and will drop SSH connections. The installer detects containers and skips the UFW step entirely, printing a reminder of which ports to forward on your router instead.
+>
+> **Bare-metal / VM:** UFW is configured and enabled. Port 22 is always allowed as a safety net even if SSH is on a non-standard port.
 
 ### Runtime — Dynamic Port Management
 
