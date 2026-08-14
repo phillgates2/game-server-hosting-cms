@@ -15,6 +15,11 @@ interface CmsPost {
   createdAt: string;
 }
 
+interface ForumCategory {
+  id: number; name: string; slug: string; description: string | null;
+  threadCount: number; postCount: number; lastActivity: string | null;
+}
+
 interface Props {
   user: {
     username: string;
@@ -27,13 +32,14 @@ interface Props {
   onLogout: () => void;
 }
 
-type Tab = "home" | "blog" | "changelog" | "post";
+type Tab = "home" | "blog" | "changelog" | "forums" | "post";
 
 export default function PublicSite({ user, onLoginClick, onDashboardClick, onLogout }: Props) {
   const [tab, setTab] = useState<Tab>("home");
   const [blogs, setBlogs] = useState<CmsPost[]>([]);
   const [changelogs, setChangelogs] = useState<CmsPost[]>([]);
   const [selectedPost, setSelectedPost] = useState<CmsPost | null>(null);
+  const [forumCategories, setForumCategories] = useState<ForumCategory[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -47,12 +53,26 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
     } catch { /* ignore */ } finally { setLoaded(true); }
   }, []);
 
+  const loadForumCategories = useCallback(async () => {
+    try {
+      const res = await fetch("/api/forum/categories");
+      if (res.ok) {
+        const data = await res.json();
+        setForumCategories(data.categories || []);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadData();
-    }, 0);
+    const timer = window.setTimeout(() => { void loadData(); }, 0);
     return () => window.clearTimeout(timer);
   }, [loadData]);
+
+  useEffect(() => {
+    if (tab === "forums" && forumCategories.length === 0) {
+      void loadForumCategories();
+    }
+  }, [tab, forumCategories.length, loadForumCategories]);
 
   function openPost(post: CmsPost) { setSelectedPost(post); setTab("post"); }
   function fmt(d: string) { return new Date(d).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }); }
@@ -69,7 +89,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
             <span className="text-lg font-bold group-hover:text-accent transition-colors">GameServer Manager</span>
           </button>
           <nav className="flex items-center gap-1">
-            {([["home","Home"],["blog","Blog"],["changelog","Changelog"]] as const).map(([k,l]) => (
+            {([["home","Home"],["forums","Forums"],["blog","Blog"],["changelog","Changelog"]] as const).map(([k,l]) => (
               <button key={k} onClick={() => { setTab(k); setSelectedPost(null); }} className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${tab === k ? "text-accent bg-accent/10" : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"}`}>{l}</button>
             ))}
             {user ? (
@@ -99,6 +119,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
               <p className="text-text-secondary text-lg max-w-2xl mx-auto mb-8">High-performance game servers with a modern control panel. Multi-node infrastructure, real-time monitoring, and one-click deploys.</p>
               <div className="flex gap-4 justify-center flex-wrap">
                 <button onClick={user ? onDashboardClick : onLoginClick} className="px-6 py-3 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors">{user ? "Open Control Panel →" : "Control Panel →"}</button>
+                <button onClick={() => setTab("forums")} className="px-6 py-3 bg-bg-card border border-border hover:border-accent/30 rounded-lg font-medium transition-colors">💬 Forums</button>
                 <button onClick={() => setTab("blog")} className="px-6 py-3 bg-bg-card border border-border hover:border-accent/30 rounded-lg font-medium transition-colors">Read Blog</button>
               </div>
             </section>
@@ -110,7 +131,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                 { icon: "🎮", t: "30+ Games", d: "Pre-built templates for Minecraft, CS2, Rust, Valheim, ARK, and more." },
                 { icon: "🔔", t: "Discord Alerts", d: "Webhook notifications for server start, stop, crash, and restarts." },
                 { icon: "🗄️", t: "Database Tools", d: "Built-in PostgreSQL viewer and editor — like phpMyAdmin, built in." },
-                { icon: "🌐", t: "IPv6 Ready", d: "Full dual-stack networking for game servers and monitoring." },
+                { icon: "💬", t: "Community Forums", d: "Built-in forums for your gaming community with categories and threads." },
               ].map((f) => (
                 <div key={f.t} className="bg-bg-card border border-border rounded-xl p-6 hover:border-accent/30 transition-colors">
                   <span className="text-3xl mb-3 block">{f.icon}</span>
@@ -173,6 +194,50 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
           </div>
         )}
 
+        {/* ═══ FORUMS (public read-only view) ═══ */}
+        {tab === "forums" && (
+          <div className="animate-fade-in space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold">💬 Community Forums</h2>
+              {user ? (
+                <button onClick={onDashboardClick} className="px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition-colors">Open in Dashboard →</button>
+              ) : (
+                <button onClick={onLoginClick} className="px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition-colors">Login to Post →</button>
+              )}
+            </div>
+            {forumCategories.length === 0 ? (
+              <div className="bg-bg-card border border-border rounded-xl p-12 text-center">
+                <span className="text-4xl block mb-3">💬</span>
+                <h3 className="font-semibold mb-1">No forum categories yet</h3>
+                <p className="text-text-secondary text-sm">Forum categories will appear here once an admin creates them.</p>
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {forumCategories.map((cat) => (
+                  <div key={cat.id} className="bg-bg-card border border-border rounded-xl p-5 hover:border-accent/30 transition-colors cursor-pointer" onClick={user ? onDashboardClick : onLoginClick}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="font-semibold text-lg">{cat.name}</h3>
+                        <p className="text-sm text-text-secondary mt-1">{cat.description}</p>
+                      </div>
+                      <div className="text-right text-xs text-text-muted flex-shrink-0 ml-4">
+                        <p><strong className="text-text-secondary">{cat.threadCount}</strong> threads</p>
+                        <p><strong className="text-text-secondary">{cat.postCount}</strong> posts</p>
+                        {cat.lastActivity && <p className="mt-1">{fmt(cat.lastActivity)}</p>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {!user && (
+                  <p className="text-center text-text-muted text-sm pt-2">
+                    <button onClick={onLoginClick} className="text-accent hover:underline">Log in</button> to create threads and reply to posts.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {tab === "blog" && !selectedPost && (
           <div className="animate-fade-in space-y-6">
             <h2 className="text-2xl font-bold">📝 Blog</h2>
@@ -217,6 +282,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
             ) : (
               <button onClick={onLoginClick} className="hover:text-text-primary transition-colors">Login</button>
             )}
+            <button onClick={() => setTab("forums")} className="hover:text-text-primary transition-colors">Forums</button>
             <button onClick={() => setTab("blog")} className="hover:text-text-primary transition-colors">Blog</button>
             <button onClick={() => setTab("changelog")} className="hover:text-text-primary transition-colors">Changelog</button>
           </div>

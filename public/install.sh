@@ -181,91 +181,151 @@ log "Detected OS: $OS_ID $OS_VERSION"
 
 # ── LXC / Container network fix ──────────────────────────────────────────────
 # ASUSTOR Linux Center (and some other NAS platforms) run Debian inside LXC
-# containers and inject an internal gateway (e.g. 10.172.5.1 on eth1) that
-# takes priority over the real LAN gateway. This breaks outbound internet
-# access and causes npm/curl/apt to hang or fail.
+# containers with multiple interfaces.  The real LAN (for port forwarding)
+# can be on ANY interface — not necessarily eth0.  ASUSTOR also injects an
+# internal management gateway that can steal the default route.
 #
-# Detect and fix this automatically.
+# Strategy: find the interface carrying a routable private IP on the same
+# subnet as the physical LAN router (usually 192.168.x.x or a user-chosen
+# subnet), make THAT the default route, and remove everything else.
 if [[ -f /proc/1/environ ]] && grep -qa "container=lxc" /proc/1/environ 2>/dev/null \
    || [[ -f /.dockerenv ]] \
    || grep -qsai "lxc\|docker\|container" /proc/1/cgroup 2>/dev/null; then
-  
+
   IS_CONTAINER="true"
   log "Running inside a container (LXC/Docker detected)"
 
-  # Check for the ASUSTOR-style bad gateway: a default route via 10.x.x.x on
-  # a secondary interface that shadows the real LAN gateway
-  BAD_GW=$(ip route show default 2>/dev/null \
-    | grep -oP 'default via 10\.\d+\.\d+\.\d+ dev eth[1-9]' | head -1 || true)
-  GOOD_GW=$(ip route show default 2>/dev/null \
-    | grep -oP 'default via 192\.168\.\d+\.\d+ dev eth0' | head -1 || true)
+  # ── Find the real LAN interface and gateway ────────────────────────────────
+  # We score each interface.  192.168.x.x and 172.16-31.x.x score highest
+  # because they are almost always the home/office LAN.  10.x.x.x scores
+  # lower because NAS platforms use 10.0.3.x (LXC bridge) and 10.172.x.x
+  # (internal management) — both of which are NOT the real LAN.
+  LAN_DEV=""
+  LAN_GW=""
+  LAN_IP=""
+  BEST_SCORE=0
 
-  if [[ -n "$BAD_GW" ]]; then
-    warn "Detected conflicting container gateway: $BAD_GW"
+  while IFS= read -r line; do
+    iface=$(echo "$line" | awk '{print $2}' | tr -d ':' || true)
+    cidr=$(echo "$line" | awk '{print $4}' || true)
+    ip_addr=${cidr%/*}
 
-    if [[ -n "$GOOD_GW" ]]; then
-      log "Good LAN gateway also present: $GOOD_GW"
+    [[ -z "$ip_addr" || -z "$iface" ]] && continue
+    # Skip loopback
+    [[ "$iface" == "lo" ]] && continue
+
+    score=0
+    # 192.168.x.x — almost always the real home/office LAN
+    if [[ "$ip_addr" =~ ^192\.168\. ]]; then
+      score=100
+    # 172.16-31.x.x — common corporate/prosumer LAN
+    elif [[ "$ip_addr" =~ ^172\.(1[6-9]|2[0-9]|3[01])\. ]]; then
+      score=80
+    # 10.x.x.x — could be LAN but also could be LXC bridge or NAS internal
+    elif [[ "$ip_addr" =~ ^10\. ]]; then
+      # 10.0.3.x is the standard LXC bridge — very low score
+      if [[ "$ip_addr" =~ ^10\.0\.3\. ]]; then
+        score=5
+      # 10.172.x.x is ASUSTOR internal — very low score
+      elif [[ "$ip_addr" =~ ^10\.172\. ]]; then
+        score=2
+      else
+        score=30
+      fi
     fi
 
-    # Try to reach the internet through the current routing table
-    if ! curl -sf --max-time 5 "https://deb.nodesource.com" > /dev/null 2>&1; then
-      warn "Internet is unreachable — fixing container routing..."
-
-      # Extract the bad gateway IP and interface
-      BAD_GW_IP=$(echo "$BAD_GW" | grep -oP '10\.\d+\.\d+\.\d+' || true)
-      BAD_GW_DEV=$(echo "$BAD_GW" | grep -oP 'eth[1-9]' || true)
-
-      if [[ -n "$BAD_GW_IP" && -n "$BAD_GW_DEV" ]]; then
-        ip route del default via "$BAD_GW_IP" dev "$BAD_GW_DEV" 2>/dev/null || true
-        log "Removed bad gateway: $BAD_GW_IP via $BAD_GW_DEV"
+    if [[ $score -gt $BEST_SCORE ]]; then
+      BEST_SCORE=$score
+      LAN_DEV="$iface"
+      LAN_IP="$ip_addr"
+      # Guess gateway as x.x.x.1
+      if [[ "$ip_addr" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
+        LAN_GW="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.1"
       fi
+    fi
+  done < <(ip -4 -o addr show 2>/dev/null || true)
 
-      # If no good gateway exists, try to detect the LAN gateway from eth0
-      if [[ -z "$GOOD_GW" ]]; then
-        ETH0_GW=$(ip route show 2>/dev/null \
-          | grep -oP '\d+\.\d+\.\d+\.\d+' \
-          | grep -E '^192\.168\.|^10\.0\.|^172\.(1[6-9]|2[0-9]|3[01])\.' \
-          | head -1 || true)
-        if [[ -n "$ETH0_GW" ]]; then
-          ip route add default via "$ETH0_GW" dev eth0 2>/dev/null || true
-          log "Added LAN gateway: $ETH0_GW via eth0"
-        fi
-      fi
-
-      # Verify the fix worked
-      sleep 2
-      if curl -sf --max-time 5 "https://deb.nodesource.com" > /dev/null 2>&1; then
-        ok "Container networking fixed — internet is reachable"
-
-        # Install the persistent fix as a systemd service
-        if command -v systemctl &>/dev/null; then
-          log "Installing persistent routing fix for container reboots..."
-
-          cat > /usr/local/bin/fix-container-routing.sh <<'ROUTEFIX'
-#!/bin/bash
-# Fix ASUSTOR/NAS Linux Center container default gateway conflict
-# Installed by GameServer Manager installer
-sleep 10
-# Remove any 10.x.x.x default routes on secondary interfaces
-for route in $(ip route show default 2>/dev/null | grep -oP 'default via 10\.\d+\.\d+\.\d+ dev eth[1-9]'); do
-  GW_IP=$(echo "$route" | grep -oP '10\.\d+\.\d+\.\d+')
-  GW_DEV=$(echo "$route" | grep -oP 'eth[1-9]')
-  ip route del default via "$GW_IP" dev "$GW_DEV" 2>/dev/null || true
-done
-# Ensure a default route exists via eth0
-if ! ip route show default | grep -q 'dev eth0'; then
-  GATEWAY=$(ip route show 2>/dev/null | grep -oP 'default via \S+' | head -1 | awk '{print $3}')
-  if [ -n "$GATEWAY" ]; then
-    ip route add default via "$GATEWAY" dev eth0 2>/dev/null || true
+  # Override gateway guess with an existing default route on the chosen device
+  if [[ -n "$LAN_DEV" ]]; then
+    EXISTING_GW=$(ip route show default dev "$LAN_DEV" 2>/dev/null \
+      | awk '/default via/ {print $3; exit}' || true)
+    if [[ -n "$EXISTING_GW" ]]; then
+      LAN_GW="$EXISTING_GW"
+    fi
   fi
-fi
-ROUTEFIX
-          chmod +x /usr/local/bin/fix-container-routing.sh
 
-          cat > /etc/systemd/system/fix-container-routing.service <<'ROUTESVC'
+  # Also check DHCP leases for a router option
+  if [[ -z "$LAN_GW" && -d /var/lib/dhcp ]]; then
+    LAN_GW=$(grep -RhoP 'option routers\s+\K[0-9.]+' /var/lib/dhcp 2>/dev/null | head -1 || true)
+  fi
+
+  # Show what we found
+  if [[ -n "$LAN_DEV" && -n "$LAN_GW" ]]; then
+    log "Detected LAN: $LAN_IP on $LAN_DEV → gateway $LAN_GW (score $BEST_SCORE)"
+  fi
+
+  # Show all current defaults for context
+  log "Current default route(s) before fix:"
+  ip route show default 2>/dev/null || true
+
+  if [[ -n "$LAN_DEV" && -n "$LAN_GW" && $BEST_SCORE -ge 30 ]]; then
+    # Force the LAN gateway as the preferred default route
+    ip route replace default via "$LAN_GW" dev "$LAN_DEV" metric 10 2>/dev/null || true
+
+    # Remove any competing default routes on OTHER interfaces
+    while IFS= read -r route_line; do
+      r_via=$(echo "$route_line" | grep -oP 'via \K[0-9.]+' || true)
+      r_dev=$(echo "$route_line" | grep -oP 'dev \K\S+' || true)
+      if [[ -n "$r_via" && -n "$r_dev" && "$r_dev" != "$LAN_DEV" ]]; then
+        ip route del default via "$r_via" dev "$r_dev" 2>/dev/null || true
+        log "Removed competing default: $r_via via $r_dev"
+      fi
+    done < <(ip route show default 2>/dev/null || true)
+
+    # Re-assert our preferred route after cleanup
+    ip route replace default via "$LAN_GW" dev "$LAN_DEV" metric 10 2>/dev/null || true
+
+    ok "Default route set to $LAN_GW via $LAN_DEV"
+
+    # Verify internet access
+    sleep 1
+    if curl -sf --max-time 5 "http://deb.debian.org" > /dev/null 2>&1 \
+       || curl -sf --max-time 5 "http://google.com" > /dev/null 2>&1; then
+      ok "Internet is reachable"
+    else
+      warn "Internet may not be reachable — check your router/NAT config"
+    fi
+
+    # Install the persistent fix as a systemd service
+    if command -v systemctl &>/dev/null; then
+      log "Installing persistent routing fix for container reboots..."
+
+      cat > /usr/local/bin/fix-container-routing.sh <<ROUTEFIX
+#!/bin/bash
+# Force LAN gateway for ASUSTOR/NAS Linux Center containers
+# Installed by GameServer Manager installer
+# LAN interface: $LAN_DEV  Gateway: $LAN_GW
+sleep 10
+
+# Remove default routes on every interface EXCEPT $LAN_DEV
+while IFS= read -r route_line; do
+  r_via=\$(echo "\$route_line" | grep -oP 'via \K[0-9.]+' || true)
+  r_dev=\$(echo "\$route_line" | grep -oP 'dev \K\S+' || true)
+  if [[ -n "\$r_via" && -n "\$r_dev" && "\$r_dev" != "$LAN_DEV" ]]; then
+    ip route del default via "\$r_via" dev "\$r_dev" 2>/dev/null || true
+  fi
+done < <(ip route show default 2>/dev/null || true)
+
+# Force LAN gateway as the default
+ip route replace default via "$LAN_GW" dev "$LAN_DEV" metric 10 2>/dev/null || true
+ROUTEFIX
+      chmod +x /usr/local/bin/fix-container-routing.sh
+
+      cat > /etc/systemd/system/fix-container-routing.service <<'ROUTESVC'
 [Unit]
-Description=Fix container default gateway conflict (ASUSTOR/NAS LXC)
-After=network.target
+Description=Force LAN gateway for LXC container networking
+After=network.target network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot
@@ -276,19 +336,25 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 ROUTESVC
 
-          systemctl daemon-reload 2>/dev/null || true
-          systemctl enable fix-container-routing.service 2>/dev/null || true
-          ok "Persistent routing fix installed (survives reboots)"
-        fi
-      else
-        warn "Routing fix did not restore internet access"
-        warn "You may need to manually configure your container's network"
-        warn "Current routing table:"
-        ip route show 2>/dev/null || true
-      fi
-    else
-      log "Internet is reachable despite container gateway — no fix needed"
+      systemctl daemon-reload 2>/dev/null || true
+      systemctl enable fix-container-routing.service 2>/dev/null || true
+      ok "Persistent routing fix installed (survives reboots)"
     fi
+
+    log "Final default route(s):"
+    ip route show default 2>/dev/null || true
+  else
+    if [[ $BEST_SCORE -lt 30 && -n "$LAN_DEV" ]]; then
+      warn "Best interface found was $LAN_DEV ($LAN_IP) but confidence is low (score $BEST_SCORE)"
+      warn "This looks like an internal bridge, not your real LAN"
+    fi
+    warn "Could not confidently detect the LAN gateway"
+    warn "The installer will continue, but port forwarding may not work"
+    warn "You may need to manually set the default route:"
+    warn "  ip route replace default via <YOUR_ROUTER_IP> dev <LAN_INTERFACE>"
+    warn ""
+    warn "Current routing table:"
+    ip route show 2>/dev/null || true
   fi
 else
   IS_CONTAINER="false"
@@ -987,7 +1053,51 @@ su - "$GSM_USER" -c "pm2 save" || true
 # Set up PM2 to start on boot via systemd
 env PATH=$PATH:/usr/bin pm2 startup systemd -u "$GSM_USER" --hp "/home/$GSM_USER" 2>/dev/null || true
 
+# Create a wrapper script so root (and other users) can manage the gsm PM2 instance
+# without needing to `su - gsm` first
+cat > /usr/local/bin/gsm <<'GSMWRAPPER'
+#!/bin/bash
+# GameServer Manager — PM2 helper
+# Runs pm2 commands against the gsm user's PM2 daemon
+GSM_USER="gsm"
+
+case "${1:-}" in
+  status|list|ls)
+    su - "$GSM_USER" -c "pm2 status" ;;
+  logs|log)
+    su - "$GSM_USER" -c "pm2 logs gsm-panel ${*:2}" ;;
+  restart)
+    su - "$GSM_USER" -c "pm2 restart gsm-panel" ;;
+  stop)
+    su - "$GSM_USER" -c "pm2 stop gsm-panel" ;;
+  start)
+    su - "$GSM_USER" -c "pm2 start gsm-panel" ;;
+  reload)
+    su - "$GSM_USER" -c "pm2 reload gsm-panel" ;;
+  monit|monitor)
+    su - "$GSM_USER" -c "pm2 monit" ;;
+  *)
+    echo "GameServer Manager — Panel Management"
+    echo ""
+    echo "Usage: gsm <command>"
+    echo ""
+    echo "Commands:"
+    echo "  status    Show panel process status"
+    echo "  logs      View live panel logs (Ctrl+C to exit)"
+    echo "  restart   Restart the panel"
+    echo "  stop      Stop the panel"
+    echo "  start     Start the panel"
+    echo "  reload    Graceful reload"
+    echo "  monit     Live monitoring dashboard"
+    echo ""
+    echo "Direct PM2 access:  su - gsm -c 'pm2 <command>'"
+    ;;
+esac
+GSMWRAPPER
+chmod +x /usr/local/bin/gsm
+
 ok "PM2 configured — panel running as 'gsm-panel'"
+log "'gsm' command installed — run 'gsm status' from any user"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  STEP 10: Caddy reverse proxy (optional)
@@ -1025,48 +1135,48 @@ fi
 if [[ "$SETUP_CADDY" == "true" && -n "$DOMAIN" ]]; then
 
   # Write Caddyfile
+  # The Caddyfile has TWO server blocks:
+  #   1. The domain with automatic HTTPS (for external access)
+  #   2. A plain HTTP listener on :PANEL_PORT (for LAN / direct access)
+  # This way the panel is ALWAYS reachable on the LAN IP even if the
+  # ACME challenge fails or the domain isn't set up yet.
   log "Writing Caddyfile for $DOMAIN..."
+
+  # Create Caddy log directory with correct permissions BEFORE writing the config
+  mkdir -p /var/log/caddy
+  chown caddy:caddy /var/log/caddy
+  chmod 755 /var/log/caddy
+  # Pre-create the log file so Caddy doesn't fail on first write
+  touch /var/log/caddy/gsm-panel.log
+  chown caddy:caddy /var/log/caddy/gsm-panel.log
+
   cat > /etc/caddy/Caddyfile <<CADDYEOF
 # GameServer Manager — Caddy reverse proxy
-# Automatic HTTPS is handled by Caddy (Let's Encrypt)
 
+# ── HTTPS via domain (automatic Let's Encrypt) ──────────────
 $DOMAIN {
-    reverse_proxy 127.0.0.1:$PANEL_PORT {
-        # WebSocket support (for live logs, RCON, etc.)
-        header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-For {remote_host}
-        header_up X-Forwarded-Proto {scheme}
-    }
-
-    # File upload limit (for server file manager)
+    reverse_proxy 127.0.0.1:$PANEL_PORT
     request_body {
         max_size 256MB
     }
-
-    # Compression
     encode gzip zstd
-
-    # Security headers
     header {
         X-Content-Type-Options nosniff
         X-Frame-Options SAMEORIGIN
         Referrer-Policy strict-origin-when-cross-origin
         -Server
     }
+}
 
-    # Logging
-    log {
-        output file /var/log/caddy/gsm-panel.log {
-            roll_size 10mb
-            roll_keep 5
-        }
+# ── Plain HTTP on port 8080 (LAN direct access — always works) ──
+:8080 {
+    reverse_proxy 127.0.0.1:$PANEL_PORT
+    request_body {
+        max_size 256MB
     }
+    encode gzip zstd
 }
 CADDYEOF
-
-  # Create Caddy log directory
-  mkdir -p /var/log/caddy
-  chown caddy:caddy /var/log/caddy
 
   # Validate config
   caddy validate --config /etc/caddy/Caddyfile > /dev/null 2>&1 \
@@ -1076,8 +1186,24 @@ CADDYEOF
   # Enable and start Caddy
   systemctl enable caddy > /dev/null 2>&1
   systemctl restart caddy
-  ok "Caddy running — automatic HTTPS enabled for $DOMAIN"
-  log "Caddy will automatically obtain and renew SSL certificates from Let's Encrypt"
+  ok "Caddy started"
+
+  # Wait a moment then check if Caddy is actually running
+  sleep 2
+  if systemctl is-active caddy > /dev/null 2>&1; then
+    ok "Caddy is running"
+  else
+    warn "Caddy may have failed to start — checking logs..."
+    journalctl -u caddy --no-pager -n 15 2>/dev/null || true
+  fi
+
+  # Check if the HTTP fallback port is reachable
+  if curl -sf --max-time 3 "http://localhost:8080/api/health" > /dev/null 2>&1; then
+    ok "Caddy HTTP fallback is working on port 8080"
+  fi
+
+  log "Caddy will attempt to obtain SSL certificate for $DOMAIN"
+  log "If ACME fails (port 80 not forwarded), use http://<LAN-IP>:8080 instead"
 
 elif [[ -n "$DOMAIN" ]]; then
   warn "Domain '$DOMAIN' provided but Caddy setup was skipped"
@@ -1094,8 +1220,21 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════════
 log "Configuring firewall..."
 
-# Check if UFW is available
-if ! command -v ufw &>/dev/null; then
+# ── Skip UFW entirely inside containers ──────────────────────────────────────
+# Enabling UFW inside an LXC container fights with the host's iptables/nftables
+# and will drop SSH connections.  The host OS (ASUSTOR, Proxmox, etc.) manages
+# the firewall.  Port forwarding is done on the router, not inside the container.
+if [[ "${IS_CONTAINER:-false}" == "true" ]]; then
+  log "Container detected — skipping UFW firewall configuration"
+  log "Your host OS / router handles the firewall and port forwarding"
+  log "Ensure your router forwards the following ports to this container's IP:"
+  log "  - TCP $PANEL_PORT (panel)"
+  if [[ "$SETUP_CADDY" == "true" ]]; then
+    log "  - TCP 80 + 443 (Caddy HTTPS)"
+  fi
+  log "  - Game server ports as needed (see README for full list)"
+  ok "Firewall step skipped (container — host manages firewall)"
+elif ! command -v ufw &>/dev/null; then
   warn "UFW is not installed — skipping firewall configuration"
   warn "You should manually configure your firewall to allow:"
   warn "  - SSH (port 22 or your custom port)"
@@ -1103,7 +1242,9 @@ if ! command -v ufw &>/dev/null; then
   warn "  - Game server ports as needed"
   ok "Firewall step skipped (no UFW)"
 else
-  # ── SSH: detect the real port to avoid locking yourself out ─────────────────
+  # ── Bare-metal / VM: configure UFW ─────────────────────────────────────────
+
+  # Detect SSH port to avoid locking ourselves out
   SSH_PORT="22"
   if [[ -f /etc/ssh/sshd_config ]]; then
     DETECTED_PORT=$(grep -E "^[[:space:]]*Port[[:space:]]+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1 || true)
@@ -1112,7 +1253,7 @@ else
     fi
   fi
 
-  # Also check for drop-in configs (Ubuntu 24.04+, Debian 12+)
+  # Check drop-in configs (Ubuntu 24.04+, Debian 12+)
   if [[ -d /etc/ssh/sshd_config.d ]]; then
     for cfg in /etc/ssh/sshd_config.d/*.conf; do
       [[ -f "$cfg" ]] || continue
@@ -1123,7 +1264,7 @@ else
     done
   fi
 
-  # Check the current SSH session port as a safeguard
+  # Check current SSH session port as a safeguard
   if [[ -n "${SSH_CONNECTION:-}" ]]; then
     CONN_PORT=$(echo "$SSH_CONNECTION" | awk '{print $4}' || true)
     if [[ -n "${CONN_PORT:-}" && "${CONN_PORT:-}" =~ ^[0-9]+$ && "$CONN_PORT" != "$SSH_PORT" ]]; then
@@ -1132,10 +1273,12 @@ else
     fi
   fi
 
-  # Allow SSH *before* enabling UFW
+  # Allow SSH FIRST — before anything else and before enabling UFW
   ufw allow "$SSH_PORT/tcp" comment "SSH" > /dev/null 2>&1 || true
+  # Also always allow port 22 as a safety net even if sshd is on another port
+  ufw allow 22/tcp comment "SSH (fallback)" > /dev/null 2>&1 || true
   if [[ "$SSH_PORT" != "22" ]]; then
-    log "SSH detected on port $SSH_PORT (non-default)"
+    log "SSH detected on port $SSH_PORT (non-default) — both 22 and $SSH_PORT allowed"
   fi
 
   # Panel / Caddy
@@ -1196,7 +1339,7 @@ fi
 #  Done!
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Determine access URL
+# Determine access URLs
 if [[ -n "$DOMAIN" ]]; then
   if [[ "$SETUP_CADDY" == "true" ]]; then
     ACCESS_URL="https://$DOMAIN"
@@ -1208,17 +1351,56 @@ else
   ACCESS_URL="http://$SERVER_IP:$PANEL_PORT"
 fi
 
+# LAN fallback URL (always works, no SSL, no domain needed)
+if [[ -n "${LAN_IP:-}" ]]; then
+  SERVER_LAN_IP_FINAL="$LAN_IP"
+else
+  SERVER_LAN_IP_FINAL=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "unknown")
+fi
+if [[ "$SETUP_CADDY" == "true" ]]; then
+  LAN_URL="http://$SERVER_LAN_IP_FINAL:8080"
+else
+  LAN_URL="http://$SERVER_LAN_IP_FINAL:$PANEL_PORT"
+fi
+
+# ── Post-install connectivity check ───────────────────────────────────────────
+log "Checking panel connectivity..."
+sleep 3
+
+PANEL_LOCAL_OK="false"
+if curl -sf --max-time 5 "http://localhost:$PANEL_PORT/api/health" > /dev/null 2>&1 \
+   || curl -sf --max-time 5 "http://127.0.0.1:$PANEL_PORT/api/health" > /dev/null 2>&1; then
+  PANEL_LOCAL_OK="true"
+fi
+
+# Detect the container/server's LAN IP for the summary
+if [[ -n "${LAN_IP:-}" ]]; then
+  SERVER_LAN_IP="$LAN_IP"
+else
+  SERVER_LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "unknown")
+fi
+
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║${NC}  ${BOLD}🎉  Installation Complete!${NC}                                 ${GREEN}║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  ${BOLD}Panel URL:${NC}       $ACCESS_URL"
+echo -e "  ${BOLD}LAN Access:${NC}      ${GREEN}$LAN_URL${NC}  ← ${BOLD}use this first${NC}"
 echo -e "  ${BOLD}Admin User:${NC}      $ADMIN_USER"
 echo -e "  ${BOLD}Admin Email:${NC}     $ADMIN_EMAIL"
 if [[ "$NONINTERACTIVE" == "true" && -n "$ADMIN_PASS" ]]; then
   echo -e "  ${BOLD}Admin Password:${NC}  $ADMIN_PASS"
 fi
+echo ""
+
+if [[ "$PANEL_LOCAL_OK" == "true" ]]; then
+  ok "Panel is running and responding on localhost:$PANEL_PORT"
+else
+  warn "Panel is not responding on localhost:$PANEL_PORT yet"
+  warn "It may still be starting up — check:  gsm logs"
+fi
+
 echo ""
 echo -e "  ${BOLD}Panel Dir:${NC}       $INSTALL_DIR"
 echo -e "  ${BOLD}Database:${NC}        $DB_NAME (user: $DB_USER)"
@@ -1231,11 +1413,13 @@ if [[ "$SETUP_CADDY" == "true" ]]; then
   echo -e "  ${BOLD}Logs (caddy):${NC}    /var/log/caddy/"
 fi
 echo ""
-echo -e "  ${CYAN}Panel management:${NC}"
-echo -e "    pm2 status              # View panel status"
-echo -e "    pm2 logs gsm-panel      # View live logs"
-echo -e "    pm2 restart gsm-panel   # Restart panel"
-echo -e "    pm2 stop gsm-panel      # Stop panel"
+echo -e "  ${CYAN}Panel management (works as any user):${NC}"
+echo -e "    gsm status      # View panel process status"
+echo -e "    gsm logs        # View live logs (Ctrl+C to exit)"
+echo -e "    gsm restart     # Restart the panel"
+echo -e "    gsm stop        # Stop the panel"
+echo -e "    gsm start       # Start the panel"
+echo -e "    gsm monit       # Live monitoring dashboard"
 if [[ "$SKIP_STEAMCMD" != "true" ]]; then
   echo ""
   echo -e "  ${CYAN}SteamCMD usage:${NC}"
@@ -1252,14 +1436,32 @@ if [[ "$SETUP_CADDY" == "true" ]]; then
 fi
 echo ""
 echo -e "  ${CYAN}Update to latest version:${NC}"
-echo -e "    cd $INSTALL_DIR && git pull && npm ci && npx next build && pm2 restart gsm-panel"
+echo -e "    cd $INSTALL_DIR && git pull && npm ci && npx next build && gsm restart"
 echo ""
+
+if [[ "$SETUP_CADDY" == "true" && -n "$DOMAIN" ]]; then
+  echo -e "  ${CYAN}${BOLD}📡 Access your panel:${NC}"
+  echo -e "     ${GREEN}$LAN_URL${NC}  ← works right now on your LAN (no SSL)"
+  echo -e "     $ACCESS_URL  ← works after router port forwarding"
+  echo ""
+  echo -e "  ${YELLOW}${BOLD}⚠  For HTTPS ($DOMAIN) to work, forward on your router:${NC}"
+  echo -e "     TCP 80   → $SERVER_LAN_IP_FINAL:80    (Let's Encrypt ACME challenge)"
+  echo -e "     TCP 443  → $SERVER_LAN_IP_FINAL:443   (HTTPS traffic)"
+  echo ""
+  echo -e "  ${CYAN}Troubleshooting ERR_CONNECTION_REFUSED:${NC}"
+  echo -e "     1. Open ${GREEN}$LAN_URL${NC} in your browser first — if this works, the panel is fine"
+  echo -e "     2. Forward TCP 80+443 on your router to $SERVER_LAN_IP_FINAL"
+  echo -e "     3. Check Caddy logs:  journalctl -u caddy --no-pager -n 30"
+  echo -e "     4. Some ISPs block port 80 — try the LAN URL instead"
+  echo ""
+fi
 
 # Save install details to a file for reference
 cat > "$INSTALL_DIR/.install-info" <<INFOEOF
 # GameServer Manager — Install Details
 # Generated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
 PANEL_URL=$ACCESS_URL
+PANEL_LAN_URL=$LAN_URL
 ADMIN_USER=$ADMIN_USER
 ADMIN_EMAIL=$ADMIN_EMAIL
 INSTALL_DIR=$INSTALL_DIR
@@ -1267,6 +1469,7 @@ DB_NAME=$DB_NAME
 DB_USER=$DB_USER
 PANEL_PORT=$PANEL_PORT
 DOMAIN=$DOMAIN
+SERVER_LAN_IP=$SERVER_LAN_IP_FINAL
 REVERSE_PROXY=caddy
 STEAMCMD_DIR=$STEAMCMD_DIR
 GAMESERVERS_DIR=$GAMESERVERS_DIR

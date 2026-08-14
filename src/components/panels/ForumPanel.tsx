@@ -6,6 +6,7 @@ interface AuthUser { id: number; username: string; role: string }
 
 interface Category {
   id: number; name: string; slug: string; description: string | null;
+  sortOrder: number | null;
   threadCount: number; postCount: number; lastActivity: string | null;
 }
 interface Thread {
@@ -36,11 +37,26 @@ export default function ForumPanel({ user }: { user: AuthUser }) {
   const [editBody, setEditBody] = useState("");
   const [quoteText, setQuoteText] = useState("");
 
+  // Category management state
+  const [showNewCategory, setShowNewCategory] = useState(false);
+  const [newCat, setNewCat] = useState({ name: "", description: "", sortOrder: 0 });
+  const [editingCatId, setEditingCatId] = useState<number | null>(null);
+  const [editCat, setEditCat] = useState({ name: "", description: "", sortOrder: 0 });
+  const [catError, setCatError] = useState("");
+
   const isMod = user.role === "admin" || user.role === "moderator";
 
-  useEffect(() => {
-    fetch("/api/forum/categories").then((r) => r.json()).then((d) => setCategories(d.categories || [])).catch(() => {});
+  const loadCategories = useCallback(async () => {
+    try {
+      const res = await fetch("/api/forum/categories");
+      if (res.ok) {
+        const d = await res.json();
+        setCategories(d.categories || []);
+      }
+    } catch { /* ignore */ }
   }, []);
+
+  useEffect(() => { loadCategories(); }, [loadCategories]);
 
   const loadThreads = useCallback(async (catId: number) => {
     const d = await (await fetch(`/api/forum/threads?categoryId=${catId}`)).json();
@@ -56,6 +72,56 @@ export default function ForumPanel({ user }: { user: AuthUser }) {
   function openCategory(cat: Category) { setSelectedCat(cat); setView("threads"); loadThreads(cat.id); }
   function openThread(thread: Thread) { setSelectedThread(thread); setView("thread"); loadThread(thread.id); }
 
+  // ── Category CRUD ─────────────────────────────────────────────────────────
+  async function createCategory(e: React.FormEvent) {
+    e.preventDefault();
+    setCatError("");
+    const res = await fetch("/api/forum/categories", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(newCat),
+    });
+    const data = await res.json();
+    if (!res.ok) { setCatError(data.error || "Failed to create category"); return; }
+    setShowNewCategory(false);
+    setNewCat({ name: "", description: "", sortOrder: 0 });
+    loadCategories();
+  }
+
+  async function updateCategory(e: React.FormEvent) {
+    e.preventDefault();
+    setCatError("");
+    const res = await fetch("/api/forum/categories", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: editingCatId, ...editCat }),
+    });
+    const data = await res.json();
+    if (!res.ok) { setCatError(data.error || "Failed to update category"); return; }
+    setEditingCatId(null);
+    loadCategories();
+  }
+
+  async function deleteCategory(catId: number, catName: string) {
+    if (!confirm(`Delete category "${catName}"? This only works if the category has no threads.`)) return;
+    setCatError("");
+    const res = await fetch("/api/forum/categories", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: catId }),
+    });
+    const data = await res.json();
+    if (!res.ok) { setCatError(data.error || "Failed to delete category"); return; }
+    loadCategories();
+  }
+
+  function startEditCategory(cat: Category) {
+    setEditingCatId(cat.id);
+    setEditCat({ name: cat.name, description: cat.description || "", sortOrder: cat.sortOrder || 0 });
+    setCatError("");
+  }
+
+  // ── Thread/Post CRUD ──────────────────────────────────────────────────────
   async function createThread(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedCat) return;
@@ -104,7 +170,6 @@ export default function ForumPanel({ user }: { user: AuthUser }) {
   }
   function quotePost(post: Post) {
     setQuoteText(`${post.authorName}: ${post.body.slice(0, 200)}`);
-    // Scroll to reply box
     document.getElementById("forum-reply")?.scrollIntoView({ behavior: "smooth" });
   }
 
@@ -134,25 +199,138 @@ export default function ForumPanel({ user }: { user: AuthUser }) {
       {/* ═══ CATEGORIES ═══ */}
       {view === "categories" && (
         <div className="space-y-4">
-          <h2 className="text-2xl font-bold">💬 Forum</h2>
-          {categories.length === 0 ? (
-            <div className="gaming-surface rounded-xl p-8 text-center text-text-secondary">No forum categories. Run the installer.</div>
+          <div className="flex items-center justify-between">
+            <h2 className="text-2xl font-bold">💬 Forum</h2>
+            {isMod && (
+              <button
+                onClick={() => { setShowNewCategory(!showNewCategory); setEditingCatId(null); setCatError(""); }}
+                className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium"
+              >
+                {showNewCategory ? "Cancel" : "+ New Category"}
+              </button>
+            )}
+          </div>
+
+          {catError && (
+            <div className="bg-danger/10 border border-danger/30 text-danger rounded-lg px-4 py-3 text-sm">{catError}</div>
+          )}
+
+          {/* New category form */}
+          {showNewCategory && isMod && (
+            <form onSubmit={createCategory} className="gaming-surface rounded-xl p-6 space-y-4">
+              <h3 className="font-semibold">Create New Category</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-text-muted mb-1">Name *</label>
+                  <input
+                    value={newCat.name}
+                    onChange={(e) => setNewCat({ ...newCat, name: e.target.value })}
+                    placeholder="e.g. General Discussion"
+                    className="w-full px-4 py-2.5 gaming-chip rounded-lg text-sm"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-text-muted mb-1">Sort Order</label>
+                  <input
+                    type="number"
+                    value={newCat.sortOrder}
+                    onChange={(e) => setNewCat({ ...newCat, sortOrder: Number(e.target.value) })}
+                    className="w-full px-4 py-2.5 gaming-chip rounded-lg text-sm"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Description</label>
+                <input
+                  value={newCat.description}
+                  onChange={(e) => setNewCat({ ...newCat, description: e.target.value })}
+                  placeholder="Brief description of what this category is for"
+                  className="w-full px-4 py-2.5 gaming-chip rounded-lg text-sm"
+                />
+              </div>
+              <button type="submit" className="px-6 py-2 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium">
+                Create Category
+              </button>
+            </form>
+          )}
+
+          {categories.length === 0 && !showNewCategory ? (
+            <div className="gaming-surface rounded-xl p-8 text-center text-text-secondary">
+              No forum categories yet.
+              {isMod && <> Click <strong>+ New Category</strong> to create one.</>}
+            </div>
           ) : (
             <div className="grid gap-3">
               {categories.map((cat) => (
-                <button key={cat.id} onClick={() => openCategory(cat)} className="gaming-surface rounded-xl p-5 text-left hover:border-accent/30 transition-colors w-full">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="font-semibold">{cat.name}</h3>
-                      <p className="text-sm text-text-secondary mt-1">{cat.description}</p>
+                <div key={cat.id} className="gaming-surface rounded-xl p-5 transition-colors">
+                  {/* Edit mode */}
+                  {editingCatId === cat.id ? (
+                    <form onSubmit={updateCategory} className="space-y-3">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-xs text-text-muted mb-1">Name</label>
+                          <input
+                            value={editCat.name}
+                            onChange={(e) => setEditCat({ ...editCat, name: e.target.value })}
+                            className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-text-muted mb-1">Description</label>
+                          <input
+                            value={editCat.description}
+                            onChange={(e) => setEditCat({ ...editCat, description: e.target.value })}
+                            className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-text-muted mb-1">Sort Order</label>
+                          <input
+                            type="number"
+                            value={editCat.sortOrder}
+                            onChange={(e) => setEditCat({ ...editCat, sortOrder: Number(e.target.value) })}
+                            className="w-full px-3 py-2 gaming-chip rounded-lg text-sm"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button type="submit" className="px-4 py-1.5 bg-success hover:opacity-90 text-white rounded-lg text-xs font-medium">Save</button>
+                        <button type="button" onClick={() => setEditingCatId(null)} className="px-4 py-1.5 bg-bg-secondary border border-border text-text-secondary rounded-lg text-xs font-medium">Cancel</button>
+                      </div>
+                    </form>
+                  ) : (
+                    /* Normal display */
+                    <div className="flex items-center justify-between">
+                      <button onClick={() => openCategory(cat)} className="text-left flex-1 min-w-0">
+                        <h3 className="font-semibold">{cat.name}</h3>
+                        <p className="text-sm text-text-secondary mt-1">{cat.description}</p>
+                      </button>
+                      <div className="flex items-center gap-3 flex-shrink-0 ml-4">
+                        <div className="text-right text-xs text-text-muted">
+                          <p><strong>{cat.threadCount}</strong> threads</p>
+                          <p><strong>{cat.postCount}</strong> posts</p>
+                          {cat.lastActivity && <p className="mt-1">{fmt(cat.lastActivity)}</p>}
+                        </div>
+                        {isMod && (
+                          <div className="flex gap-1">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); startEditCategory(cat); }}
+                              className="p-1.5 rounded hover:bg-bg-hover text-text-muted hover:text-accent transition-colors"
+                              title="Edit category"
+                            >✏️</button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); deleteCategory(cat.id, cat.name); }}
+                              className="p-1.5 rounded hover:bg-danger/10 text-text-muted hover:text-danger transition-colors"
+                              title="Delete category"
+                            >🗑️</button>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div className="text-right text-xs text-text-muted flex-shrink-0 ml-4">
-                      <p><strong>{cat.threadCount}</strong> threads</p>
-                      <p><strong>{cat.postCount}</strong> posts</p>
-                      {cat.lastActivity && <p className="mt-1">{fmt(cat.lastActivity)}</p>}
-                    </div>
-                  </div>
-                </button>
+                  )}
+                </div>
               ))}
             </div>
           )}
@@ -191,19 +369,13 @@ export default function ForumPanel({ user }: { user: AuthUser }) {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      {thread.pinned && <span className="text-warning text-[10px] font-medium bg-warning/10 px-1.5 py-0.5 rounded">Pinned</span>}
-                      {thread.locked && <span className="text-danger text-[10px] font-medium bg-danger/10 px-1.5 py-0.5 rounded">🔒 Locked</span>}
-                      <h3 className="font-medium truncate">{thread.title}</h3>
+                      <h3 className="font-semibold text-sm truncate">{thread.title}</h3>
+                      {thread.pinned && <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning/15 text-warning">Pinned</span>}
+                      {thread.locked && <span className="text-[10px] px-1.5 py-0.5 rounded bg-danger/15 text-danger">Locked</span>}
                     </div>
-                    <div className="flex gap-3 mt-1 text-xs text-text-muted">
-                      <span>{thread.authorName}</span>
-                      {roleBadge(thread.authorRole)}
-                      <span>{fmt(thread.createdAt)}</span>
-                    </div>
-                  </div>
-                  <div className="text-right text-xs text-text-muted flex-shrink-0">
-                    <p className="text-sm font-medium text-text-secondary">{Math.max(thread.replyCount, 0)}</p>
-                    <p>replies</p>
+                    <p className="text-xs text-text-muted mt-1">
+                      by {thread.authorName || "Unknown"} {roleBadge(thread.authorRole)} · {fmt(thread.createdAt)} · <strong>{thread.replyCount}</strong> replies
+                    </p>
                   </div>
                 </button>
               ))}
@@ -212,125 +384,86 @@ export default function ForumPanel({ user }: { user: AuthUser }) {
         </div>
       )}
 
-      {/* ═══ THREAD ═══ */}
+      {/* ═══ THREAD VIEW ═══ */}
       {view === "thread" && selectedThread && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-2 flex-wrap">
-              {selectedThread.pinned && <span className="text-warning text-xs bg-warning/10 px-2 py-0.5 rounded">📌 Pinned</span>}
-              {selectedThread.locked && <span className="text-danger text-xs bg-danger/10 px-2 py-0.5 rounded">🔒 Locked</span>}
-              <h2 className="text-xl font-bold">{selectedThread.title}</h2>
-            </div>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h2 className="text-xl font-bold">{selectedThread.title}</h2>
             {isMod && (
-              <div className="flex gap-2">
-                <button onClick={() => togglePin(selectedThread.id, selectedThread.pinned)} className="px-3 py-1 bg-warning/15 text-warning rounded-lg text-xs font-medium">
-                  {selectedThread.pinned ? "Unpin" : "📌 Pin"}
-                </button>
-                <button onClick={() => toggleLock(selectedThread.id, selectedThread.locked)} className="px-3 py-1 bg-accent/15 text-accent rounded-lg text-xs font-medium">
-                  {selectedThread.locked ? "Unlock" : "🔒 Lock"}
-                </button>
-                <button onClick={() => deleteThread(selectedThread.id)} className="px-3 py-1 bg-danger/15 text-danger rounded-lg text-xs font-medium">
-                  🗑️ Delete
-                </button>
+              <div className="flex gap-2 text-xs">
+                <button onClick={() => togglePin(selectedThread.id, selectedThread.pinned)} className="px-3 py-1.5 gaming-chip rounded-lg hover:bg-bg-hover">{selectedThread.pinned ? "Unpin" : "📌 Pin"}</button>
+                <button onClick={() => toggleLock(selectedThread.id, selectedThread.locked)} className="px-3 py-1.5 gaming-chip rounded-lg hover:bg-bg-hover">{selectedThread.locked ? "Unlock" : "🔒 Lock"}</button>
+                <button onClick={() => deleteThread(selectedThread.id)} className="px-3 py-1.5 bg-danger/10 border border-danger/30 text-danger rounded-lg hover:bg-danger/20">Delete</button>
               </div>
             )}
           </div>
 
-          {/* Posts */}
           <div className="space-y-4">
-            {posts.map((post, i) => (
+            {posts.map((post) => (
               <div key={post.id} className="gaming-surface rounded-xl overflow-hidden">
                 <div className="flex flex-col md:flex-row">
-                  {/* Author sidebar */}
-                  <div className="md:w-48 bg-bg-secondary/50 p-4 md:border-r border-b md:border-b-0 border-border flex md:flex-col items-center md:items-start gap-3">
-                    <div className="w-12 h-12 rounded-full bg-accent/20 flex items-center justify-center text-accent text-lg font-bold flex-shrink-0">
-                      {(post.authorName || "?")[0].toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="font-semibold text-sm">{post.authorName}</p>
-                        {roleBadge(post.authorRole)}
+                  <div className="md:w-44 p-4 bg-bg-secondary/50 border-b md:border-b-0 md:border-r border-border/50 flex-shrink-0">
+                    <div className="flex md:flex-col items-center md:items-start gap-3">
+                      <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center text-accent text-sm font-bold">
+                        {(post.authorName || "?")[0].toUpperCase()}
                       </div>
-                      <div className="text-[10px] text-text-muted mt-1 space-y-0.5">
-                        <p>{post.authorPostCount} posts</p>
-                        {post.authorJoined && <p>Joined {fmt(post.authorJoined)}</p>}
-                        {post.authorLocation && <p>📍 {post.authorLocation}</p>}
+                      <div>
+                        <p className="font-semibold text-sm">{post.authorName || "Unknown"}</p>
+                        {roleBadge(post.authorRole)}
+                        <div className="text-[10px] text-text-muted mt-1 space-y-0.5">
+                          <p>{post.authorPostCount} posts</p>
+                          {post.authorLocation && <p>📍 {post.authorLocation}</p>}
+                          {post.authorJoined && <p>Joined {fmt(post.authorJoined)}</p>}
+                        </div>
                       </div>
                     </div>
                   </div>
-
-                  {/* Post body */}
                   <div className="flex-1 p-4">
                     <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs text-text-muted">{fmtFull(post.createdAt)}{post.updatedAt !== post.createdAt ? " (edited)" : ""}</span>
-                      <span className="text-[10px] text-text-muted">#{i + 1}</span>
+                      <span className="text-xs text-text-muted">{fmtFull(post.createdAt)}</span>
+                      <div className="flex gap-1">
+                        <button onClick={() => quotePost(post)} className="text-xs text-text-muted hover:text-accent px-2 py-1 rounded hover:bg-bg-hover">Quote</button>
+                        {(post.authorId === user.id || isMod) && (
+                          <>
+                            <button onClick={() => { setEditingPostId(post.id); setEditBody(post.body); }} className="text-xs text-text-muted hover:text-accent px-2 py-1 rounded hover:bg-bg-hover">Edit</button>
+                            <button onClick={() => deletePost(post.id)} className="text-xs text-text-muted hover:text-danger px-2 py-1 rounded hover:bg-bg-hover">Delete</button>
+                          </>
+                        )}
+                      </div>
                     </div>
-
                     {editingPostId === post.id ? (
-                      <div className="space-y-3">
+                      <div className="space-y-2">
                         <textarea value={editBody} onChange={(e) => setEditBody(e.target.value)} rows={4} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm resize-y" />
                         <div className="flex gap-2">
-                          <button onClick={() => savePostEdit(post.id)} className="px-4 py-1.5 bg-success hover:opacity-90 text-white rounded-lg text-xs font-medium">Save</button>
-                          <button onClick={() => { setEditingPostId(null); setEditBody(""); }} className="px-4 py-1.5 bg-bg-secondary text-text-muted rounded-lg text-xs font-medium">Cancel</button>
+                          <button onClick={() => savePostEdit(post.id)} className="px-4 py-1.5 bg-success text-white rounded-lg text-xs">Save</button>
+                          <button onClick={() => setEditingPostId(null)} className="px-4 py-1.5 gaming-chip rounded-lg text-xs">Cancel</button>
                         </div>
                       </div>
                     ) : (
-                      <div className="text-sm text-text-secondary whitespace-pre-wrap leading-relaxed">
-                        {post.body.split("\n").map((line, li) =>
-                          line.startsWith("> ") ? (
-                            <div key={li} className="border-l-2 border-accent/30 pl-3 py-1 my-2 text-text-muted italic text-xs bg-bg-secondary/50 rounded-r">
-                              {line.slice(2)}
-                            </div>
-                          ) : (
-                            <span key={li}>{line}{"\n"}</span>
-                          )
-                        )}
-                      </div>
+                      <div className="text-sm text-text-secondary whitespace-pre-wrap leading-relaxed">{post.body}</div>
                     )}
-
-                    {/* Post actions */}
-                    {editingPostId !== post.id && (
-                      <div className="flex gap-2 mt-4 pt-3 border-t border-border/50">
-                        {!selectedThread.locked && (
-                          <button onClick={() => quotePost(post)} className="px-2 py-1 text-[10px] text-text-muted hover:text-accent transition-colors">
-                            💬 Quote
-                          </button>
-                        )}
-                        {(post.authorId === user.id || isMod) && (
-                          <button onClick={() => { setEditingPostId(post.id); setEditBody(post.body); }} className="px-2 py-1 text-[10px] text-text-muted hover:text-accent transition-colors">
-                            ✏️ Edit
-                          </button>
-                        )}
-                        {(post.authorId === user.id || isMod) && i > 0 && (
-                          <button onClick={() => deletePost(post.id)} className="px-2 py-1 text-[10px] text-text-muted hover:text-danger transition-colors">
-                            🗑️ Delete
-                          </button>
-                        )}
-                      </div>
-                    )}
+                    {post.updatedAt !== post.createdAt && <p className="text-[10px] text-text-muted mt-3 italic">Edited {fmtFull(post.updatedAt)}</p>}
                   </div>
                 </div>
               </div>
             ))}
           </div>
 
-          {/* Reply */}
+          {/* Reply form */}
           {!selectedThread.locked ? (
             <form id="forum-reply" onSubmit={createReply} className="gaming-surface rounded-xl p-6 space-y-4">
-              <h3 className="font-medium text-sm">Post a Reply</h3>
+              <h3 className="font-semibold text-sm">Reply</h3>
               {quoteText && (
-                <div className="border-l-2 border-accent/30 pl-3 py-2 bg-bg-secondary rounded-r text-xs text-text-muted flex items-start justify-between">
-                  <span className="italic">{quoteText.slice(0, 200)}{quoteText.length > 200 ? "..." : ""}</span>
-                  <button type="button" onClick={() => setQuoteText("")} className="text-text-muted hover:text-danger ml-2 flex-shrink-0">✕</button>
+                <div className="bg-bg-secondary rounded-lg p-3 text-sm text-text-secondary border-l-4 border-accent flex items-start gap-2">
+                  <span className="flex-1 italic line-clamp-3">{quoteText}</span>
+                  <button type="button" onClick={() => setQuoteText("")} className="text-text-muted hover:text-danger text-xs flex-shrink-0">✕</button>
                 </div>
               )}
               <textarea value={replyBody} onChange={(e) => setReplyBody(e.target.value)} placeholder="Write your reply..." rows={4} className="w-full px-4 py-2.5 gaming-chip rounded-lg text-sm resize-y" required />
               <button type="submit" className="px-6 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium">Post Reply</button>
             </form>
           ) : (
-            <div className="gaming-surface rounded-xl p-6 text-center text-text-muted text-sm">
-              🔒 This thread is locked. No new replies can be posted.
-            </div>
+            <div className="gaming-surface rounded-xl p-6 text-center text-text-muted text-sm">🔒 This thread is locked. No new replies.</div>
           )}
         </div>
       )}
