@@ -47,10 +47,7 @@ async function ensureLadderSchema() {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "ladder.view"))) {
-    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
-  }
+  // Ladder standings are publicly readable — no auth required
 
   try {
     await ensureLadderSchema();
