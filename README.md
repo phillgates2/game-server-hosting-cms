@@ -259,6 +259,34 @@ sudo ufw allow 12345/udp
 
 ---
 
+## 🗨️ Sandbox Chat
+
+The **Forum** section includes a built-in real-time chat box — a community shoutbox where users can have quick conversations without creating forum threads.
+
+### Features
+
+- **Real-time messaging** — polls every 2.5 seconds for new messages via incremental `?after=<id>` queries
+- **Active user indicator** — shows how many users chatted in the last 5 minutes
+- **Unread badge** — minimized chat shows an unread message counter
+- **Collapsible** — click the header to minimize/expand the chat
+- **Auto-scroll** — scrolls to new messages unless user is reading history
+- **Role badges** — admin and moderator badges displayed next to usernames
+- **Message moderation** — admins/mods can delete any message; users can delete their own
+- **Responsive** — sidebar on xl+ screens, stacked on mobile
+- **1000 char limit** — server-validated message length
+
+### Chat API
+
+```
+GET    /api/forum/chat              # Fetch messages (?after=<id>&limit=<n>)
+POST   /api/forum/chat              # Send message { "body": "Hello!" }
+DELETE /api/forum/chat              # Delete message { "messageId": 123 }
+```
+
+All endpoints require authentication via the `gsm_token` cookie.
+
+---
+
 ## 🧰 Management Commands
 
 ### Panel
@@ -339,6 +367,7 @@ sudo bash /opt/gsm-panel/public/uninstall.sh --purge --keep-servers
 | 🔧 **RCON Console** | Remote server management from the browser |
 | 📁 **File Manager** | Browse, edit, upload, and download server files |
 | 💬 **Forum** | Built-in community forum with categories and threads |
+| 🗨️ **Sandbox Chat** | Real-time chat box in the forum section with live polling, unread badges, and moderation |
 | 📝 **CMS** | Blog posts, changelogs, and static pages |
 | 🏆 **League Ladder** | Team rankings and competitive standings |
 | 🗄️ **Database Manager** | phpMyAdmin-style database browser and SQL editor |

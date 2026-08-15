@@ -298,6 +298,16 @@ export const auditLog = pgTable("audit_log", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// ── Forum sandbox chat messages ───────────────────────────────
+export const chatMessages = pgTable("chat_messages", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id")
+    .references(() => users.id)
+    .notNull(),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // ── CMS: Pages / Blog Posts / Changelogs ──────────────────────
 export const cmsPages = pgTable("cms_pages", {
   id: serial("id").primaryKey(),

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import SandboxChat from "@/components/SandboxChat";
 
 interface AuthUser { id: number; username: string; role: string }
 
@@ -195,6 +196,11 @@ export default function ForumPanel({ user }: { user: AuthUser }) {
           <><span className="text-text-muted">/</span><span className="text-text-secondary truncate max-w-xs">{selectedThread.title}</span></>
         )}
       </div>
+
+      {/* Main content + Chat sidebar */}
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6">
+        {/* Left: Forum content */}
+        <div className="space-y-6 min-w-0">
 
       {/* ═══ CATEGORIES ═══ */}
       {view === "categories" && (
@@ -467,6 +473,14 @@ export default function ForumPanel({ user }: { user: AuthUser }) {
           )}
         </div>
       )}
+
+        </div>{/* end left column */}
+
+        {/* Right: Sandbox Chat sidebar */}
+        <div className="xl:sticky xl:top-4 self-start">
+          <SandboxChat user={user} />
+        </div>
+      </div>{/* end grid */}
     </div>
   );
 }

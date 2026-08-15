@@ -4,6 +4,27 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.2.0] — 2026-08-15
+
+### 🗨️ Real-Time Sandbox Chat
+- **New Forum Sandbox Chat** — a persistent, real-time chat box embedded in the Forum panel sidebar. Think of it as a community shoutbox / lobby chat for your game server community.
+- **Live polling** — messages update every 2.5 seconds via short-polling (`GET /api/forum/chat?after=<lastId>`), giving a near real-time experience without WebSocket complexity.
+- **New database table** — `chat_messages` table (id, user_id, body, created_at) with foreign key to `users`.
+- **Full REST API** — `GET /api/forum/chat` (fetch messages with optional `?after=<id>` for incremental polling and `?limit=<n>`), `POST /api/forum/chat` (send message, max 1000 chars), `DELETE /api/forum/chat` (delete own message or any message if admin/moderator).
+- **Active user count** — header shows how many unique users have chatted in the last 5 minutes, with a pulsing green dot indicator.
+- **Unread badge** — when the chat is minimized, new incoming messages increment an unread counter badge on the header.
+- **Collapsible UI** — click the chat header to minimize/expand; chat state persists during the session.
+- **Auto-scroll** — automatically scrolls to the latest message unless the user has scrolled up to read history.
+- **User avatars** — displays initials with color-coded badges (accent for own messages, muted for others).
+- **Role badges** — ADMIN and MOD badges displayed next to usernames, matching the forum's role badge style.
+- **Message moderation** — admins and moderators can delete any message; regular users can delete only their own.
+- **Responsive layout** — on large screens (xl+), the chat appears as a sticky sidebar next to forum content. On smaller screens, it stacks below the forum content.
+- **Themed** — fully integrated with all 5 panel themes (Nebula Dark, Cloud Light, Ember Sun, Forest Command, custom user themes) using existing CSS custom properties.
+- **Character limit** — 1000 character limit per message with server-side validation.
+- **Relative timestamps** — messages show "just now", "5m ago", "2h ago", or date for older messages.
+
+---
+
 ## [1.1.0] — 2026-08-12
 
 ### 🐳 LXC / Container Support
@@ -99,5 +120,5 @@ All notable changes to GameServer Manager are documented here.
 - **5 themes** — Nebula Dark, Cloud Light, Ember Sun, Forest Command, and custom user themes.
 - **IPv6 support** — full dual-stack for servers and nodes.
 - **Install wizard** — web-based first-run setup with admin account creation.
-- **PostgreSQL** via Drizzle ORM with 17 tables.
+- **PostgreSQL** via Drizzle ORM with 18 tables.
 - **One-liner installer** for Ubuntu 22.04+ and Debian 12+.
