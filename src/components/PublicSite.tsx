@@ -483,17 +483,19 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
         </div>
       </footer>
 
-      {/* ── Floating Public Chat Widget ──────────────────────────────────── */}
-      <PublicChatWidget
-        user={user}
-        onLoginClick={onLoginClick}
-        config={{
-          enabled: ss.chat_enabled !== "false",
-          position: (ss.chat_position as "bottom-right" | "bottom-left" | "top-right" | "top-left") || "bottom-right",
-          width: parseInt(ss.chat_width || "360", 10) || 360,
-          height: parseInt(ss.chat_height || "420", 10) || 420,
-        }}
-      />
+      {/* ── Floating Public Chat Widget (forums tab only) ─────────────── */}
+      {(tab === "forums" || tab === "forum-cat" || tab === "forum-thread") && (
+        <PublicChatWidget
+          user={user}
+          onLoginClick={onLoginClick}
+          config={{
+            enabled: ss.chat_enabled !== "false",
+            position: (ss.chat_position as "bottom-right" | "bottom-left" | "top-right" | "top-left") || "bottom-right",
+            width: parseInt(ss.chat_width || "360", 10) || 360,
+            height: parseInt(ss.chat_height || "420", 10) || 420,
+          }}
+        />
+      )}
     </div>
   );
 }
