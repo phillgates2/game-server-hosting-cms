@@ -29,6 +29,38 @@ async function getMemStats() {
   }
 }
 
+/**
+ * Try multiple methods to drop caches, from most to least privileged.
+ * Returns true if any method succeeded.
+ */
+async function dropCaches(): Promise<{ ok: boolean; method: string }> {
+  // Method 1: direct write (only works as root)
+  try {
+    await writeFile("/proc/sys/vm/drop_caches", "3", "utf-8");
+    return { ok: true, method: "direct write (root)" };
+  } catch { /* not root */ }
+
+  // Method 2: sudo tee (works if gsm user has passwordless sudo for this)
+  try {
+    await execAsync("echo 3 | sudo -n tee /proc/sys/vm/drop_caches > /dev/null 2>&1");
+    return { ok: true, method: "sudo tee" };
+  } catch { /* no sudo access */ }
+
+  // Method 3: sudo sh -c (alternative sudo approach)
+  try {
+    await execAsync("sudo -n sh -c 'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null");
+    return { ok: true, method: "sudo sh" };
+  } catch { /* no sudo access */ }
+
+  // Method 4: Check if there's a sysctl we can use
+  try {
+    await execAsync("sudo -n sysctl -w vm.drop_caches=3 2>/dev/null");
+    return { ok: true, method: "sudo sysctl" };
+  } catch { /* no sudo access */ }
+
+  return { ok: false, method: "none" };
+}
+
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth || !(await hasPermission(auth.userId, "monitor.clear_cache"))) {
@@ -48,39 +80,31 @@ export async function POST(req: NextRequest) {
   }
 
   // 2. Drop page cache, dentries, and inodes
-  // echo 3 > /proc/sys/vm/drop_caches needs root.
-  // Using writeFile directly is more reliable than exec with shell redirect.
-  try {
-    await writeFile("/proc/sys/vm/drop_caches", "3", "utf-8");
-    actions.push("Dropped page cache, dentries, and inodes (level 3)");
-  } catch {
-    // writeFile failed (no root), try exec with sudo
-    try {
-      await execAsync("echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null 2>&1");
-      actions.push("Dropped page cache, dentries, and inodes via sudo (level 3)");
-    } catch {
-      // Try without sudo as last resort
-      try {
-        await execAsync("sh -c 'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null");
-        actions.push("Dropped caches via sh redirect");
-      } catch {
-        errors.push("Cannot write to /proc/sys/vm/drop_caches — panel must run as root or have sudo access");
-      }
-    }
+  const dropResult = await dropCaches();
+  if (dropResult.ok) {
+    actions.push(`Dropped page cache, dentries, and inodes via ${dropResult.method}`);
+  } else {
+    errors.push(
+      "Cannot clear caches — the panel user needs sudo access. " +
+      "Run this to fix:  echo 'gsm ALL=(ALL) NOPASSWD: /usr/bin/tee /proc/sys/vm/drop_caches, /usr/sbin/sysctl, /usr/sbin/swapoff, /usr/sbin/swapon' | sudo tee /etc/sudoers.d/gsm-panel"
+    );
   }
 
   // 3. Clear swap (swapoff + swapon forces all swap contents back to RAM then clears)
   try {
     const { stdout: swapInfo } = await execAsync("swapon --show --noheadings 2>/dev/null || true");
     if (swapInfo.trim()) {
-      await execAsync("sudo swapoff -a && sudo swapon -a 2>/dev/null");
-      actions.push("Swap cleared (swapoff + swapon)");
+      try {
+        await execAsync("sudo -n swapoff -a && sudo -n swapon -a 2>/dev/null");
+        actions.push("Swap cleared (swapoff + swapon)");
+      } catch {
+        actions.push("Swap clear skipped (requires sudo for swapoff/swapon)");
+      }
     } else {
       actions.push("No swap configured — skipped");
     }
   } catch {
-    // Swap clear is optional
-    actions.push("Swap clear skipped (requires sudo)");
+    actions.push("Swap check skipped");
   }
 
   // 4. Compact memory (kernel 4.6+)
@@ -88,7 +112,12 @@ export async function POST(req: NextRequest) {
     await writeFile("/proc/sys/vm/compact_memory", "1", "utf-8");
     actions.push("Memory compaction triggered");
   } catch {
-    // Optional, requires root
+    try {
+      await execAsync("sudo -n sh -c 'echo 1 > /proc/sys/vm/compact_memory' 2>/dev/null");
+      actions.push("Memory compaction triggered via sudo");
+    } catch {
+      // Optional, not an error
+    }
   }
 
   const after = await getMemStats();

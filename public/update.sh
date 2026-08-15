@@ -95,9 +95,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ── Checks ────────────────────────────────────────────────────────────────────
+# ── Root / sudo check ─────────────────────────────────────────────────────────
 if [[ $EUID -ne 0 ]]; then
-  die "This updater must be run as root. Use:  sudo bash update.sh"
+  if command -v sudo &>/dev/null; then
+    warn "Not running as root — re-launching with sudo..."
+    exec sudo bash "$0" "$@"
+  else
+    die "This updater needs root access. Run with:  sudo bash update.sh"
+  fi
 fi
 
 if [[ ! -d "$INSTALL_DIR/.git" ]]; then

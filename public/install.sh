@@ -145,9 +145,32 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ── Root check ────────────────────────────────────────────────────────────────
+# ── Root / sudo check ─────────────────────────────────────────────────────────
+# The installer needs root privileges for package installation, user creation,
+# and system configuration.  If not running as root, re-exec under sudo.
 if [[ $EUID -ne 0 ]]; then
-  die "This installer must be run as root. Use:  sudo bash install.sh"
+  if command -v sudo &>/dev/null; then
+    warn "Not running as root — re-launching with sudo..."
+    # When invoked via bash <(curl ...), $0 is /dev/stdin or /proc/self/fd/X
+    # so we can't re-exec it.  Save to a temp file first.
+    if [[ "$0" == "/dev/stdin" || "$0" == "bash" || "$0" =~ ^/proc/ || "$0" =~ ^/dev/ ]]; then
+      TMPSCRIPT=$(mktemp /tmp/gsm-install-XXXXXX.sh)
+      # Re-download the script or copy stdin
+      if [[ -f "$0" ]]; then
+        cp "$0" "$TMPSCRIPT"
+      else
+        # The script was piped — download it fresh
+        curl -fsSL "https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/public/install.sh" -o "$TMPSCRIPT" 2>/dev/null \
+          || die "Cannot re-download install script for sudo re-exec. Run with: sudo bash install.sh"
+      fi
+      chmod +x "$TMPSCRIPT"
+      exec sudo bash "$TMPSCRIPT" "$@"
+    else
+      exec sudo bash "$0" "$@"
+    fi
+  else
+    die "This installer needs root access. Run with:  sudo bash install.sh"
+  fi
 fi
 
 banner
@@ -1052,6 +1075,40 @@ su - "$GSM_USER" -c "pm2 save" || true
 
 # Set up PM2 to start on boot via systemd
 env PATH=$PATH:/usr/bin pm2 startup systemd -u "$GSM_USER" --hp "/home/$GSM_USER" 2>/dev/null || true
+
+# ── Grant the gsm user passwordless sudo for system management commands ──────
+# This allows the panel to clear RAM buffers/cache, manage swap, and perform
+# other system operations without running the entire panel as root.
+log "Configuring sudo access for panel system operations..."
+cat > /etc/sudoers.d/gsm-panel <<SUDOEOF
+# GameServer Manager — passwordless sudo for system management
+# Installed by the GSM installer. Remove with: sudo rm /etc/sudoers.d/gsm-panel
+
+# Clear RAM buffers and cached memory
+$GSM_USER ALL=(ALL) NOPASSWD: /usr/bin/tee /proc/sys/vm/drop_caches
+$GSM_USER ALL=(ALL) NOPASSWD: /usr/sbin/sysctl vm.drop_caches=*
+$GSM_USER ALL=(ALL) NOPASSWD: /bin/sh -c echo ? > /proc/sys/vm/drop_caches
+
+# Swap management
+$GSM_USER ALL=(ALL) NOPASSWD: /usr/sbin/swapoff
+$GSM_USER ALL=(ALL) NOPASSWD: /usr/sbin/swapon
+
+# Memory compaction
+$GSM_USER ALL=(ALL) NOPASSWD: /bin/sh -c echo ? > /proc/sys/vm/compact_memory
+
+# Sync filesystem
+$GSM_USER ALL=(ALL) NOPASSWD: /usr/bin/sync, /bin/sync
+SUDOEOF
+chmod 440 /etc/sudoers.d/gsm-panel
+
+# Validate sudoers file
+if visudo -cf /etc/sudoers.d/gsm-panel > /dev/null 2>&1; then
+  ok "Sudo access configured for $GSM_USER (cache clearing, swap, sync)"
+else
+  warn "Sudoers file validation failed — removing it to avoid lockouts"
+  rm -f /etc/sudoers.d/gsm-panel
+  warn "Panel will not be able to clear RAM buffers (non-fatal)"
+fi
 
 # Create a wrapper script so root (and other users) can manage the gsm PM2 instance
 # without needing to `su - gsm` first
