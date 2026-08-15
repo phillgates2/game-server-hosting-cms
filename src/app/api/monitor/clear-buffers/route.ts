@@ -1,19 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
-import { exec } from "node:child_process";
+import { execFile, exec } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile, writeFile } from "node:fs/promises";
 
+const execFileAsync = promisify(execFile);
 const execAsync = promisify(exec);
 
-// Use absolute paths so child_process.exec works regardless of PATH
-const SUDO = "/usr/bin/sudo";
-const TEE = "/usr/bin/tee";
-const SYSCTL = "/usr/sbin/sysctl";
-const SYNC = "/usr/bin/sync";
-const SWAPOFF = "/usr/sbin/swapoff";
-const SWAPON = "/usr/sbin/swapon";
+const FULL_PATH =
+  "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+/** Build an env object that keeps process.env intact but forces a broad PATH. */
+function safeEnv() {
+  return { ...process.env, PATH: FULL_PATH };
+}
 
 async function getMemStats() {
   try {
@@ -37,67 +38,80 @@ async function getMemStats() {
   }
 }
 
-/**
- * Try multiple methods to drop caches, from most to least privileged.
- * Returns { ok, method, error? }.
- */
-async function dropCaches(): Promise<{ ok: boolean; method: string; error?: string }> {
-  // Method 1: direct write (only works as root)
+/** Detect the actual OS username running this Node.js process. */
+async function getProcessUser(): Promise<string> {
   try {
-    await writeFile("/proc/sys/vm/drop_caches", "3", "utf-8");
-    return { ok: true, method: "direct write (root)" };
-  } catch { /* not root */ }
-
-  // Method 2: sudo tee (absolute paths, capture stderr)
-  try {
-    const { stderr } = await execAsync(`echo 3 | ${SUDO} -n ${TEE} /proc/sys/vm/drop_caches`, {
-      env: { ...process.env, PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" },
-      timeout: 10000,
+    const { stdout } = await execFileAsync("/usr/bin/id", ["-un"], {
+      timeout: 3000,
     });
-    if (stderr && stderr.includes("password")) throw new Error(stderr);
-    return { ok: true, method: "sudo tee" };
-  } catch (e) {
-    // fall through
-    void e;
-  }
-
-  // Method 3: sudo sh -c (absolute path)
-  try {
-    await execAsync(`${SUDO} -n /bin/sh -c 'echo 3 > /proc/sys/vm/drop_caches'`, {
-      env: { ...process.env, PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" },
-      timeout: 10000,
-    });
-    return { ok: true, method: "sudo sh" };
-  } catch { /* no sudo access */ }
-
-  // Method 4: sysctl
-  try {
-    await execAsync(`${SUDO} -n ${SYSCTL} -w vm.drop_caches=3`, {
-      env: { ...process.env, PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" },
-      timeout: 10000,
-    });
-    return { ok: true, method: "sudo sysctl" };
-  } catch { /* no sudo access */ }
-
-  // All methods failed — find out why
-  let diagMsg = "";
-  try {
-    const { stdout } = await execAsync(`${SUDO} -n true 2>&1 || echo SUDO_FAIL`, {
-      env: { ...process.env, PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" },
-      timeout: 5000,
-    });
-    if (stdout.includes("SUDO_FAIL")) {
-      diagMsg = "sudo requires a password for this user";
-    }
+    return stdout.trim();
   } catch {
-    diagMsg = "sudo not available";
+    return process.env.USER || process.env.LOGNAME || "unknown";
+  }
+}
+
+/**
+ * Try to write a value to a /proc or /sys file using escalating methods.
+ */
+async function writeProc(
+  filePath: string,
+  value: string
+): Promise<{ ok: boolean; method: string }> {
+  // Method 1: Direct write (works when running as root)
+  try {
+    await writeFile(filePath, value, "utf-8");
+    return { ok: true, method: "direct write (root)" };
+  } catch {
+    /* not root */
   }
 
-  return {
-    ok: false,
-    method: "none",
-    error: diagMsg || "All drop_caches methods failed",
-  };
+  // Method 2: sudo tee
+  try {
+    const { stdout, stderr } = await execAsync(
+      `printf '%s' '${value}' | /usr/bin/sudo -n /usr/bin/tee ${filePath}`,
+      { env: safeEnv(), timeout: 10000 }
+    );
+    if (
+      stderr &&
+      (stderr.includes("password") || stderr.includes("sorry"))
+    ) {
+      throw new Error(stderr);
+    }
+    if (stdout.trim() === value) {
+      return { ok: true, method: "sudo tee" };
+    }
+    return { ok: true, method: "sudo tee" };
+  } catch {
+    /* no sudo tee access */
+  }
+
+  // Method 3: sudo sh -c
+  try {
+    await execFileAsync(
+      "/usr/bin/sudo",
+      ["-n", "/bin/sh", "-c", `echo ${value} > ${filePath}`],
+      { env: safeEnv(), timeout: 10000 }
+    );
+    return { ok: true, method: "sudo sh" };
+  } catch {
+    /* no sudo sh access */
+  }
+
+  // Method 4: sudo sysctl (only for vm.drop_caches)
+  if (filePath === "/proc/sys/vm/drop_caches") {
+    try {
+      await execFileAsync(
+        "/usr/bin/sudo",
+        ["-n", "/usr/sbin/sysctl", "-w", `vm.drop_caches=${value}`],
+        { env: safeEnv(), timeout: 10000 }
+      );
+      return { ok: true, method: "sudo sysctl" };
+    } catch {
+      /* no sysctl access */
+    }
+  }
+
+  return { ok: false, method: "none" };
 }
 
 export async function POST(req: NextRequest) {
@@ -112,36 +126,47 @@ export async function POST(req: NextRequest) {
 
   // 1. Sync all filesystem buffers to disk
   try {
-    await execAsync(SYNC, { timeout: 10000 });
+    await execFileAsync("/usr/bin/sync", [], { timeout: 10000 });
     actions.push("Filesystem synced to disk");
   } catch (e: unknown) {
-    errors.push(`sync failed: ${e instanceof Error ? e.message : "unknown"}`);
-  }
-
-  // 2. Drop page cache, dentries, and inodes
-  const dropResult = await dropCaches();
-  if (dropResult.ok) {
-    actions.push(`Dropped page cache, dentries, and inodes via ${dropResult.method}`);
-  } else {
-    const user = process.env.USER || "unknown";
     errors.push(
-      `Cannot clear caches (${dropResult.error || "no method succeeded"}). ` +
-      `Run this as root to fix:  echo '${user} ALL=(ALL) NOPASSWD: ${TEE} /proc/sys/vm/drop_caches, ${SYSCTL}, ${SWAPOFF}, ${SWAPON}' | sudo tee /etc/sudoers.d/gsm-panel`
+      `sync failed: ${e instanceof Error ? e.message : "unknown"}`
     );
   }
 
-  // 3. Clear swap (swapoff + swapon forces all swap contents back to RAM then clears)
+  // 2. Drop page cache, dentries, and inodes
+  const dropResult = await writeProc("/proc/sys/vm/drop_caches", "3");
+  if (dropResult.ok) {
+    actions.push(
+      `Dropped page cache, dentries, and inodes via ${dropResult.method}`
+    );
+  } else {
+    const processUser = await getProcessUser();
+    errors.push(
+      `Cannot clear caches — the panel process runs as OS user '${processUser}'. ` +
+        `Run this as root to fix:\n` +
+        `echo '${processUser} ALL=(ALL) NOPASSWD: /usr/bin/tee /proc/sys/vm/drop_caches, /usr/sbin/sysctl vm.drop_caches=*, /usr/sbin/swapoff, /usr/sbin/swapon' | sudo tee /etc/sudoers.d/gsm-panel && sudo chmod 440 /etc/sudoers.d/gsm-panel`
+    );
+  }
+
+  // 3. Clear swap
   try {
-    const { stdout: swapInfo } = await execAsync("swapon --show --noheadings 2>/dev/null || true", {
-      env: { ...process.env, PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" },
-      timeout: 5000,
-    });
+    const { stdout: swapInfo } = await execAsync(
+      "swapon --show --noheadings 2>/dev/null || true",
+      { env: safeEnv(), timeout: 5000 }
+    );
     if (swapInfo.trim()) {
       try {
-        await execAsync(`${SUDO} -n ${SWAPOFF} -a && ${SUDO} -n ${SWAPON} -a`, {
-          env: { ...process.env, PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" },
-          timeout: 30000,
-        });
+        await execFileAsync(
+          "/usr/bin/sudo",
+          ["-n", "/usr/sbin/swapoff", "-a"],
+          { env: safeEnv(), timeout: 30000 }
+        );
+        await execFileAsync(
+          "/usr/bin/sudo",
+          ["-n", "/usr/sbin/swapon", "-a"],
+          { env: safeEnv(), timeout: 30000 }
+        );
         actions.push("Swap cleared (swapoff + swapon)");
       } catch {
         actions.push("Swap clear skipped (requires sudo for swapoff/swapon)");
@@ -153,28 +178,17 @@ export async function POST(req: NextRequest) {
     actions.push("Swap check skipped");
   }
 
-  // 4. Compact memory (kernel 4.6+)
-  try {
-    await writeFile("/proc/sys/vm/compact_memory", "1", "utf-8");
-    actions.push("Memory compaction triggered");
-  } catch {
-    try {
-      await execAsync(`${SUDO} -n /bin/sh -c 'echo 1 > /proc/sys/vm/compact_memory'`, {
-        env: { ...process.env, PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" },
-        timeout: 10000,
-      });
-      actions.push("Memory compaction triggered via sudo");
-    } catch {
-      // Optional, not an error
-    }
+  // 4. Compact memory (kernel 4.6+) — optional
+  const compactResult = await writeProc("/proc/sys/vm/compact_memory", "1");
+  if (compactResult.ok) {
+    actions.push(`Memory compaction triggered via ${compactResult.method}`);
   }
 
-  // Small delay to let the kernel finish freeing
+  // Small delay to let the kernel finish freeing pages
   await new Promise((resolve) => setTimeout(resolve, 500));
 
   const after = await getMemStats();
 
-  // Calculate what was actually freed
   let freedMb = 0;
   let freedBuffersMb = 0;
   let freedCachedMb = 0;
