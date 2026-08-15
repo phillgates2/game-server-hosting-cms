@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { chatMessages, users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { desc, gt, eq, sql } from "drizzle-orm";
 
 // GET /api/forum/chat — fetch recent messages (with optional ?after=<id> for polling)
@@ -54,11 +55,16 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST /api/forum/chat — send a new message
+// POST /api/forum/chat — send a new message (requires forum.post permission)
 export async function POST(req: NextRequest) {
   const authUser = await getCurrentUser(req.headers);
   if (!authUser) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Check forum.post permission
+  if (!(await hasPermission(authUser.userId, "forum.post"))) {
+    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
   try {
@@ -100,7 +106,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// DELETE /api/forum/chat — delete a message (admin/mod or own message)
+// DELETE /api/forum/chat — delete a message (own message or forum.delete_any permission)
 export async function DELETE(req: NextRequest) {
   const authUser = await getCurrentUser(req.headers);
   if (!authUser) {
@@ -113,7 +119,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "messageId is required" }, { status: 400 });
     }
 
-    // Check ownership or admin/mod role
+    // Check ownership or moderation permissions
     const [msg] = await db
       .select({ userId: chatMessages.userId })
       .from(chatMessages)
@@ -123,15 +129,14 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "Message not found" }, { status: 404 });
     }
 
-    // Get user role
-    const [userRow] = await db
-      .select({ role: users.role })
-      .from(users)
-      .where(eq(users.id, authUser.userId));
+    // Check if user can delete: own message with forum.delete_own, or any message with forum.delete_any/moderate
+    const isOwner = msg.userId === authUser.userId;
+    const canDeleteAny = await hasPermission(authUser.userId, "forum.delete_any") || 
+                         await hasPermission(authUser.userId, "forum.moderate");
+    const canDeleteOwn = await hasPermission(authUser.userId, "forum.delete_own");
 
-    const isMod = userRow?.role === "admin" || userRow?.role === "moderator";
-    if (msg.userId !== authUser.userId && !isMod) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!canDeleteAny && !(isOwner && canDeleteOwn)) {
+      return NextResponse.json({ error: "Permission denied" }, { status: 403 });
     }
 
     await db.delete(chatMessages).where(eq(chatMessages.id, messageId));
