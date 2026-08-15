@@ -34,8 +34,6 @@ interface SiteSettings {
   panel_name?: string; hero_title?: string; hero_subtitle?: string;
   hero_cta_text?: string; footer_text?: string;
   announcement?: string; announcement_type?: string;
-  chat_enabled?: string; chat_position?: string;
-  chat_width?: string; chat_height?: string;
 }
 interface Props {
   user: { id: number; username: string; role: string;
@@ -283,41 +281,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                   </select>
                 </div>
               </div>
-              <div className="bg-bg-card border border-border rounded-xl p-6 space-y-4">
-                <h3 className="font-semibold text-lg">💬 Public Chat Widget</h3>
-                <p className="text-sm text-text-secondary">Configure the floating community chat visible on all public pages. Guests can read messages; logged-in users can send messages.</p>
-                <div>
-                  <label className="block text-xs text-text-muted mb-1">Enabled</label>
-                  <select value={editorSettings.chat_enabled || "true"} onChange={(e) => setEditorSettings({ ...editorSettings, chat_enabled: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent">
-                    <option value="true">Enabled</option>
-                    <option value="false">Disabled</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs text-text-muted mb-1">Position</label>
-                  <select value={editorSettings.chat_position || "bottom-right"} onChange={(e) => setEditorSettings({ ...editorSettings, chat_position: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent">
-                    <option value="bottom-right">Bottom Right</option>
-                    <option value="bottom-left">Bottom Left</option>
-                    <option value="top-right">Top Right</option>
-                    <option value="top-left">Top Left</option>
-                  </select>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs text-text-muted mb-1">Width (px)</label>
-                    <input type="number" min={280} max={600} value={editorSettings.chat_width || "360"} onChange={(e) => setEditorSettings({ ...editorSettings, chat_width: e.target.value })}
-                      className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-text-muted mb-1">Height (px)</label>
-                    <input type="number" min={200} max={800} value={editorSettings.chat_height || "420"} onChange={(e) => setEditorSettings({ ...editorSettings, chat_height: e.target.value })}
-                      className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent" />
-                  </div>
-                </div>
-                <p className="text-xs text-text-muted">💡 Users can also drag the chat widget to reposition it temporarily during their session.</p>
-              </div>
+
               <div className="flex items-center gap-4">
                 <button type="submit" disabled={editorSaving} className="px-6 py-2.5 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium disabled:opacity-50">
                   {editorSaving ? "Saving..." : "💾 Save Changes"}
@@ -392,67 +356,88 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
 
         {/* ═══ FORUMS ═══ */}
         {tab === "forums" && (
-          <div className="animate-fade-in space-y-6">
-            <h2 className="text-2xl font-bold">💬 Forums</h2>
-            {forumCategories.length === 0 ? <Empty text="No forum categories yet." /> : (
-              <div className="grid gap-3">{forumCategories.map((c) => (
-                <button key={c.id} onClick={() => openCategory(c)} className="bg-bg-card border border-border rounded-xl p-5 text-left hover:border-accent/30 transition-colors w-full">
-                  <div className="flex items-center justify-between"><div><h3 className="font-semibold text-lg">{c.name}</h3><p className="text-sm text-text-secondary mt-1">{c.description}</p></div>
-                    <div className="text-right text-xs text-text-muted flex-shrink-0 ml-4"><p><strong className="text-text-secondary">{c.threadCount}</strong> threads</p><p><strong className="text-text-secondary">{c.postCount}</strong> posts</p>{c.lastActivity && <p className="mt-1">{fmtS(c.lastActivity)}</p>}</div></div>
-                </button>
-              ))}</div>
-            )}
+          <div className="animate-fade-in">
+            <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6">
+              <div className="space-y-6 min-w-0">
+                <h2 className="text-2xl font-bold">💬 Forums</h2>
+                {forumCategories.length === 0 ? <Empty text="No forum categories yet." /> : (
+                  <div className="grid gap-3">{forumCategories.map((c) => (
+                    <button key={c.id} onClick={() => openCategory(c)} className="bg-bg-card border border-border rounded-xl p-5 text-left hover:border-accent/30 transition-colors w-full">
+                      <div className="flex items-center justify-between"><div><h3 className="font-semibold text-lg">{c.name}</h3><p className="text-sm text-text-secondary mt-1">{c.description}</p></div>
+                        <div className="text-right text-xs text-text-muted flex-shrink-0 ml-4"><p><strong className="text-text-secondary">{c.threadCount}</strong> threads</p><p><strong className="text-text-secondary">{c.postCount}</strong> posts</p>{c.lastActivity && <p className="mt-1">{fmtS(c.lastActivity)}</p>}</div></div>
+                    </button>
+                  ))}</div>
+                )}
+              </div>
+              <div className="xl:sticky xl:top-20 self-start">
+                <PublicChatWidget user={user} onLoginClick={onLoginClick} />
+              </div>
+            </div>
           </div>
         )}
 
         {/* ═══ FORUM CATEGORY ═══ */}
         {tab === "forum-cat" && selectedCat && (
-          <div className="animate-fade-in space-y-4">
-            <Crumb items={[["Forums", () => goTab("forums")], [selectedCat.name]]} />
-            <div className="flex items-center justify-between">
-              <div><h2 className="text-2xl font-bold">{selectedCat.name}</h2><p className="text-text-secondary text-sm">{selectedCat.description}</p></div>
-              {user ? <button onClick={() => setShowNewThread(!showNewThread)} className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium">{showNewThread ? "Cancel" : "+ New Thread"}</button>
-                : <button onClick={onLoginClick} className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium">Login to Post</button>}
+          <div className="animate-fade-in">
+            <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6">
+              <div className="space-y-4 min-w-0">
+                <Crumb items={[["Forums", () => goTab("forums")], [selectedCat.name]]} />
+                <div className="flex items-center justify-between">
+                  <div><h2 className="text-2xl font-bold">{selectedCat.name}</h2><p className="text-text-secondary text-sm">{selectedCat.description}</p></div>
+                  {user ? <button onClick={() => setShowNewThread(!showNewThread)} className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium">{showNewThread ? "Cancel" : "+ New Thread"}</button>
+                    : <button onClick={onLoginClick} className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium">Login to Post</button>}
+                </div>
+                {showNewThread && user && (
+                  <form onSubmit={createThread} className="bg-bg-card border border-border rounded-xl p-6 space-y-4">
+                    <input value={newThread.title} onChange={(e) => setNewThread({ ...newThread, title: e.target.value })} placeholder="Thread title" className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent" required />
+                    <textarea value={newThread.body} onChange={(e) => setNewThread({ ...newThread, body: e.target.value })} placeholder="Write your post..." rows={5} className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-accent" required />
+                    <button type="submit" className="px-6 py-2 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium">Create Thread</button>
+                  </form>
+                )}
+                {threads.length === 0 ? <Empty text="No threads yet. Be the first!" /> : (
+                  <div className="bg-bg-card border border-border rounded-xl overflow-hidden">{threads.map((t, i) => (
+                    <button key={t.id} onClick={() => openThread(t)} className={`w-full text-left p-4 hover:bg-bg-hover transition-colors flex items-center gap-4 ${i > 0 ? "border-t border-border/50" : ""}`}>
+                      <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center text-accent text-sm font-bold flex-shrink-0">{t.pinned ? "📌" : (t.authorName || "?")[0].toUpperCase()}</div>
+                      <div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><h3 className="font-semibold text-sm truncate">{t.title}</h3>{t.pinned && <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning/15 text-warning">Pinned</span>}{t.locked && <span className="text-[10px] px-1.5 py-0.5 rounded bg-danger/15 text-danger">Locked</span>}</div>
+                        <p className="text-xs text-text-muted mt-1">by {t.authorName || "Unknown"} {roleBadge(t.authorRole)} · {fmtS(t.createdAt)} · <strong>{t.replyCount}</strong> replies</p></div>
+                    </button>
+                  ))}</div>
+                )}
+              </div>
+              <div className="xl:sticky xl:top-20 self-start">
+                <PublicChatWidget user={user} onLoginClick={onLoginClick} />
+              </div>
             </div>
-            {showNewThread && user && (
-              <form onSubmit={createThread} className="bg-bg-card border border-border rounded-xl p-6 space-y-4">
-                <input value={newThread.title} onChange={(e) => setNewThread({ ...newThread, title: e.target.value })} placeholder="Thread title" className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent" required />
-                <textarea value={newThread.body} onChange={(e) => setNewThread({ ...newThread, body: e.target.value })} placeholder="Write your post..." rows={5} className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-accent" required />
-                <button type="submit" className="px-6 py-2 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium">Create Thread</button>
-              </form>
-            )}
-            {threads.length === 0 ? <Empty text="No threads yet. Be the first!" /> : (
-              <div className="bg-bg-card border border-border rounded-xl overflow-hidden">{threads.map((t, i) => (
-                <button key={t.id} onClick={() => openThread(t)} className={`w-full text-left p-4 hover:bg-bg-hover transition-colors flex items-center gap-4 ${i > 0 ? "border-t border-border/50" : ""}`}>
-                  <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center text-accent text-sm font-bold flex-shrink-0">{t.pinned ? "📌" : (t.authorName || "?")[0].toUpperCase()}</div>
-                  <div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><h3 className="font-semibold text-sm truncate">{t.title}</h3>{t.pinned && <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning/15 text-warning">Pinned</span>}{t.locked && <span className="text-[10px] px-1.5 py-0.5 rounded bg-danger/15 text-danger">Locked</span>}</div>
-                    <p className="text-xs text-text-muted mt-1">by {t.authorName || "Unknown"} {roleBadge(t.authorRole)} · {fmtS(t.createdAt)} · <strong>{t.replyCount}</strong> replies</p></div>
-                </button>
-              ))}</div>
-            )}
           </div>
         )}
 
         {/* ═══ FORUM THREAD ═══ */}
         {tab === "forum-thread" && selectedThread && (
-          <div className="animate-fade-in space-y-4">
-            <Crumb items={[["Forums", () => goTab("forums")], ...(selectedCat ? [[selectedCat.name, () => { setTab("forum-cat"); loadThreads(selectedCat.id); }] as [string, () => void]] : []), [selectedThread.title]]} />
-            <h2 className="text-xl font-bold">{selectedThread.title}</h2>
-            <div className="space-y-4">{posts.map((p) => (
-              <div key={p.id} className="bg-bg-card border border-border rounded-xl overflow-hidden"><div className="flex flex-col md:flex-row">
-                <div className="md:w-44 p-4 bg-bg-secondary/50 border-b md:border-b-0 md:border-r border-border/50 flex-shrink-0"><div className="flex md:flex-col items-center md:items-start gap-3">
-                  <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center text-accent text-sm font-bold">{(p.authorName || "?")[0].toUpperCase()}</div>
-                  <div><p className="font-semibold text-sm">{p.authorName || "Unknown"}</p>{roleBadge(p.authorRole)}<div className="text-[10px] text-text-muted mt-1 space-y-0.5"><p>{p.authorPostCount} posts</p>{p.authorLocation && <p>📍 {p.authorLocation}</p>}{p.authorJoined && <p>Joined {fmtS(p.authorJoined)}</p>}</div></div>
-                </div></div>
-                <div className="flex-1 p-4"><span className="text-xs text-text-muted">{fmtF(p.createdAt)}</span><div className="text-sm text-text-secondary whitespace-pre-wrap leading-relaxed mt-2">{p.body}</div>{p.updatedAt !== p.createdAt && <p className="text-[10px] text-text-muted mt-3 italic">Edited {fmtF(p.updatedAt)}</p>}</div>
-              </div></div>
-            ))}</div>
-            {selectedThread.locked ? <div className="bg-bg-card border border-border rounded-xl p-6 text-center text-text-muted text-sm">🔒 This thread is locked.</div>
-              : user ? (
-                <form onSubmit={createReply} className="bg-bg-card border border-border rounded-xl p-6 space-y-4"><h3 className="font-semibold text-sm">Reply</h3>
-                  <textarea value={replyBody} onChange={(e) => setReplyBody(e.target.value)} placeholder="Write your reply..." rows={4} className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-accent" required />
-                  <button type="submit" className="px-6 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium">Post Reply</button></form>
-              ) : <div className="bg-bg-card border border-border rounded-xl p-6 text-center"><button onClick={onLoginClick} className="text-accent hover:underline text-sm">Log in to reply</button></div>}
+          <div className="animate-fade-in">
+            <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6">
+              <div className="space-y-4 min-w-0">
+                <Crumb items={[["Forums", () => goTab("forums")], ...(selectedCat ? [[selectedCat.name, () => { setTab("forum-cat"); loadThreads(selectedCat.id); }] as [string, () => void]] : []), [selectedThread.title]]} />
+                <h2 className="text-xl font-bold">{selectedThread.title}</h2>
+                <div className="space-y-4">{posts.map((p) => (
+                  <div key={p.id} className="bg-bg-card border border-border rounded-xl overflow-hidden"><div className="flex flex-col md:flex-row">
+                    <div className="md:w-44 p-4 bg-bg-secondary/50 border-b md:border-b-0 md:border-r border-border/50 flex-shrink-0"><div className="flex md:flex-col items-center md:items-start gap-3">
+                      <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center text-accent text-sm font-bold">{(p.authorName || "?")[0].toUpperCase()}</div>
+                      <div><p className="font-semibold text-sm">{p.authorName || "Unknown"}</p>{roleBadge(p.authorRole)}<div className="text-[10px] text-text-muted mt-1 space-y-0.5"><p>{p.authorPostCount} posts</p>{p.authorLocation && <p>📍 {p.authorLocation}</p>}{p.authorJoined && <p>Joined {fmtS(p.authorJoined)}</p>}</div></div>
+                    </div></div>
+                    <div className="flex-1 p-4"><span className="text-xs text-text-muted">{fmtF(p.createdAt)}</span><div className="text-sm text-text-secondary whitespace-pre-wrap leading-relaxed mt-2">{p.body}</div>{p.updatedAt !== p.createdAt && <p className="text-[10px] text-text-muted mt-3 italic">Edited {fmtF(p.updatedAt)}</p>}</div>
+                  </div></div>
+                ))}</div>
+                {selectedThread.locked ? <div className="bg-bg-card border border-border rounded-xl p-6 text-center text-text-muted text-sm">🔒 This thread is locked.</div>
+                  : user ? (
+                    <form onSubmit={createReply} className="bg-bg-card border border-border rounded-xl p-6 space-y-4"><h3 className="font-semibold text-sm">Reply</h3>
+                      <textarea value={replyBody} onChange={(e) => setReplyBody(e.target.value)} placeholder="Write your reply..." rows={4} className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-accent" required />
+                      <button type="submit" className="px-6 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium">Post Reply</button></form>
+                  ) : <div className="bg-bg-card border border-border rounded-xl p-6 text-center"><button onClick={onLoginClick} className="text-accent hover:underline text-sm">Log in to reply</button></div>}
+              </div>
+              <div className="xl:sticky xl:top-20 self-start">
+                <PublicChatWidget user={user} onLoginClick={onLoginClick} />
+              </div>
+            </div>
           </div>
         )}
 
@@ -483,19 +468,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
         </div>
       </footer>
 
-      {/* ── Floating Public Chat Widget (forums tab only) ─────────────── */}
-      {(tab === "forums" || tab === "forum-cat" || tab === "forum-thread") && (
-        <PublicChatWidget
-          user={user}
-          onLoginClick={onLoginClick}
-          config={{
-            enabled: ss.chat_enabled !== "false",
-            position: (ss.chat_position as "bottom-right" | "bottom-left" | "top-right" | "top-left") || "bottom-right",
-            width: parseInt(ss.chat_width || "360", 10) || 360,
-            height: parseInt(ss.chat_height || "420", 10) || 420,
-          }}
-        />
-      )}
+
     </div>
   );
 }
