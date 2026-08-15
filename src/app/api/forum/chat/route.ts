@@ -5,12 +5,8 @@ import { getCurrentUser } from "@/lib/auth";
 import { desc, gt, eq, sql } from "drizzle-orm";
 
 // GET /api/forum/chat — fetch recent messages (with optional ?after=<id> for polling)
+// Public: anyone can read chat messages (guests see read-only view)
 export async function GET(req: NextRequest) {
-  const authUser = await getCurrentUser(req.headers);
-  if (!authUser) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const url = new URL(req.url);
   const afterId = url.searchParams.get("after");
   const limitParam = url.searchParams.get("limit");

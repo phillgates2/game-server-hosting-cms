@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import PublicChatWidget from "@/components/PublicChatWidget";
 
 /* ── Types ──────────────────────────────────────────────────────────────────── */
 interface CmsPost {
@@ -33,6 +34,8 @@ interface SiteSettings {
   panel_name?: string; hero_title?: string; hero_subtitle?: string;
   hero_cta_text?: string; footer_text?: string;
   announcement?: string; announcement_type?: string;
+  chat_enabled?: string; chat_position?: string;
+  chat_width?: string; chat_height?: string;
 }
 interface Props {
   user: { id: number; username: string; role: string;
@@ -280,6 +283,41 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                   </select>
                 </div>
               </div>
+              <div className="bg-bg-card border border-border rounded-xl p-6 space-y-4">
+                <h3 className="font-semibold text-lg">💬 Public Chat Widget</h3>
+                <p className="text-sm text-text-secondary">Configure the floating community chat visible on all public pages. Guests can read messages; logged-in users can send messages.</p>
+                <div>
+                  <label className="block text-xs text-text-muted mb-1">Enabled</label>
+                  <select value={editorSettings.chat_enabled || "true"} onChange={(e) => setEditorSettings({ ...editorSettings, chat_enabled: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent">
+                    <option value="true">Enabled</option>
+                    <option value="false">Disabled</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-text-muted mb-1">Position</label>
+                  <select value={editorSettings.chat_position || "bottom-right"} onChange={(e) => setEditorSettings({ ...editorSettings, chat_position: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent">
+                    <option value="bottom-right">Bottom Right</option>
+                    <option value="bottom-left">Bottom Left</option>
+                    <option value="top-right">Top Right</option>
+                    <option value="top-left">Top Left</option>
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-text-muted mb-1">Width (px)</label>
+                    <input type="number" min={280} max={600} value={editorSettings.chat_width || "360"} onChange={(e) => setEditorSettings({ ...editorSettings, chat_width: e.target.value })}
+                      className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-text-muted mb-1">Height (px)</label>
+                    <input type="number" min={200} max={800} value={editorSettings.chat_height || "420"} onChange={(e) => setEditorSettings({ ...editorSettings, chat_height: e.target.value })}
+                      className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent" />
+                  </div>
+                </div>
+                <p className="text-xs text-text-muted">💡 Users can also drag the chat widget to reposition it temporarily during their session.</p>
+              </div>
               <div className="flex items-center gap-4">
                 <button type="submit" disabled={editorSaving} className="px-6 py-2.5 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium disabled:opacity-50">
                   {editorSaving ? "Saving..." : "💾 Save Changes"}
@@ -444,6 +482,18 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
           </div>
         </div>
       </footer>
+
+      {/* ── Floating Public Chat Widget ──────────────────────────────────── */}
+      <PublicChatWidget
+        user={user}
+        onLoginClick={onLoginClick}
+        config={{
+          enabled: ss.chat_enabled !== "false",
+          position: (ss.chat_position as "bottom-right" | "bottom-left" | "top-right" | "top-left") || "bottom-right",
+          width: parseInt(ss.chat_width || "360", 10) || 360,
+          height: parseInt(ss.chat_height || "420", 10) || 420,
+        }}
+      />
     </div>
   );
 }

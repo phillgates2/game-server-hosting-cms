@@ -18,6 +18,10 @@ const PUBLIC_KEYS = [
   "announcement_type",
   "custom_css",
   "nav_links_json",
+  "chat_enabled",
+  "chat_position",
+  "chat_width",
+  "chat_height",
 ];
 
 /**

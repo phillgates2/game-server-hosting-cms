@@ -4,6 +4,23 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.3.0] — 2026-08-15
+
+### 💬 Public Chat Widget (Guest-Visible, Configurable)
+- **Public-facing chat widget** — a floating community chat overlay visible on all public site pages (home, forums, blog, changelog, ladder). Guests and unauthenticated visitors can **read** the chat in real-time, but only logged-in users can **send** messages.
+- **Read-only for guests** — the `GET /api/forum/chat` endpoint no longer requires authentication, allowing anyone to poll and view chat messages. `POST` and `DELETE` still require a valid session.
+- **Login prompt** — unauthenticated users see a "Login to Chat" button in the chat input area, making it easy to convert visitors into registered users.
+- **Configurable position** — admins can set the widget's default screen position via the Site Editor: Bottom Right, Bottom Left, Top Right, or Top Left.
+- **Configurable size** — admins can set the widget's width (280–600px) and height (200–800px) from the Site Editor, controlling how much screen real estate the chat uses.
+- **Enable/disable toggle** — the widget can be fully disabled from the Site Editor without code changes.
+- **Draggable** — users can click-and-drag the chat header to reposition the widget anywhere on their screen during their session for maximum flexibility.
+- **Site Settings integration** — four new public setting keys: `chat_enabled`, `chat_position`, `chat_width`, `chat_height` — all configurable from the ✏️ Edit Frontpage panel.
+- **Minimized by default** — the floating widget starts collapsed to avoid blocking content; unread badge shows new message count while minimized.
+- **Same theme integration** — inherits all CSS custom properties from the 5 built-in themes, maintaining visual consistency with the rest of the site.
+- **3-second polling** — the public widget polls every 3 seconds (vs 2.5s in the dashboard chat) to balance real-time feel with guest traffic load.
+
+---
+
 ## [1.2.0] — 2026-08-15
 
 ### 🗨️ Real-Time Sandbox Chat
