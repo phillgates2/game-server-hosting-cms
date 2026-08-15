@@ -6,11 +6,7 @@ import { hasPermission } from "@/lib/permissions";
 import { eq, desc, sql } from "drizzle-orm";
 
 export async function GET(req: NextRequest) {
-  const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "forum.view"))) {
-    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
-  }
-
+  // Forum threads are publicly readable — no auth required
   const url = new URL(req.url);
   const categoryId = url.searchParams.get("categoryId");
 

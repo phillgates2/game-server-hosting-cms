@@ -5,16 +5,11 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq, asc, sql } from "drizzle-orm";
 
-// GET thread with posts and rich user data
+// GET thread with posts and rich user data — publicly readable
 export async function GET(
-  req: NextRequest,
+  _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "forum.view"))) {
-    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
-  }
-
   const { id } = await params;
 
   try {
