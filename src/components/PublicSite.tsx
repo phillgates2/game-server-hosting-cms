@@ -33,7 +33,6 @@ interface SiteSettings {
   panel_name?: string; hero_title?: string; hero_subtitle?: string;
   hero_cta_text?: string; footer_text?: string;
   announcement?: string; announcement_type?: string;
-  features_json?: string;
 }
 interface Props {
   user: { id: number; username: string; role: string;
@@ -46,15 +45,7 @@ interface Props {
 type Tab = "home" | "forums" | "ladder" | "blog" | "changelog" | "post"
   | "forum-cat" | "forum-thread" | "site-editor";
 
-/* ── Default features ───────────────────────────────────────────────────────── */
-const DEFAULT_FEATURES = [
-  { icon: "🖥️", t: "Multi-Node", d: "Deploy game servers across multiple machines from a single panel." },
-  { icon: "📊", t: "Live Monitoring", d: "Real-time CPU, RAM, disk, and network stats with buffer management." },
-  { icon: "🎮", t: "30+ Games", d: "Pre-built templates for Minecraft, CS2, Rust, Valheim, ARK, and more." },
-  { icon: "🔔", t: "Discord Alerts", d: "Webhook notifications for server start, stop, crash, and restarts." },
-  { icon: "💬", t: "Community Forums", d: "Built-in forums for your gaming community with categories and threads." },
-  { icon: "🏆", t: "League Ladder", d: "Competitive rankings and team standings for your community." },
-];
+
 
 /* ── Component ──────────────────────────────────────────────────────────────── */
 export default function PublicSite({ user, onLoginClick, onDashboardClick, onLogout }: Props) {
@@ -175,8 +166,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
   const panelName = ss.panel_name || "GameServer Manager";
   const heroTitle = ss.hero_title || "Game Server Hosting";
   const heroSub = ss.hero_subtitle || "High-performance game servers with a modern control panel. Multi-node infrastructure, real-time monitoring, and one-click deploys.";
-  let features = DEFAULT_FEATURES;
-  try { if (ss.features_json) features = JSON.parse(ss.features_json); } catch { /* */ }
+
 
   const roleBadge = (r: string | null) => {
     if (!r) return null;
@@ -241,13 +231,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                 <button onClick={() => goTab("blog")} className="px-6 py-3 bg-bg-card border border-border hover:border-accent/30 rounded-lg font-medium transition-colors">📝 Blog</button>
               </div>
             </section>
-            <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {features.map((f) => (
-                <div key={f.t} className="bg-bg-card border border-border rounded-xl p-6 hover:border-accent/30 transition-colors">
-                  <span className="text-3xl mb-3 block">{f.icon}</span><h3 className="font-semibold mb-2">{f.t}</h3><p className="text-text-secondary text-sm">{f.d}</p>
-                </div>
-              ))}
-            </section>
+
             {blogs.length > 0 && (<section><div className="flex items-center justify-between mb-6"><h2 className="text-2xl font-bold">Latest Posts</h2><button onClick={() => goTab("blog")} className="text-accent text-sm hover:underline">View All →</button></div><div className="grid grid-cols-1 md:grid-cols-2 gap-6">{blogs.slice(0, 4).map((p) => <PostCard key={p.id} post={p} onClick={() => openPost(p)} fmt={fmt} />)}</div></section>)}
             {changelogs.length > 0 && (<section><div className="flex items-center justify-between mb-6"><h2 className="text-2xl font-bold">Changelog</h2><button onClick={() => goTab("changelog")} className="text-accent text-sm hover:underline">View All →</button></div><div className="space-y-4">{changelogs.slice(0, 3).map((p) => <LogCard key={p.id} post={p} onClick={() => openPost(p)} fmt={fmt} />)}</div></section>)}
             {loaded && blogs.length === 0 && changelogs.length === 0 && (<section className="text-center py-12 bg-bg-card border border-border rounded-xl"><span className="text-4xl block mb-3">✍️</span><h3 className="font-semibold mb-1">No content yet</h3><p className="text-text-secondary text-sm">Create blog posts or changelogs from the Control Panel.</p></section>)}
