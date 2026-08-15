@@ -7,6 +7,14 @@ import { readFile, writeFile } from "node:fs/promises";
 
 const execAsync = promisify(exec);
 
+// Use absolute paths so child_process.exec works regardless of PATH
+const SUDO = "/usr/bin/sudo";
+const TEE = "/usr/bin/tee";
+const SYSCTL = "/usr/sbin/sysctl";
+const SYNC = "/usr/bin/sync";
+const SWAPOFF = "/usr/sbin/swapoff";
+const SWAPON = "/usr/sbin/swapon";
+
 async function getMemStats() {
   try {
     const meminfo = await readFile("/proc/meminfo", "utf-8");
@@ -31,34 +39,65 @@ async function getMemStats() {
 
 /**
  * Try multiple methods to drop caches, from most to least privileged.
- * Returns true if any method succeeded.
+ * Returns { ok, method, error? }.
  */
-async function dropCaches(): Promise<{ ok: boolean; method: string }> {
+async function dropCaches(): Promise<{ ok: boolean; method: string; error?: string }> {
   // Method 1: direct write (only works as root)
   try {
     await writeFile("/proc/sys/vm/drop_caches", "3", "utf-8");
     return { ok: true, method: "direct write (root)" };
   } catch { /* not root */ }
 
-  // Method 2: sudo tee (works if gsm user has passwordless sudo for this)
+  // Method 2: sudo tee (absolute paths, capture stderr)
   try {
-    await execAsync("echo 3 | sudo -n tee /proc/sys/vm/drop_caches > /dev/null 2>&1");
+    const { stderr } = await execAsync(`echo 3 | ${SUDO} -n ${TEE} /proc/sys/vm/drop_caches`, {
+      env: { ...process.env, PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" },
+      timeout: 10000,
+    });
+    if (stderr && stderr.includes("password")) throw new Error(stderr);
     return { ok: true, method: "sudo tee" };
-  } catch { /* no sudo access */ }
+  } catch (e) {
+    // fall through
+    void e;
+  }
 
-  // Method 3: sudo sh -c (alternative sudo approach)
+  // Method 3: sudo sh -c (absolute path)
   try {
-    await execAsync("sudo -n sh -c 'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null");
+    await execAsync(`${SUDO} -n /bin/sh -c 'echo 3 > /proc/sys/vm/drop_caches'`, {
+      env: { ...process.env, PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" },
+      timeout: 10000,
+    });
     return { ok: true, method: "sudo sh" };
   } catch { /* no sudo access */ }
 
-  // Method 4: Check if there's a sysctl we can use
+  // Method 4: sysctl
   try {
-    await execAsync("sudo -n sysctl -w vm.drop_caches=3 2>/dev/null");
+    await execAsync(`${SUDO} -n ${SYSCTL} -w vm.drop_caches=3`, {
+      env: { ...process.env, PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" },
+      timeout: 10000,
+    });
     return { ok: true, method: "sudo sysctl" };
   } catch { /* no sudo access */ }
 
-  return { ok: false, method: "none" };
+  // All methods failed — find out why
+  let diagMsg = "";
+  try {
+    const { stdout } = await execAsync(`${SUDO} -n true 2>&1 || echo SUDO_FAIL`, {
+      env: { ...process.env, PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" },
+      timeout: 5000,
+    });
+    if (stdout.includes("SUDO_FAIL")) {
+      diagMsg = "sudo requires a password for this user";
+    }
+  } catch {
+    diagMsg = "sudo not available";
+  }
+
+  return {
+    ok: false,
+    method: "none",
+    error: diagMsg || "All drop_caches methods failed",
+  };
 }
 
 export async function POST(req: NextRequest) {
@@ -73,7 +112,7 @@ export async function POST(req: NextRequest) {
 
   // 1. Sync all filesystem buffers to disk
   try {
-    await execAsync("sync");
+    await execAsync(SYNC, { timeout: 10000 });
     actions.push("Filesystem synced to disk");
   } catch (e: unknown) {
     errors.push(`sync failed: ${e instanceof Error ? e.message : "unknown"}`);
@@ -84,18 +123,25 @@ export async function POST(req: NextRequest) {
   if (dropResult.ok) {
     actions.push(`Dropped page cache, dentries, and inodes via ${dropResult.method}`);
   } else {
+    const user = process.env.USER || "unknown";
     errors.push(
-      "Cannot clear caches — the panel user needs sudo access. " +
-      "Run this to fix:  echo 'gsm ALL=(ALL) NOPASSWD: /usr/bin/tee /proc/sys/vm/drop_caches, /usr/sbin/sysctl, /usr/sbin/swapoff, /usr/sbin/swapon' | sudo tee /etc/sudoers.d/gsm-panel"
+      `Cannot clear caches (${dropResult.error || "no method succeeded"}). ` +
+      `Run this as root to fix:  echo '${user} ALL=(ALL) NOPASSWD: ${TEE} /proc/sys/vm/drop_caches, ${SYSCTL}, ${SWAPOFF}, ${SWAPON}' | sudo tee /etc/sudoers.d/gsm-panel`
     );
   }
 
   // 3. Clear swap (swapoff + swapon forces all swap contents back to RAM then clears)
   try {
-    const { stdout: swapInfo } = await execAsync("swapon --show --noheadings 2>/dev/null || true");
+    const { stdout: swapInfo } = await execAsync("swapon --show --noheadings 2>/dev/null || true", {
+      env: { ...process.env, PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" },
+      timeout: 5000,
+    });
     if (swapInfo.trim()) {
       try {
-        await execAsync("sudo -n swapoff -a && sudo -n swapon -a 2>/dev/null");
+        await execAsync(`${SUDO} -n ${SWAPOFF} -a && ${SUDO} -n ${SWAPON} -a`, {
+          env: { ...process.env, PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" },
+          timeout: 30000,
+        });
         actions.push("Swap cleared (swapoff + swapon)");
       } catch {
         actions.push("Swap clear skipped (requires sudo for swapoff/swapon)");
@@ -113,12 +159,18 @@ export async function POST(req: NextRequest) {
     actions.push("Memory compaction triggered");
   } catch {
     try {
-      await execAsync("sudo -n sh -c 'echo 1 > /proc/sys/vm/compact_memory' 2>/dev/null");
+      await execAsync(`${SUDO} -n /bin/sh -c 'echo 1 > /proc/sys/vm/compact_memory'`, {
+        env: { ...process.env, PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" },
+        timeout: 10000,
+      });
       actions.push("Memory compaction triggered via sudo");
     } catch {
       // Optional, not an error
     }
   }
+
+  // Small delay to let the kernel finish freeing
+  await new Promise((resolve) => setTimeout(resolve, 500));
 
   const after = await getMemStats();
 
