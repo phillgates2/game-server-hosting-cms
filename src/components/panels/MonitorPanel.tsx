@@ -99,6 +99,11 @@ export default function MonitorPanel({ user }: { user: AuthUser }) {
 
       const lines: string[] = [];
 
+      // Show container detection info if relevant
+      if (d.container) {
+        lines.push(`🐳 Environment: ${d.container} container${d.procWritable === false ? " (/proc/sys is read-only)" : ""}`);
+      }
+
       if (d.actions?.length) {
         lines.push("Actions performed:");
         d.actions.forEach((a: string) => lines.push(`  ✅ ${a}`));
