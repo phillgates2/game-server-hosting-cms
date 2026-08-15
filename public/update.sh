@@ -121,6 +121,50 @@ echo ""
 
 cd "$INSTALL_DIR"
 
+# ── Fix git safe.directory ────────────────────────────────────────────────────
+# When the repo is owned by 'gsm' but the updater runs as root, git refuses
+# to operate due to safe.directory checks.  Mark this directory as safe.
+git config --global --get safe.directory "$INSTALL_DIR" > /dev/null 2>&1 \
+  || git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
+
+# ── Ensure git remote is configured ──────────────────────────────────────────
+REPO_URL="https://github.com/phillgates2/game-server-hosting-cms.git"
+CURRENT_REMOTE=$(git remote get-url origin 2>/dev/null || echo "")
+if [[ -z "$CURRENT_REMOTE" ]]; then
+  log "No git remote 'origin' found — adding it..."
+  git remote add origin "$REPO_URL" 2>/dev/null || true
+elif [[ "$CURRENT_REMOTE" != *"game-server-hosting-cms"* ]]; then
+  warn "Remote 'origin' points to unexpected URL: $CURRENT_REMOTE"
+  warn "Updating to $REPO_URL"
+  git remote set-url origin "$REPO_URL" 2>/dev/null || true
+fi
+
+# If .git is completely broken, re-initialize
+if ! git rev-parse HEAD > /dev/null 2>&1; then
+  warn "Git repository appears broken — re-initializing..."
+  # Save config files before nuke
+  cp -f "$INSTALL_DIR/.env" /tmp/gsm-env-save 2>/dev/null || true
+  cp -f "$INSTALL_DIR/drizzle.config.json" /tmp/gsm-drizzle-save 2>/dev/null || true
+  cp -f "$INSTALL_DIR/ecosystem.config.cjs" /tmp/gsm-ecosystem-save 2>/dev/null || true
+  cp -f "$INSTALL_DIR/.install-info" /tmp/gsm-installinfo-save 2>/dev/null || true
+
+  rm -rf "$INSTALL_DIR/.git"
+  git init 2>/dev/null || true
+  git remote add origin "$REPO_URL" 2>/dev/null || true
+  git fetch origin "$BRANCH" 2>/dev/null || true
+  git checkout -f "origin/$BRANCH" 2>/dev/null || git checkout -f FETCH_HEAD 2>/dev/null || true
+  git checkout -b "$BRANCH" 2>/dev/null || true
+
+  # Restore config files
+  cp -f /tmp/gsm-env-save "$INSTALL_DIR/.env" 2>/dev/null || true
+  cp -f /tmp/gsm-drizzle-save "$INSTALL_DIR/drizzle.config.json" 2>/dev/null || true
+  cp -f /tmp/gsm-ecosystem-save "$INSTALL_DIR/ecosystem.config.cjs" 2>/dev/null || true
+  cp -f /tmp/gsm-installinfo-save "$INSTALL_DIR/.install-info" 2>/dev/null || true
+  rm -f /tmp/gsm-env-save /tmp/gsm-drizzle-save /tmp/gsm-ecosystem-save /tmp/gsm-installinfo-save
+
+  ok "Git repository re-initialized"
+fi
+
 # ── Current version info ──────────────────────────────────────────────────────
 CURRENT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
@@ -175,7 +219,16 @@ fi
 
 # ── Check for updates ────────────────────────────────────────────────────────
 log "Checking for updates..."
-git fetch origin "$BRANCH" 2>/dev/null || die "Failed to fetch from origin/$BRANCH"
+if ! git fetch origin "$BRANCH" 2>/dev/null; then
+  warn "git fetch failed — trying full fetch..."
+  if ! git fetch origin 2>/dev/null; then
+    warn "git fetch origin failed — trying to fix remote..."
+    git remote set-url origin "$REPO_URL" 2>/dev/null || true
+    if ! git fetch origin "$BRANCH" 2>/dev/null; then
+      die "Cannot fetch updates. Check your internet connection and try again."
+    fi
+  fi
+fi
 
 LOCAL_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
 REMOTE_HEAD=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "")
@@ -293,23 +346,42 @@ ok "Panel stopped"
 # ═══════════════════════════════════════════════════════════════════════════════
 step "Pulling latest code"
 
+# Save user config files before git operations might overwrite them
+cp -f "$INSTALL_DIR/.env" /tmp/gsm-update-env-save 2>/dev/null || true
+cp -f "$INSTALL_DIR/drizzle.config.json" /tmp/gsm-update-drizzle-save 2>/dev/null || true
+cp -f "$INSTALL_DIR/ecosystem.config.cjs" /tmp/gsm-update-ecosystem-save 2>/dev/null || true
+cp -f "$INSTALL_DIR/.install-info" /tmp/gsm-update-info-save 2>/dev/null || true
+
 # Stash any local changes (e.g. edited config files that are tracked)
 git stash 2>/dev/null || true
 
 # Switch to target branch if different
-if [[ "$CURRENT_BRANCH" != "$BRANCH" ]]; then
+if [[ "$CURRENT_BRANCH" != "$BRANCH" && "$CURRENT_BRANCH" != "unknown" ]]; then
   log "Switching from $CURRENT_BRANCH to $BRANCH..."
-  git checkout "$BRANCH" 2>/dev/null || die "Failed to checkout branch $BRANCH"
+  git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH" 2>/dev/null || true
 fi
 
-# Pull latest
-if ! git pull origin "$BRANCH" --ff-only 2>/dev/null; then
-  warn "Fast-forward merge failed — trying reset..."
-  git reset --hard "origin/$BRANCH" 2>/dev/null || die "Failed to pull latest code"
+# Pull latest — try multiple strategies
+if git pull origin "$BRANCH" --ff-only 2>/dev/null; then
+  ok "Fast-forward pull succeeded"
+elif git pull origin "$BRANCH" 2>/dev/null; then
+  ok "Merge pull succeeded"
+else
+  warn "Pull failed — resetting to remote..."
+  git fetch origin "$BRANCH" 2>/dev/null || true
+  git reset --hard "origin/$BRANCH" 2>/dev/null || die "Failed to update code from origin/$BRANCH"
+  ok "Reset to origin/$BRANCH"
 fi
 
 # Restore stashed changes
 git stash pop 2>/dev/null || true
+
+# Restore user config files (git pull/reset may have overwritten them)
+cp -f /tmp/gsm-update-env-save "$INSTALL_DIR/.env" 2>/dev/null || true
+cp -f /tmp/gsm-update-drizzle-save "$INSTALL_DIR/drizzle.config.json" 2>/dev/null || true
+cp -f /tmp/gsm-update-ecosystem-save "$INSTALL_DIR/ecosystem.config.cjs" 2>/dev/null || true
+cp -f /tmp/gsm-update-info-save "$INSTALL_DIR/.install-info" 2>/dev/null || true
+rm -f /tmp/gsm-update-env-save /tmp/gsm-update-drizzle-save /tmp/gsm-update-ecosystem-save /tmp/gsm-update-info-save
 
 NEW_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 chown -R "$GSM_USER:$GSM_USER" "$INSTALL_DIR"
