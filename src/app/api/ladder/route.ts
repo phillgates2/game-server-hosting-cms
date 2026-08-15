@@ -16,85 +16,176 @@ function normalizeSeason(value: string | null | undefined) {
   return trimmed.length > 0 ? trimmed.slice(0, 64) : "S1";
 }
 
-function normalizeGameId(value: string | number | null | undefined) {
-  if (value === null || value === undefined || value === "") return null;
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) return null;
-  return parsed;
-}
-
-function ladderScopeFilter(gameId: number | null, season?: string) {
-  if (gameId === null) {
-    return season
-      ? and(isNull(leagueLadderEntries.gameId), eq(leagueLadderEntries.season, season))
-      : isNull(leagueLadderEntries.gameId);
-  }
-
-  return season
-    ? and(eq(leagueLadderEntries.gameId, gameId), eq(leagueLadderEntries.season, season))
-    : eq(leagueLadderEntries.gameId, gameId);
-}
-
 async function ensureLadderSchema() {
   await db.execute(sql`
     ALTER TABLE league_ladder_entries
     ADD COLUMN IF NOT EXISTS game_id INTEGER REFERENCES game_definitions(id)
   `);
   await db.execute(sql`
+    ALTER TABLE league_ladder_entries
+    ADD COLUMN IF NOT EXISTS ladder_name VARCHAR(128)
+  `);
+  await db.execute(sql`
     CREATE INDEX IF NOT EXISTS league_ladder_entries_game_season_idx
     ON league_ladder_entries (game_id, season)
   `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS league_ladder_entries_ladder_name_idx
+    ON league_ladder_entries (ladder_name, season)
+  `);
 }
 
-export async function GET(req: NextRequest) {
-  // Ladder standings are publicly readable — no auth required
+/**
+ * Build a filter for a specific ladder scope.
+ * A ladder is identified by EITHER a gameId OR a ladderName (standalone ladder).
+ * If neither is provided, returns entries with no game AND no ladder name (legacy).
+ */
+function ladderScopeFilter(gameId: number | null, ladderName: string | null, season?: string) {
+  const conditions = [];
 
+  if (gameId !== null) {
+    conditions.push(eq(leagueLadderEntries.gameId, gameId));
+  } else if (ladderName) {
+    conditions.push(eq(leagueLadderEntries.ladderName, ladderName));
+  } else {
+    conditions.push(isNull(leagueLadderEntries.gameId));
+    conditions.push(isNull(leagueLadderEntries.ladderName));
+  }
+
+  if (season) {
+    conditions.push(eq(leagueLadderEntries.season, season));
+  }
+
+  return conditions.length === 1 ? conditions[0] : and(...conditions);
+}
+
+/**
+ * GET /api/ladder — Public read access
+ *
+ * Query params:
+ *   ?gameId=123       — filter by installed game
+ *   ?ladder=MyLadder  — filter by standalone ladder name
+ *   ?season=S1        — filter by season
+ *
+ * Returns all available ladders (from games + standalone) so the UI can
+ * show selector tabs.
+ */
+export async function GET(req: NextRequest) {
   try {
     await ensureLadderSchema();
 
     const url = new URL(req.url);
-    const requestedSeason = normalizeSeason(url.searchParams.get("season"));
-    const requestedGameId = normalizeGameId(url.searchParams.get("gameId"));
+    const requestedSeason = url.searchParams.get("season");
+    const requestedGameIdStr = url.searchParams.get("gameId");
+    const requestedLadder = url.searchParams.get("ladder");
 
+    const requestedGameId = requestedGameIdStr
+      ? (Number.isInteger(Number(requestedGameIdStr)) && Number(requestedGameIdStr) > 0 ? Number(requestedGameIdStr) : null)
+      : null;
+
+    // ── Discover all available ladders ────────────────────────────────────
+    // 1. Ladders from installed games
     const games = await db
       .select({ id: gameDefinitions.id, slug: gameDefinitions.slug, name: gameDefinitions.name, iconEmoji: gameDefinitions.iconEmoji })
       .from(gameDefinitions)
       .orderBy(asc(gameDefinitions.name));
 
-    const gameId = requestedGameId ?? games[0]?.id ?? null;
-
-    const seasons = await db
-      .select({ season: leagueLadderEntries.season })
+    // 2. Standalone ladders (entries with ladder_name set, no game_id)
+    const standaloneLadders = await db
+      .selectDistinct({ ladderName: leagueLadderEntries.ladderName })
       .from(leagueLadderEntries)
-      .where(ladderScopeFilter(gameId))
+      .where(and(
+        isNull(leagueLadderEntries.gameId),
+        sql`${leagueLadderEntries.ladderName} IS NOT NULL AND ${leagueLadderEntries.ladderName} != ''`
+      ))
+      .orderBy(asc(leagueLadderEntries.ladderName));
+
+    // Build unified ladder list for the UI
+    interface LadderOption { type: "game" | "standalone"; id: number | null; name: string; icon: string }
+    const ladders: LadderOption[] = [];
+
+    // Add game-based ladders (only if they have entries)
+    for (const g of games) {
+      const [count] = await db
+        .select({ c: sql<number>`count(*)::int` })
+        .from(leagueLadderEntries)
+        .where(eq(leagueLadderEntries.gameId, g.id));
+      if (count && count.c > 0) {
+        ladders.push({ type: "game", id: g.id, name: g.name, icon: g.iconEmoji || "🎮" });
+      }
+    }
+
+    // Add standalone ladders
+    for (const sl of standaloneLadders) {
+      if (sl.ladderName) {
+        ladders.push({ type: "standalone", id: null, name: sl.ladderName, icon: "🏆" });
+      }
+    }
+
+    // ── Determine which ladder to show ────────────────────────────────────
+    let activeGameId: number | null = null;
+    let activeLadderName: string | null = null;
+
+    if (requestedGameId !== null) {
+      activeGameId = requestedGameId;
+    } else if (requestedLadder) {
+      activeLadderName = requestedLadder;
+    } else if (ladders.length > 0) {
+      // Default to first available ladder
+      const first = ladders[0];
+      if (first.type === "game") activeGameId = first.id;
+      else activeLadderName = first.name;
+    }
+
+    // ── Get seasons for the active ladder ─────────────────────────────────
+    const seasonsRaw = await db
+      .selectDistinct({ season: leagueLadderEntries.season })
+      .from(leagueLadderEntries)
+      .where(ladderScopeFilter(activeGameId, activeLadderName))
       .orderBy(desc(leagueLadderEntries.season));
 
-    const uniqueSeasons = Array.from(new Set(seasons.map((s) => s.season)));
-    const season = uniqueSeasons.includes(requestedSeason)
+    const seasons = seasonsRaw.map((s) => s.season);
+    const season = requestedSeason && seasons.includes(requestedSeason)
       ? requestedSeason
-      : (uniqueSeasons[0] || requestedSeason);
+      : (seasons[0] || normalizeSeason(requestedSeason));
 
+    // ── Get standings ─────────────────────────────────────────────────────
     const standings = await db
       .select()
       .from(leagueLadderEntries)
-      .where(ladderScopeFilter(gameId, season))
-      .orderBy(desc(leagueLadderEntries.points), desc(leagueLadderEntries.wins), asc(leagueLadderEntries.losses), asc(leagueLadderEntries.teamName));
+      .where(ladderScopeFilter(activeGameId, activeLadderName, season))
+      .orderBy(
+        desc(leagueLadderEntries.points),
+        desc(leagueLadderEntries.wins),
+        asc(leagueLadderEntries.losses),
+        asc(leagueLadderEntries.teamName)
+      );
 
     return NextResponse.json({
-      gameId,
-      games,
+      ladders,
+      activeGameId,
+      activeLadderName,
       season,
-      seasons: uniqueSeasons,
-      standings: standings.map((entry, idx) => ({
-        ...entry,
-        rank: idx + 1,
-      })),
+      seasons,
+      standings: standings.map((entry, idx) => ({ ...entry, rank: idx + 1 })),
+      // Legacy compat
+      gameId: activeGameId,
+      games,
     });
   } catch (e: unknown) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
   }
 }
 
+/**
+ * POST /api/ladder — Create a new ladder entry
+ *
+ * Body must include EITHER:
+ *   { gameId: 123, ... }         — entry under an installed game's ladder
+ *   { ladderName: "My Ladder", ... } — entry under a standalone ladder
+ *
+ * This means you can create ladders without installing any game templates.
+ */
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   const canCreate = auth && ((await hasPermission(auth.userId, "ladder.create")) || (await hasPermission(auth.userId, "ladder.create.entry")));
@@ -109,18 +200,32 @@ export async function POST(req: NextRequest) {
     const teamName = String(body.teamName || "").trim();
     if (!teamName) return NextResponse.json({ error: "teamName required" }, { status: 400 });
 
-    const gameId = normalizeGameId(body.gameId);
-    if (gameId === null) {
-      return NextResponse.json({ error: "gameId required" }, { status: 400 });
-    }
+    // Determine ladder scope: gameId OR ladderName (at least one required)
+    let gameId: number | null = null;
+    let ladderName: string | null = null;
 
-    const [game] = await db
-      .select({ id: gameDefinitions.id })
-      .from(gameDefinitions)
-      .where(eq(gameDefinitions.id, gameId))
-      .limit(1);
-    if (!game) {
-      return NextResponse.json({ error: "Invalid gameId" }, { status: 400 });
+    if (body.gameId !== undefined && body.gameId !== null && body.gameId !== "") {
+      const gid = Number(body.gameId);
+      if (!Number.isInteger(gid) || gid <= 0) {
+        return NextResponse.json({ error: "Invalid gameId" }, { status: 400 });
+      }
+      // Verify game exists
+      const [game] = await db
+        .select({ id: gameDefinitions.id })
+        .from(gameDefinitions)
+        .where(eq(gameDefinitions.id, gid))
+        .limit(1);
+      if (!game) {
+        return NextResponse.json({ error: "Game not found" }, { status: 404 });
+      }
+      gameId = gid;
+    } else if (body.ladderName) {
+      ladderName = String(body.ladderName).trim().slice(0, 128);
+      if (!ladderName) {
+        return NextResponse.json({ error: "ladderName cannot be empty" }, { status: 400 });
+      }
+    } else {
+      return NextResponse.json({ error: "Either gameId or ladderName is required" }, { status: 400 });
     }
 
     const wins = Number(body.wins || 0);
@@ -131,6 +236,7 @@ export async function POST(req: NextRequest) {
 
     const [created] = await db.insert(leagueLadderEntries).values({
       gameId,
+      ladderName,
       season: normalizeSeason(body.season),
       teamName,
       tag: normalizeTeamTag(body.tag),

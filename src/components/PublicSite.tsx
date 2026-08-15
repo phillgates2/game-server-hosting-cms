@@ -28,7 +28,7 @@ interface LadderEntry {
   logoEmoji: string | null; wins: number; losses: number; draws: number;
   points: number; streak: number; notes: string | null;
 }
-interface LadderGame { id: number; slug: string; name: string; iconEmoji: string | null; }
+interface LadderOption { type: "game" | "standalone"; id: number | null; name: string; icon: string; }
 interface SiteSettings {
   panel_name?: string; hero_title?: string; hero_subtitle?: string;
   hero_cta_text?: string; footer_text?: string;
@@ -67,8 +67,8 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
 
   // Ladder
   const [ladderEntries, setLadderEntries] = useState<LadderEntry[]>([]);
-  const [ladderGames, setLadderGames] = useState<LadderGame[]>([]);
-  const [ladderGameId, setLadderGameId] = useState<number | null>(null);
+  const [ladders, setLadders] = useState<LadderOption[]>([]);
+  const [activeLadderKey, setActiveLadderKey] = useState("");
   const [ladderSeasons, setLadderSeasons] = useState<string[]>([]);
   const [ladderSeason, setLadderSeason] = useState("S1");
 
@@ -111,19 +111,25 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
   const loadThread = useCallback(async (tid: number) => {
     try { const r = await fetch(`/api/forum/threads/${tid}`); if (r.ok) { const d = await r.json(); if (d.thread) setSelectedThread(d.thread); setPosts(d.posts || []); } } catch { /* */ }
   }, []);
-  const loadLadder = useCallback(async (gameId?: number | null, season?: string) => {
+  const loadLadder = useCallback(async (key?: string, season?: string) => {
     try {
       const params = new URLSearchParams();
-      if (gameId) params.set("gameId", String(gameId));
+      if (key) {
+        // key format: "game:123" or "standalone:MyLadder"
+        if (key.startsWith("game:")) params.set("gameId", key.slice(5));
+        else if (key.startsWith("standalone:")) params.set("ladder", key.slice(11));
+      }
       if (season) params.set("season", season);
       const r = await fetch(`/api/ladder?${params}`);
       if (r.ok) {
         const d = await r.json();
         setLadderEntries(d.standings || []);
-        setLadderGames(d.games || []);
+        setLadders(d.ladders || []);
         setLadderSeasons(d.seasons || []);
-        if (d.gameId) setLadderGameId(d.gameId);
         if (d.season) setLadderSeason(d.season);
+        // Set active key from response
+        if (d.activeGameId) setActiveLadderKey(`game:${d.activeGameId}`);
+        else if (d.activeLadderName) setActiveLadderKey(`standalone:${d.activeLadderName}`);
       }
     } catch { /* */ }
   }, []);
@@ -288,18 +294,21 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
         {tab === "ladder" && (
           <div className="animate-fade-in space-y-6">
             <h2 className="text-2xl font-bold">🏆 League Ladder</h2>
-            {ladderGames.length > 0 && (
+            {ladders.length > 0 && (
               <div className="flex flex-wrap gap-3 items-center">
                 <div className="flex gap-2 flex-wrap">
-                  {ladderGames.map((g) => (
-                    <button key={g.id} onClick={() => { setLadderGameId(g.id); loadLadder(g.id, ladderSeason); }}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${ladderGameId === g.id ? "bg-accent text-white" : "bg-bg-card border border-border hover:border-accent/30 text-text-secondary"}`}>
-                      {g.iconEmoji || "🎮"} {g.name}
-                    </button>
-                  ))}
+                  {ladders.map((l) => {
+                    const key = l.type === "game" ? `game:${l.id}` : `standalone:${l.name}`;
+                    return (
+                      <button key={key} onClick={() => { setActiveLadderKey(key); loadLadder(key, ladderSeason); }}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeLadderKey === key ? "bg-accent text-white" : "bg-bg-card border border-border hover:border-accent/30 text-text-secondary"}`}>
+                        {l.icon} {l.name}
+                      </button>
+                    );
+                  })}
                 </div>
                 {ladderSeasons.length > 1 && (
-                  <select value={ladderSeason} onChange={(e) => { setLadderSeason(e.target.value); loadLadder(ladderGameId, e.target.value); }}
+                  <select value={ladderSeason} onChange={(e) => { setLadderSeason(e.target.value); loadLadder(activeLadderKey, e.target.value); }}
                     className="px-3 py-1.5 bg-bg-card border border-border rounded-lg text-sm">
                     {ladderSeasons.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>

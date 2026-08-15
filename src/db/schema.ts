@@ -223,6 +223,7 @@ export const forumPosts = pgTable("forum_posts", {
 export const leagueLadderEntries = pgTable("league_ladder_entries", {
   id: serial("id").primaryKey(),
   gameId: integer("game_id").references(() => gameDefinitions.id),
+  ladderName: varchar("ladder_name", { length: 128 }),
   season: varchar("season", { length: 64 }).notNull().default("S1"),
   teamName: varchar("team_name", { length: 128 }).notNull(),
   tag: varchar("tag", { length: 12 }),
