@@ -1033,7 +1033,7 @@ echo "Arma 3 server installed successfully"`,
       V("Mod", "ET_MOD", "Server mod / fs_game folder to run", "etmain", {
         required: false, type: "select",
         enum_values: {
-          "etmain": "ET:Legacy / Vanilla (default)",
+          "legacy": "ET:Legacy / Vanilla (default)",
           "jaymod": "Jaymod 2.2.0",
           "etpub": "ETPub 1.0",
           "nitmod": "N!tmod 2.3.5",
