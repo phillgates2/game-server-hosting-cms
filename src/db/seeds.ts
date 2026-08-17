@@ -1144,10 +1144,7 @@ if [ ! -f "legacy/qagame.mp.$SO_PATTERN.so" ]; then
       while read -r f; do cp -v "$f" legacy/ 2>/dev/null || true; done
   fi
 fi
-# Symlink base pak files into legacy/
-for pak in pak0.pk3 pak1.pk3 pak2.pk3; do
-  [ -f "legacy/\$pak" ] || ln -sf "../etmain/\$pak" "legacy/\$pak" 2>/dev/null || true
-done
+
 
 # ── Step 4: Install selected mod ─────────────────────────────
 echo ""
@@ -1184,10 +1181,6 @@ install_jaymod() {
   # Copy .so (32-bit), .pk3, .cfg from subdirectories
   find jaymod -name "*.i386.so" -o -name "*.so" 2>/dev/null | while read -r f; do cp -v "\$f" jaymod/ 2>/dev/null || true; done
   find jaymod -name "*.pk3" 2>/dev/null | while read -r f; do cp -v "\$f" jaymod/ 2>/dev/null || true; done
-  # Symlink base pak files
-  for pak in pak0.pk3 pak1.pk3 pak2.pk3; do
-    [ -f "jaymod/\$pak" ] || ln -sf "../etmain/\$pak" "jaymod/\$pak" 2>/dev/null || true
-  done
   echo "  Jaymod (32-bit) installed to jaymod/"
 }
 
@@ -1215,9 +1208,6 @@ install_etpub() {
   rm -f etpub-dl
   find etpub -name "*.i386.so" -o -name "*.so" 2>/dev/null | while read -r f; do cp -v "\$f" etpub/ 2>/dev/null || true; done
   find etpub -name "*.pk3" 2>/dev/null | while read -r f; do cp -v "\$f" etpub/ 2>/dev/null || true; done
-  for pak in pak0.pk3 pak1.pk3 pak2.pk3; do
-    [ -f "etpub/\$pak" ] || ln -sf "../etmain/\$pak" "etpub/\$pak" 2>/dev/null || true
-  done
   echo "  ETPub (32-bit) installed to etpub/"
 }
 
@@ -1246,9 +1236,6 @@ install_nitmod() {
   rm -f nitmod-dl
   find nitmod -name "*.i386.so" -o -name "*.so" 2>/dev/null | while read -r f; do cp -v "\$f" nitmod/ 2>/dev/null || true; done
   find nitmod -name "*.pk3" 2>/dev/null | while read -r f; do cp -v "\$f" nitmod/ 2>/dev/null || true; done
-  for pak in pak0.pk3 pak1.pk3 pak2.pk3; do
-    [ -f "nitmod/\$pak" ] || ln -sf "../etmain/\$pak" "nitmod/\$pak" 2>/dev/null || true
-  done
   echo "  N!tmod (32-bit) installed to nitmod/"
 }
 
