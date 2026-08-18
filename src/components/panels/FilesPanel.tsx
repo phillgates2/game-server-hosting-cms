@@ -55,8 +55,12 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
   const [uploading, setUploading] = useState(false);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [lastSelectedPath, setLastSelectedPath] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const checkboxShiftRef = useRef(false);
+  const dragCounterRef = useRef(0);
 
   // Load servers
   useEffect(() => {
@@ -336,6 +340,102 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
     finally { setUploading(false); if (fileInputRef.current) fileInputRef.current.value = ""; }
   }
 
+  async function uploadFiles(files: FileList | File[], targetPath: string) {
+    if (!selectedId || files.length === 0) return;
+    setUploading(true);
+    setMessage(null);
+    setUploadProgress({ current: 0, total: files.length });
+    let successCount = 0;
+    let failCount = 0;
+    const fileArray = Array.from(files);
+    for (let i = 0; i < fileArray.length; i++) {
+      setUploadProgress({ current: i + 1, total: fileArray.length });
+      const formData = new FormData();
+      formData.append("file", fileArray[i]);
+      formData.append("path", targetPath);
+      try {
+        const res = await fetch(`/api/servers/${selectedId}/files/upload`, { method: "POST", body: formData });
+        if (res.ok) successCount++;
+        else failCount++;
+      } catch {
+        failCount++;
+      }
+    }
+    setUploadProgress(null);
+    setUploading(false);
+    if (failCount > 0) {
+      setMessage({ type: "error", text: `Uploaded ${successCount} file(s), ${failCount} failed` });
+    } else {
+      setMessage({ type: "success", text: `Uploaded ${successCount} file(s)` });
+    }
+    loadDir(selectedId, currentPath);
+  }
+
+  function handleDragEnter(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
+    if (e.dataTransfer.types.includes("Files")) {
+      setDragging(true);
+    }
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current--;
+    if (dragCounterRef.current === 0) {
+      setDragging(false);
+      setDropTarget(null);
+    }
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = 0;
+    setDragging(false);
+    setDropTarget(null);
+    if (!selectedId) return;
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      uploadFiles(files, currentPath);
+    }
+  }
+
+  function handleRowDragOver(e: React.DragEvent, entry: FileEntry) {
+    if (!entry.isDir) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+    setDropTarget(entry.path);
+  }
+
+  function handleRowDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDropTarget(null);
+  }
+
+  function handleRowDrop(e: React.DragEvent, entry: FileEntry) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = 0;
+    setDragging(false);
+    setDropTarget(null);
+    if (!selectedId || !entry.isDir) return;
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      uploadFiles(files, entry.path);
+    }
+  }
+
   const breadcrumbs = currentPath === "." ? ["root"] : ["root", ...currentPath.split("/")];
   const isEditable = editingFile && !editingFile.tooLarge && EDITABLE_EXTS.has((editingFile.name.split(".").pop() || "").toLowerCase());
   const allSelected = entries.length > 0 && selectedPaths.length === entries.length;
@@ -361,7 +461,40 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
       )}
 
       {selectedId && !editingFile && (
-        <>
+        <div
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          className="relative space-y-4"
+        >
+          {/* Drag & drop overlay */}
+          {dragging && (
+            <div className="absolute inset-0 z-50 bg-accent/10 border-2 border-dashed border-accent rounded-xl flex items-center justify-center pointer-events-none backdrop-blur-[2px]">
+              <div className="text-center">
+                <span className="text-5xl block mb-3">📥</span>
+                <p className="text-accent font-semibold text-lg">Drop files to upload</p>
+                <p className="text-accent/70 text-sm mt-1">Files will be uploaded to the current directory</p>
+              </div>
+            </div>
+          )}
+
+          {/* Upload progress */}
+          {uploadProgress && (
+            <div className="bg-accent/10 border border-accent/30 rounded-lg p-3 flex items-center gap-3">
+              <div className="inline-block w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+              <span className="text-sm text-accent font-medium">
+                Uploading file {uploadProgress.current} of {uploadProgress.total}...
+              </span>
+              <div className="flex-1 bg-bg-secondary rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-accent h-full rounded-full transition-all duration-300"
+                  style={{ width: `${(uploadProgress.current / uploadProgress.total) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           {/* Toolbar */}
           <div className="flex items-center gap-2 flex-wrap">
             <button onClick={goUp} disabled={currentPath === "."} className="px-3 py-1.5 gaming-chip rounded-lg text-xs disabled:opacity-30">⬆️ Up</button>
@@ -474,8 +607,11 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
                   {entries.map((entry) => (
                     <tr
                       key={entry.path}
-                      className={`border-b border-border/30 hover:bg-bg-hover group ${selectedPaths.includes(entry.path) ? "bg-accent/10" : ""}`}
+                      className={`border-b border-border/30 hover:bg-bg-hover group transition-colors ${selectedPaths.includes(entry.path) ? "bg-accent/10" : ""} ${dropTarget === entry.path ? "!bg-accent/20 ring-1 ring-accent ring-inset" : ""}`}
                       onClick={(event) => onRowClick(entry, event)}
+                      onDragOver={(e) => handleRowDragOver(e, entry)}
+                      onDragLeave={handleRowDragLeave}
+                      onDrop={(e) => { if (entry.isDir) handleRowDrop(e, entry); }}
                     >
                       <td className="px-4 py-2 text-center" onClick={(e) => e.stopPropagation()}>
                         <input
@@ -519,13 +655,17 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
                     </tr>
                   ))}
                   {entries.length === 0 && (
-                    <tr><td colSpan={6} className="px-4 py-8 text-center text-text-muted">Empty directory</td></tr>
+                    <tr><td colSpan={6} className="px-4 py-12 text-center text-text-muted">
+                      <span className="text-3xl block mb-2">📂</span>
+                      <p>Empty directory</p>
+                      <p className="text-xs mt-1 opacity-60">Drag & drop files here to upload</p>
+                    </td></tr>
                   )}
                 </tbody>
               </table>
             </div>
           )}
-        </>
+        </div>
       )}
 
       {/* File editor */}
