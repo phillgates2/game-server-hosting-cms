@@ -133,28 +133,85 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-## Install Java runtime if not present
-if ! command -v java &> /dev/null; then
-  apt-get update -qq && apt-get install -y -qq openjdk-21-jre-headless
+## Ensure a Java runtime of at least version $1 exists.
+## Falls back to a server-local Temurin JRE when apt can't provide it.
+ensure_java() {
+  local min="$1"
+  local have=""
+  if command -v java &> /dev/null; then
+    have=$(java -version 2>&1 | grep -oP '"\\K[0-9]+' | head -1)
+  fi
+  if [ -n "$have" ] && [ "$have" -ge "$min" ]; then
+    echo "Java $have detected (>= $min required) — OK"
+    return 0
+  fi
+  echo "Java $min+ required (found: \${have:-none}). Installing..."
+  if [ "$(id -u)" = "0" ]; then APT=""; else APT="sudo -n"; fi
+  $APT apt-get update -qq 2>/dev/null || true
+  $APT apt-get install -y -qq "openjdk-\${min}-jre-headless" 2>/dev/null || \
+  $APT apt-get install -y -qq openjdk-21-jre-headless 2>/dev/null || true
+  have=""
+  if command -v java &> /dev/null; then
+    have=$(java -version 2>&1 | grep -oP '"\\K[0-9]+' | head -1)
+  fi
+  if [ -n "$have" ] && [ "$have" -ge "$min" ]; then
+    echo "Java $have installed — OK"
+    return 0
+  fi
+  echo "No suitable Java from apt — downloading Temurin $min JRE (server-local)..."
+  local arch="x64"
+  [ "$(uname -m)" = "aarch64" ] && arch="aarch64"
+  mkdir -p "$INSTALL_DIR/.java"
+  curl -fSL --retry 3 -o temurin.tar.gz "https://api.adoptium.net/v3/binary/latest/\${min}/ga/linux/\${arch}/jre/hotspot/normal/eclipse" || {
+    echo "ERROR: could not obtain a Java $min runtime" >&2
+    exit 1
+  }
+  tar xf temurin.tar.gz -C "$INSTALL_DIR/.java" --strip-components=1
+  rm -f temurin.tar.gz
+  ln -sfn "$INSTALL_DIR/.java/bin/java" "$INSTALL_DIR/java"
+  echo "Temurin $min installed into $INSTALL_DIR/.java"
+}
+
+## Download latest Minecraft server JAR (piston-meta is the current Mojang API)
+MANIFEST_URL="https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
+MANIFEST=$(curl -fsSL --retry 3 "$MANIFEST_URL")
+LATEST=$(echo "$MANIFEST" | grep -oP '"release"\s*:\s*"\K[^"]+' | head -1)
+echo "Latest Minecraft version: $LATEST"
+if [ -z "$LATEST" ]; then
+  echo "ERROR: could not determine latest Minecraft release" >&2
+  exit 1
 fi
 
-## Download latest Minecraft server JAR
-MANIFEST_URL="https://launchermeta.mojang.com/mc/game/version_manifest.json"
-LATEST=$(curl -sSL "$MANIFEST_URL" | grep -oP '"release"\s*:\s*"\K[^"]+' | head -1)
-echo "Latest Minecraft version: $LATEST"
+VERSION_JSON_URL=$(echo "$MANIFEST" | grep -oP '"id":\s*"'"$LATEST"'".{0,500}?"url":\s*"\Khttps?://[^"]+' | head -1)
+VERSION_JSON=$(curl -fsSL "$VERSION_JSON_URL")
+SERVER_URL=$(echo "$VERSION_JSON" | grep -oP '"server"\s*:\s*\{[^}]*"url"\s*:\s*"\K[^"]+' | head -1)
+REQUIRED_JAVA=$(echo "$VERSION_JSON" | grep -oP '"major_version"\s*:\s*\K[0-9]+' | head -1)
+REQUIRED_JAVA=\${REQUIRED_JAVA:-21}
 
-VERSION_JSON_URL=$(curl -sSL "$MANIFEST_URL" | grep -oP "\"$LATEST\"\s*:\s*\{[^}]*\"url\"\s*:\s*\"\K[^\"]+")
-SERVER_URL=$(curl -sSL "$VERSION_JSON_URL" | grep -oP '"server"\s*:\s*\{[^}]*"url"\s*:\s*"\K[^"]+')
+ensure_java "$REQUIRED_JAVA"
+
+if [ -z "$SERVER_URL" ]; then
+  echo "ERROR: could not resolve server.jar URL for $LATEST" >&2
+  exit 1
+fi
 
 echo "Downloading Minecraft $LATEST server..."
-curl -sSL -o server.jar "$SERVER_URL"
+curl -fSL --retry 3 -o server.jar "$SERVER_URL"
+
+## Sanity-check the jar (must be a zip archive, > 1 MB)
+JAR_SIZE=$(stat -c %s server.jar 2>/dev/null || echo 0)
+if [ "$JAR_SIZE" -lt 1048576 ] || ! head -c 2 server.jar | grep -q "PK"; then
+  echo "ERROR: server.jar looks invalid (size: $JAR_SIZE bytes)" >&2
+  rm -f server.jar
+  exit 1
+fi
 
 ## Accept EULA
 echo "eula=true" > eula.txt
 
 echo "Minecraft Java server installed successfully"
 `,
-    startCommand: `cd {{INSTALL_PATH}} && java -Xms1G -Xmx{{MAX_RAM}}G -jar server.jar nogui --port {{PORT}}`,
+    startCommand: `cd {{INSTALL_PATH}} && if [ -x ./.java/bin/java ]; then JAVABIN=./.java/bin/java; else JAVABIN=java; fi && exec "$JAVABIN" -Xms1G -Xmx{{MAX_RAM}}G -jar server.jar nogui --port {{PORT}}`,
     stopCommand: "stop",
     configFiles: { "server.properties": "server.properties" },
     defaultConfig: {
@@ -187,20 +244,83 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-## Install Java if not present
-if ! command -v java &> /dev/null; then
-  apt-get update -qq && apt-get install -y -qq openjdk-21-jre-headless
+## Ensure a Java runtime of at least version $1 exists (Temurin fallback).
+ensure_java() {
+  local min="$1"
+  local have=""
+  if command -v java &> /dev/null; then
+    have=$(java -version 2>&1 | grep -oP '"\\K[0-9]+' | head -1)
+  fi
+  if [ -n "$have" ] && [ "$have" -ge "$min" ]; then
+    echo "Java $have detected (>= $min required) — OK"
+    return 0
+  fi
+  echo "Java $min+ required (found: \${have:-none}). Installing..."
+  if [ "$(id -u)" = "0" ]; then APT=""; else APT="sudo -n"; fi
+  $APT apt-get update -qq 2>/dev/null || true
+  $APT apt-get install -y -qq "openjdk-\${min}-jre-headless" 2>/dev/null || \
+  $APT apt-get install -y -qq openjdk-21-jre-headless 2>/dev/null || true
+  have=""
+  if command -v java &> /dev/null; then
+    have=$(java -version 2>&1 | grep -oP '"\\K[0-9]+' | head -1)
+  fi
+  if [ -n "$have" ] && [ "$have" -ge "$min" ]; then
+    echo "Java $have installed — OK"
+    return 0
+  fi
+  echo "No suitable Java from apt — downloading Temurin $min JRE (server-local)..."
+  local arch="x64"
+  [ "$(uname -m)" = "aarch64" ] && arch="aarch64"
+  mkdir -p "$INSTALL_DIR/.java"
+  curl -fSL --retry 3 -o temurin.tar.gz "https://api.adoptium.net/v3/binary/latest/\${min}/ga/linux/\${arch}/jre/hotspot/normal/eclipse" || {
+    echo "ERROR: could not obtain a Java $min runtime" >&2
+    exit 1
+  }
+  tar xf temurin.tar.gz -C "$INSTALL_DIR/.java" --strip-components=1
+  rm -f temurin.tar.gz
+  ln -sfn "$INSTALL_DIR/.java/bin/java" "$INSTALL_DIR/java"
+  echo "Temurin $min installed into $INSTALL_DIR/.java"
+}
+
+## Download Paper server — PaperMC "fill" v3 API (the old v2 API was retired)
+FILL_API="https://fill.papermc.io/v3/projects/paper"
+LATEST_VERSION=$(curl -fsSL --retry 3 "$FILL_API" | grep -oP '"[0-9]+\.[0-9]+(\.[0-9]+)?"' | tr -d '"' | sort -V | tail -1)
+if [ -z "$LATEST_VERSION" ]; then
+  echo "ERROR: could not determine latest Paper version" >&2
+  exit 1
 fi
 
-## Download Paper server
-PROJECT=paper
-PAPER_API="https://api.papermc.io/v2/projects/\${PROJECT}"
-LATEST_VERSION=$(curl -sSL "$PAPER_API" | grep -oP '"versions"\s*:\s*\[[^\]]*\]' | grep -oP '[0-9][0-9.]*' | tail -1)
-LATEST_BUILD=$(curl -sSL "$PAPER_API/versions/$LATEST_VERSION" | grep -oP '"builds"\s*:\s*\[[^\]]*\]' | grep -oP '[0-9]+' | tail -1)
-JAR_NAME="\${PROJECT}-\${LATEST_VERSION}-\${LATEST_BUILD}.jar"
+BUILD_JSON=$(curl -fsSL --retry 3 "$FILL_API/versions/$LATEST_VERSION/builds/latest")
+LATEST_BUILD=$(echo "$BUILD_JSON" | grep -oP '"id"\s*:\s*\K[0-9]+' | head -1)
+DOWNLOAD_URL=$(echo "$BUILD_JSON" | grep -oP '"server:default"\s*:\s*\{.*?"url"\s*:\s*"\Khttps?://[^"]+' | head -1)
+EXPECTED_SHA=$(echo "$BUILD_JSON" | grep -oP '"sha256"\s*:\s*"\K[0-9a-f]{64}' | head -1)
+
+## The version metadata declares the minimum Java Paper can run on
+REQUIRED_JAVA=$(curl -fsSL "$FILL_API/versions/$LATEST_VERSION" | grep -oP '"minimum"\s*:\s*\K[0-9]+' | head -1)
+REQUIRED_JAVA=\${REQUIRED_JAVA:-21}
+ensure_java "$REQUIRED_JAVA"
+
+if [ -z "$DOWNLOAD_URL" ]; then
+  echo "ERROR: could not resolve Paper download URL" >&2
+  exit 1
+fi
 
 echo "Downloading Paper $LATEST_VERSION build $LATEST_BUILD..."
-curl -sSL -o server.jar "$PAPER_API/versions/$LATEST_VERSION/builds/$LATEST_BUILD/downloads/$JAR_NAME"
+curl -fSL --retry 3 -o server.jar "$DOWNLOAD_URL"
+
+## Verify checksum when provided (guards against truncated downloads)
+if [ -n "$EXPECTED_SHA" ]; then
+  echo "Verifying sha256 ($EXPECTED_SHA)..."
+  echo "$EXPECTED_SHA  server.jar" | sha256sum -c - || { echo "ERROR: checksum mismatch" >&2; rm -f server.jar; exit 1; }
+fi
+
+## Sanity-check the jar
+JAR_SIZE=$(stat -c %s server.jar 2>/dev/null || echo 0)
+if [ "$JAR_SIZE" -lt 1048576 ] || ! head -c 2 server.jar | grep -q "PK"; then
+  echo "ERROR: server.jar looks invalid (size: $JAR_SIZE bytes)" >&2
+  rm -f server.jar
+  exit 1
+fi
 
 ## Accept EULA
 echo "eula=true" > eula.txt
@@ -213,7 +333,7 @@ fi
 
 echo "Paper server installed successfully"
 `,
-    startCommand: `cd {{INSTALL_PATH}} && java -Xms1G -Xmx{{MAX_RAM}}G -XX:+UseG1GC -jar server.jar nogui --port {{PORT}}`,
+    startCommand: `cd {{INSTALL_PATH}} && if [ -x ./.java/bin/java ]; then JAVABIN=./.java/bin/java; else JAVABIN=java; fi && exec "$JAVABIN" -Xms1G -Xmx{{MAX_RAM}}G -XX:+UseG1GC -jar server.jar nogui --port {{PORT}}`,
     stopCommand: "stop",
     configFiles: { "server.properties": "server.properties", "paper.yml": "paper.yml" },
     defaultConfig: {
@@ -243,19 +363,60 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-## Download Bedrock server
-echo "Downloading Minecraft Bedrock Dedicated Server..."
-DOWNLOAD_URL=$(curl -sSL "https://www.minecraft.net/en-us/download/server/bedrock" | grep -oP 'https://minecraft\.azureedge\.net/bin-linux/[^"]+' | head -1)
-
-if [ -z "$DOWNLOAD_URL" ]; then
-  echo "Could not find download URL, using latest known version..."
-  DOWNLOAD_URL="https://minecraft.azureedge.net/bin-linux/bedrock-server-1.21.62.01.zip"
+if ! command -v unzip &> /dev/null; then
+  apt-get update -qq && apt-get install -y -qq unzip 2>/dev/null || true
 fi
 
-curl -sSL -o bedrock-server.zip "$DOWNLOAD_URL"
+## Resolve the Bedrock download URL.
+## 1) Mojang's official links API (stable, no HTML scraping)
+echo "Resolving latest Bedrock Dedicated Server download URL..."
+DOWNLOAD_URL=$(curl -sSL --max-time 30 "https://net-secondary.web.minecraft-services.net/api/v1.0/download/links" \
+  | grep -oP '\\"downloadType\\":\\"serverBedrockLinux\\",\\"downloadUrl\\":\\"\\K[^\\"]+' | head -1)
+
+## 2) Fallback: scrape the download page (new minecraft.net host)
+if [ -z "$DOWNLOAD_URL" ]; then
+  echo "API lookup failed, scraping download page..."
+  DOWNLOAD_URL=$(curl -sSL --max-time 30 -A "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0" \
+    "https://www.minecraft.net/en-us/download/server/bedrock" \
+    | grep -oP 'https://www\.minecraft\.net/bedrockdedicatedserver/bin-linux/bedrock-server-[^"\\s<>]+?\.zip' | head -1)
+fi
+
+## 3) Fallback: pinned known-good versions on the current host
+if [ -z "$DOWNLOAD_URL" ]; then
+  echo "Scrape failed, trying pinned known versions..."
+  for VER in 1.26.44.3 1.21.124.2 1.21.111.1 1.21.101.1; do
+    CANDIDATE="https://www.minecraft.net/bedrockdedicatedserver/bin-linux/bedrock-server-$VER.zip"
+    if curl -fsIL --max-time 20 -A "Mozilla/5.0" "$CANDIDATE" > /dev/null 2>&1; then
+      DOWNLOAD_URL="$CANDIDATE"
+      break
+    fi
+  done
+fi
+
+if [ -z "$DOWNLOAD_URL" ]; then
+  echo "ERROR: Could not resolve any Bedrock server download URL" >&2
+  exit 1
+fi
+
+echo "Downloading: $DOWNLOAD_URL"
+curl -fSL --retry 3 -A "Mozilla/5.0" -o bedrock-server.zip "$DOWNLOAD_URL"
+
+## Sanity-check the download is actually a zip archive
+if ! unzip -t bedrock-server.zip > /dev/null 2>&1; then
+  echo "ERROR: Downloaded file is not a valid zip (got HTML error page?)" >&2
+  head -c 200 bedrock-server.zip >&2 || true
+  rm -f bedrock-server.zip
+  exit 1
+fi
+
 unzip -o bedrock-server.zip
 rm -f bedrock-server.zip
 chmod +x bedrock_server
+
+if [ ! -x ./bedrock_server ]; then
+  echo "ERROR: bedrock_server binary missing after extraction" >&2
+  exit 1
+fi
 
 echo "Minecraft Bedrock server installed successfully"
 `,
@@ -309,21 +470,37 @@ export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Counter-Strike 2 (AppID: $STEAM_APPID)..."
-"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+STEAMCMD_ATTEMPT=1
+until "$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit; do
+  STEAMCMD_ATTEMPT=$((STEAMCMD_ATTEMPT + 1))
+  if [ "$STEAMCMD_ATTEMPT" -gt 3 ]; then
+    echo "ERROR: SteamCMD failed to install AppID $STEAM_APPID after 3 attempts" >&2
+    exit 1
+  fi
+  echo "SteamCMD attempt failed, retrying ($STEAMCMD_ATTEMPT/3)..."
+  sleep 10
+done
 
 ## Set up Steam SDK libraries
 cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
 cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
+## Source engine cfgs use: cvar "value" — write a valid server.cfg
+mkdir -p "$INSTALL_DIR/game/csgo/cfg"
+if [ ! -f "$INSTALL_DIR/game/csgo/cfg/server.cfg" ]; then
+  cat > "$INSTALL_DIR/game/csgo/cfg/server.cfg" << 'CS2CFG'
+hostname "{{SERVER_NAME}}"
+rcon_password "{{RCON_PASSWORD}}"
+sv_cheats 0
+sv_lan 0
+CS2CFG
+fi
+
 echo "Counter-Strike 2 server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./game/bin/linuxsteamrt64/cs2 -dedicated -ip 0.0.0.0 -port {{PORT}} -tv_port {{QUERY_PORT}} +game_type {{GAME_TYPE}} +game_mode {{GAME_MODE}} +map {{MAP}} +hostname "{{SERVER_NAME}}" +sv_setsteamaccount {{GSLT_TOKEN}} +rcon_password "{{RCON_PASSWORD}}"`,
     stopCommand: "quit",
     configFiles: { "game/csgo/cfg/server.cfg": "server.cfg" },
-    defaultConfig: {
-      hostname: "{{SERVER_NAME}}",
-      rcon_password: "{{RCON_PASSWORD}}",
-      sv_cheats: "0",
-    },
+    defaultConfig: {},
   },
   {
     slug: "tf2",
@@ -359,21 +536,36 @@ export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Team Fortress 2 (AppID: $STEAM_APPID)..."
-"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+STEAMCMD_ATTEMPT=1
+until "$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit; do
+  STEAMCMD_ATTEMPT=$((STEAMCMD_ATTEMPT + 1))
+  if [ "$STEAMCMD_ATTEMPT" -gt 3 ]; then
+    echo "ERROR: SteamCMD failed to install AppID $STEAM_APPID after 3 attempts" >&2
+    exit 1
+  fi
+  echo "SteamCMD attempt failed, retrying ($STEAMCMD_ATTEMPT/3)..."
+  sleep 10
+done
 
 ## Set up Steam SDK libraries
 cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
 cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
+## Source engine cfgs use: cvar "value" — write a valid server.cfg
+mkdir -p "$INSTALL_DIR/tf/cfg"
+if [ ! -f "$INSTALL_DIR/tf/cfg/server.cfg" ]; then
+  cat > "$INSTALL_DIR/tf/cfg/server.cfg" << 'TF2CFG'
+hostname "{{SERVER_NAME}}"
+rcon_password "{{RCON_PASSWORD}}"
+sv_pure 1
+TF2CFG
+fi
+
 echo "Team Fortress 2 server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./srcds_run -game tf -console -port {{PORT}} +maxplayers {{MAX_PLAYERS}} +map {{MAP}}`,
     stopCommand: "quit",
     configFiles: { "tf/cfg/server.cfg": "server.cfg" },
-    defaultConfig: {
-      hostname: "{{SERVER_NAME}}",
-      rcon_password: "{{RCON_PASSWORD}}",
-      sv_pure: "1",
-    },
+    defaultConfig: {},
   },
   {
     slug: "gmod",
@@ -411,21 +603,36 @@ export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Garry's Mod (AppID: $STEAM_APPID)..."
-"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+STEAMCMD_ATTEMPT=1
+until "$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit; do
+  STEAMCMD_ATTEMPT=$((STEAMCMD_ATTEMPT + 1))
+  if [ "$STEAMCMD_ATTEMPT" -gt 3 ]; then
+    echo "ERROR: SteamCMD failed to install AppID $STEAM_APPID after 3 attempts" >&2
+    exit 1
+  fi
+  echo "SteamCMD attempt failed, retrying ($STEAMCMD_ATTEMPT/3)..."
+  sleep 10
+done
 
 ## Set up Steam SDK libraries
 cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
 cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
+## Source engine cfgs use: cvar "value" — write a valid server.cfg
+mkdir -p "$INSTALL_DIR/garrysmod/cfg"
+if [ ! -f "$INSTALL_DIR/garrysmod/cfg/server.cfg" ]; then
+  cat > "$INSTALL_DIR/garrysmod/cfg/server.cfg" << 'GMODCFG'
+hostname "{{SERVER_NAME}}"
+rcon_password "{{RCON_PASSWORD}}"
+sv_defaultgamemode "{{GAMEMODE}}"
+GMODCFG
+fi
+
 echo "Garry's Mod server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./srcds_run -game garrysmod -console -port {{PORT}} +maxplayers {{MAX_PLAYERS}} +map {{MAP}} +gamemode {{GAMEMODE}}`,
     stopCommand: "quit",
     configFiles: { "garrysmod/cfg/server.cfg": "server.cfg" },
-    defaultConfig: {
-      hostname: "{{SERVER_NAME}}",
-      rcon_password: "{{RCON_PASSWORD}}",
-      sv_defaultgamemode: "{{GAMEMODE}}",
-    },
+    defaultConfig: {},
   },
   {
     slug: "l4d2",
@@ -461,20 +668,35 @@ export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Left 4 Dead 2 (AppID: $STEAM_APPID)..."
-"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+STEAMCMD_ATTEMPT=1
+until "$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit; do
+  STEAMCMD_ATTEMPT=$((STEAMCMD_ATTEMPT + 1))
+  if [ "$STEAMCMD_ATTEMPT" -gt 3 ]; then
+    echo "ERROR: SteamCMD failed to install AppID $STEAM_APPID after 3 attempts" >&2
+    exit 1
+  fi
+  echo "SteamCMD attempt failed, retrying ($STEAMCMD_ATTEMPT/3)..."
+  sleep 10
+done
 
 ## Set up Steam SDK libraries
 cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
 cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
+## Source engine cfgs use: cvar "value" — write a valid server.cfg
+mkdir -p "$INSTALL_DIR/left4dead2/cfg"
+if [ ! -f "$INSTALL_DIR/left4dead2/cfg/server.cfg" ]; then
+  cat > "$INSTALL_DIR/left4dead2/cfg/server.cfg" << 'L4D2CFG'
+hostname "{{SERVER_NAME}}"
+rcon_password "{{RCON_PASSWORD}}"
+L4D2CFG
+fi
+
 echo "Left 4 Dead 2 server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./srcds_run -game left4dead2 -console -port {{PORT}} +map {{MAP}}`,
     stopCommand: "quit",
     configFiles: { "left4dead2/cfg/server.cfg": "server.cfg" },
-    defaultConfig: {
-      hostname: "{{SERVER_NAME}}",
-      rcon_password: "{{RCON_PASSWORD}}",
-    },
+    defaultConfig: {},
   },
 
   // ═══════════════════════════════════════════════════════════════
@@ -516,7 +738,16 @@ export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Rust (AppID: $STEAM_APPID)..."
-"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+STEAMCMD_ATTEMPT=1
+until "$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit; do
+  STEAMCMD_ATTEMPT=$((STEAMCMD_ATTEMPT + 1))
+  if [ "$STEAMCMD_ATTEMPT" -gt 3 ]; then
+    echo "ERROR: SteamCMD failed to install AppID $STEAM_APPID after 3 attempts" >&2
+    exit 1
+  fi
+  echo "SteamCMD attempt failed, retrying ($STEAMCMD_ATTEMPT/3)..."
+  sleep 10
+done
 
 ## Set up Steam SDK libraries
 cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
@@ -563,7 +794,16 @@ export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing ARK: Survival Evolved (AppID: $STEAM_APPID)..."
-"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+STEAMCMD_ATTEMPT=1
+until "$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit; do
+  STEAMCMD_ATTEMPT=$((STEAMCMD_ATTEMPT + 1))
+  if [ "$STEAMCMD_ATTEMPT" -gt 3 ]; then
+    echo "ERROR: SteamCMD failed to install AppID $STEAM_APPID after 3 attempts" >&2
+    exit 1
+  fi
+  echo "SteamCMD attempt failed, retrying ($STEAMCMD_ATTEMPT/3)..."
+  sleep 10
+done
 
 ## Set up Steam SDK libraries
 cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
@@ -610,7 +850,16 @@ export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Valheim (AppID: $STEAM_APPID)..."
-"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+STEAMCMD_ATTEMPT=1
+until "$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit; do
+  STEAMCMD_ATTEMPT=$((STEAMCMD_ATTEMPT + 1))
+  if [ "$STEAMCMD_ATTEMPT" -gt 3 ]; then
+    echo "ERROR: SteamCMD failed to install AppID $STEAM_APPID after 3 attempts" >&2
+    exit 1
+  fi
+  echo "SteamCMD attempt failed, retrying ($STEAMCMD_ATTEMPT/3)..."
+  sleep 10
+done
 
 ## Set up Steam SDK libraries
 cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
@@ -656,11 +905,23 @@ export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing 7 Days to Die (AppID: $STEAM_APPID)..."
-"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+STEAMCMD_ATTEMPT=1
+until "$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit; do
+  STEAMCMD_ATTEMPT=$((STEAMCMD_ATTEMPT + 1))
+  if [ "$STEAMCMD_ATTEMPT" -gt 3 ]; then
+    echo "ERROR: SteamCMD failed to install AppID $STEAM_APPID after 3 attempts" >&2
+    exit 1
+  fi
+  echo "SteamCMD attempt failed, retrying ($STEAMCMD_ATTEMPT/3)..."
+  sleep 10
+done
 
 ## Set up Steam SDK libraries
 cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
 cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+
+## The -logfile flag in the start command needs this directory to exist
+mkdir -p "$INSTALL_DIR/logs"
 
 echo "7 Days to Die server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./7DaysToDieServer.x86_64 -configfile=serverconfig.xml -logfile logs/output_log.txt -quit -batchmode -nographics -dedicated`,
@@ -707,7 +968,16 @@ export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Palworld (AppID: $STEAM_APPID)..."
-"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+STEAMCMD_ATTEMPT=1
+until "$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit; do
+  STEAMCMD_ATTEMPT=$((STEAMCMD_ATTEMPT + 1))
+  if [ "$STEAMCMD_ATTEMPT" -gt 3 ]; then
+    echo "ERROR: SteamCMD failed to install AppID $STEAM_APPID after 3 attempts" >&2
+    exit 1
+  fi
+  echo "SteamCMD attempt failed, retrying ($STEAMCMD_ATTEMPT/3)..."
+  sleep 10
+done
 
 ## Set up Steam SDK libraries
 cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
@@ -756,7 +1026,16 @@ export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Satisfactory (AppID: $STEAM_APPID)..."
-"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+STEAMCMD_ATTEMPT=1
+until "$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit; do
+  STEAMCMD_ATTEMPT=$((STEAMCMD_ATTEMPT + 1))
+  if [ "$STEAMCMD_ATTEMPT" -gt 3 ]; then
+    echo "ERROR: SteamCMD failed to install AppID $STEAM_APPID after 3 attempts" >&2
+    exit 1
+  fi
+  echo "SteamCMD attempt failed, retrying ($STEAMCMD_ATTEMPT/3)..."
+  sleep 10
+done
 
 ## Set up Steam SDK libraries
 cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
@@ -773,7 +1052,9 @@ echo "Satisfactory server installed successfully"`,
     name: "Terraria (TShock)",
     engine: "Custom (Re-Logic)",
     defaultPort: 7777,
-    steamAppId: "105600",
+    // Not a SteamCMD install: TShock is fetched from GitHub. Keep null so the
+    // built-in updater never tries an anonymous app_update of the client app.
+    steamAppId: null,
     iconEmoji: "⛏️",
     supportsIpv6: true,
     category: "Sandbox",
@@ -791,20 +1072,48 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-## Download latest TShock release from GitHub
-echo "Fetching latest TShock release..."
-LATEST_URL=$(curl -sSL "https://api.github.com/repos/Pryaxis/TShock/releases/latest" | grep -oP '"browser_download_url"\s*:\s*"\K[^"]*linux[^"]*' | head -1)
+## Pick the asset matching the host architecture
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64|amd64)  RID="linux-x64" ;;
+  aarch64|arm64) RID="linux-arm64" ;;
+  armv7l)        RID="linux-arm" ;;
+  *) echo "ERROR: unsupported architecture for TShock: $ARCH" >&2; exit 1 ;;
+esac
+
+## Download latest TShock release from GitHub for this architecture
+echo "Fetching latest TShock release ($RID)..."
+RELEASE_JSON=$(curl -fsSL --retry 3 "https://api.github.com/repos/Pryaxis/TShock/releases/latest")
+LATEST_URL=$(echo "$RELEASE_JSON" | grep -oP '"browser_download_url"\s*:\s*"\K[^"]+' | grep -- "-$RID-" | head -1)
 
 if [ -z "$LATEST_URL" ]; then
-  echo "Could not find TShock Linux download, trying zip..."
-  LATEST_URL=$(curl -sSL "https://api.github.com/repos/Pryaxis/TShock/releases/latest" | grep -oP '"browser_download_url"\s*:\s*"\K[^"]*\.zip[^"]*' | head -1)
+  echo "ERROR: could not find a TShock asset for $RID in the latest release" >&2
+  exit 1
 fi
 
 echo "Downloading TShock from: $LATEST_URL"
-curl -sSL -o tshock.zip "$LATEST_URL"
-unzip -o tshock.zip
+curl -fSL --retry 3 -o tshock.zip "$LATEST_URL"
+
+if ! unzip -t tshock.zip > /dev/null 2>&1; then
+  echo "ERROR: downloaded TShock archive is corrupt" >&2
+  rm -f tshock.zip
+  exit 1
+fi
+
+mkdir -p tshock-extract
+unzip -o tshock.zip -d tshock-extract
 rm -f tshock.zip
-chmod +x TShock.Server 2>/dev/null || true
+
+## TShock ships the binary either at the archive root or one folder down — normalize
+TSHOCK_BIN=$(find tshock-extract -type f -name "TShock.Server" | head -1)
+if [ -z "$TSHOCK_BIN" ]; then
+  echo "ERROR: TShock.Server not found inside the downloaded archive" >&2
+  rm -rf tshock-extract
+  exit 1
+fi
+cp -a "$(dirname "$TSHOCK_BIN")/." .
+rm -rf tshock-extract
+chmod +x TShock.Server
 
 ## Create worlds directory
 mkdir -p worlds
@@ -849,7 +1158,16 @@ export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Enshrouded (AppID: $STEAM_APPID)..."
-"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+STEAMCMD_ATTEMPT=1
+until "$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit; do
+  STEAMCMD_ATTEMPT=$((STEAMCMD_ATTEMPT + 1))
+  if [ "$STEAMCMD_ATTEMPT" -gt 3 ]; then
+    echo "ERROR: SteamCMD failed to install AppID $STEAM_APPID after 3 attempts" >&2
+    exit 1
+  fi
+  echo "SteamCMD attempt failed, retrying ($STEAMCMD_ATTEMPT/3)..."
+  sleep 10
+done
 
 ## Set up Steam SDK libraries
 cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
@@ -904,7 +1222,16 @@ export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Insurgency: Sandstorm (AppID: $STEAM_APPID)..."
-"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+STEAMCMD_ATTEMPT=1
+until "$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit; do
+  STEAMCMD_ATTEMPT=$((STEAMCMD_ATTEMPT + 1))
+  if [ "$STEAMCMD_ATTEMPT" -gt 3 ]; then
+    echo "ERROR: SteamCMD failed to install AppID $STEAM_APPID after 3 attempts" >&2
+    exit 1
+  fi
+  echo "SteamCMD attempt failed, retrying ($STEAMCMD_ATTEMPT/3)..."
+  sleep 10
+done
 
 ## Set up Steam SDK libraries
 cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
@@ -949,14 +1276,23 @@ export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Squad (AppID: $STEAM_APPID)..."
-"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+STEAMCMD_ATTEMPT=1
+until "$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit; do
+  STEAMCMD_ATTEMPT=$((STEAMCMD_ATTEMPT + 1))
+  if [ "$STEAMCMD_ATTEMPT" -gt 3 ]; then
+    echo "ERROR: SteamCMD failed to install AppID $STEAM_APPID after 3 attempts" >&2
+    exit 1
+  fi
+  echo "SteamCMD attempt failed, retrying ($STEAMCMD_ATTEMPT/3)..."
+  sleep 10
+done
 
 ## Set up Steam SDK libraries
 cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
 cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Squad server installed successfully"`,
-    startCommand: `cd {{INSTALL_PATH}} && ./SquadGame/Binaries/Linux/SquadGameServer SquadGame Port={{PORT}} QueryPort={{QUERY_PORT}} -beaconport={{RCON_PORT}}`,
+    startCommand: `cd {{INSTALL_PATH}} && SQ_BIN=$(ls SquadGame/Binaries/Linux/SquadGameServer 2>/dev/null || ls SquadGame/Binaries/Linux/SquadGameServer-Linux-* 2>/dev/null | head -1) && if [ -z "$SQ_BIN" ]; then echo "Squad server binary not found in SquadGame/Binaries/Linux" >&2; exit 1; fi && exec "$SQ_BIN" SquadGame Port={{PORT}} QueryPort={{QUERY_PORT}} -beaconport={{RCON_PORT}} -log`,
     stopCommand: null,
     configFiles: { "SquadGame/ServerConfig/Server.cfg": "Server.cfg" },
     defaultConfig: {},
@@ -995,22 +1331,64 @@ export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Arma 3 (AppID: $STEAM_APPID)..."
-"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+STEAMCMD_ATTEMPT=1
+until "$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit; do
+  STEAMCMD_ATTEMPT=$((STEAMCMD_ATTEMPT + 1))
+  if [ "$STEAMCMD_ATTEMPT" -gt 3 ]; then
+    echo "ERROR: SteamCMD failed to install AppID $STEAM_APPID after 3 attempts" >&2
+    exit 1
+  fi
+  echo "SteamCMD attempt failed, retrying ($STEAMCMD_ATTEMPT/3)..."
+  sleep 10
+done
 
 ## Set up Steam SDK libraries
 cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
 cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
+## Arma configs use C-style class syntax ("key = value;") — write a valid
+## server.cfg here; the generated fallback config would not parse otherwise.
+mkdir -p "$INSTALL_DIR/profiles"
+if [ ! -f "$INSTALL_DIR/server.cfg" ]; then
+  cat > "$INSTALL_DIR/server.cfg" << 'ARMACFG'
+//
+// Arma 3 dedicated server configuration — generated by GameServer Manager
+//
+hostname = "{{SERVER_NAME}}";
+password = "{{SERVER_PASSWORD}}";
+passwordAdmin = "{{ADMIN_PASSWORD}}";
+maxPlayers = {{MAX_PLAYERS}};
+
+motd[] = {
+    "Welcome to {{SERVER_NAME}}",
+    "Hosted with GameServer Manager"
+};
+motdInterval = 5;
+
+persistent = 1;
+kickduplicate = 1;
+verifySignatures = 2;
+allowedFilePatching = 0;
+disableVoN = 0;
+vonCodecQuality = 30;
+
+voteMissionPlayers = 1;
+voteThreshold = 0.33;
+
+timeStampFormat = "short";
+logFile = "server_console.log";
+
+onUnsignedData = "kick (_this select 0)";
+onHackedData = "kick (_this select 0)";
+onDifferentData = "";
+ARMACFG
+fi
+
 echo "Arma 3 server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./arma3server_x64 -port={{PORT}} -config=server.cfg -profiles=profiles`,
     stopCommand: null,
     configFiles: { "server.cfg": "server.cfg" },
-    defaultConfig: {
-      hostname: "{{SERVER_NAME}}",
-      maxPlayers: "{{MAX_PLAYERS}}",
-      password: "{{SERVER_PASSWORD}}",
-      passwordAdmin: "{{ADMIN_PASSWORD}}",
-    },
+    defaultConfig: {},
   },
 
   // ═══════════════════════════════════════════════════════════════
@@ -1459,11 +1837,30 @@ export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Quake Live (AppID: $STEAM_APPID)..."
-"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+STEAMCMD_ATTEMPT=1
+until "$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit; do
+  STEAMCMD_ATTEMPT=$((STEAMCMD_ATTEMPT + 1))
+  if [ "$STEAMCMD_ATTEMPT" -gt 3 ]; then
+    echo "ERROR: SteamCMD failed to install AppID $STEAM_APPID after 3 attempts" >&2
+    exit 1
+  fi
+  echo "SteamCMD attempt failed, retrying ($STEAMCMD_ATTEMPT/3)..."
+  sleep 10
+done
 
 ## Set up Steam SDK libraries
 cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
 cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+
+## id Tech 3 cfgs use: set/seta cvar "value" — write a valid server.cfg
+mkdir -p "$INSTALL_DIR/baseq3"
+if [ ! -f "$INSTALL_DIR/baseq3/server.cfg" ]; then
+  cat > "$INSTALL_DIR/baseq3/server.cfg" << 'QLCFG'
+seta sv_hostname "{{SERVER_NAME}}"
+seta g_gametype {{GAMETYPE}}
+seta sv_maxclients {{MAX_PLAYERS}}
+QLCFG
+fi
 
 echo "Quake Live server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./run_server_x64.sh +set net_port {{PORT}} +set sv_hostname "{{SERVER_NAME}}" +set g_gametype {{GAMETYPE}}`,
@@ -1493,11 +1890,22 @@ cd "$INSTALL_DIR"
 
 ## Download Xonotic
 echo "Downloading Xonotic..."
-curl -sSL -o xonotic.zip "https://dl.xonotic.org/xonotic-0.8.6.zip"
+curl -fSL --retry 3 -o xonotic.zip "https://dl.xonotic.org/xonotic-0.8.6.zip"
+if ! unzip -t xonotic.zip > /dev/null 2>&1; then
+  echo "ERROR: downloaded Xonotic archive is corrupt" >&2
+  rm -f xonotic.zip
+  exit 1
+fi
 unzip -o xonotic.zip
 mv Xonotic/* . 2>/dev/null || true
 rmdir Xonotic 2>/dev/null || true
 rm -f xonotic.zip
+chmod +x xonotic-linux64-dedicated xonotic-dedicated 2>/dev/null || true
+
+if [ ! -x ./xonotic-linux64-dedicated ] && [ ! -x ./xonotic-dedicated ]; then
+  echo "ERROR: xonotic dedicated server binary missing after extraction" >&2
+  exit 1
+fi
 
 echo "Xonotic server installed successfully"
 `,
@@ -1531,7 +1939,23 @@ set -e
 INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="1829350"
 
-apt-get update -qq && apt-get install -y -qq dos2unix 2>/dev/null || true
+## V Rising ships a Windows-only dedicated server (AppID 1829350) — it needs Wine.
+## Install wine + a virtual framebuffer (required headless) when possible.
+if ! command -v wine &> /dev/null; then
+  echo "Installing wine + xvfb (required for the V Rising dedicated server)..."
+  if [ "$(id -u)" = "0" ]; then APT_PREFIX=""; else APT_PREFIX="sudo -n"; fi
+  $APT_PREFIX dpkg --add-architecture i386 2>/dev/null || true
+  $APT_PREFIX apt-get update -qq 2>/dev/null || true
+  $APT_PREFIX apt-get install -y -qq wine wine64 xvfb dos2unix 2>/dev/null \
+    || $APT_PREFIX apt-get install -y -qq wine xvfb dos2unix 2>/dev/null || true
+fi
+
+if ! command -v wine &> /dev/null; then
+  echo "ERROR: wine is not installed and could not be installed automatically." >&2
+  echo "Install it manually, e.g.: sudo apt-get install -y wine wine64 xvfb" >&2
+  exit 1
+fi
+command -v dos2unix &> /dev/null || echo "Note: dos2unix not available; config copy fallback will be used."
 
 ## Use system SteamCMD install (shared across servers)
 STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
@@ -1542,30 +1966,43 @@ fi
 
 export HOME="$INSTALL_DIR"
 mkdir -p "$HOME/steamapps" "$HOME/.steam/sdk32" "$HOME/.steam/sdk64"
-chown -R $(whoami) "$INSTALL_DIR"
+chown -R $(whoami) "$INSTALL_DIR" 2>/dev/null || true
 
-## V Rising uses the Windows dedicated server under wine/proton in upstream eggs
 echo "Installing V Rising Windows dedicated server (AppID: $STEAM_APPID)..."
-"$STEAMCMD_BIN" +force_install_dir "$HOME" +login anonymous +@sSteamCmdForcePlatformType windows +app_update $STEAM_APPID validate +quit
+STEAMCMD_ATTEMPT=1
+until "$STEAMCMD_BIN" +force_install_dir "$HOME" +login anonymous +@sSteamCmdForcePlatformType windows +app_update $STEAM_APPID validate +quit; do
+  STEAMCMD_ATTEMPT=$((STEAMCMD_ATTEMPT + 1))
+  if [ "$STEAMCMD_ATTEMPT" -gt 3 ]; then
+    echo "ERROR: SteamCMD failed to install AppID $STEAM_APPID after 3 attempts" >&2
+    exit 1
+  fi
+  echo "SteamCMD attempt failed, retrying ($STEAMCMD_ATTEMPT/3)..."
+  sleep 10
+done
 
 cp -v "/opt/steamcmd/linux32/steamclient.so" "$HOME/.steam/sdk32/steamclient.so" 2>/dev/null || true
 cp -v "/opt/steamcmd/linux64/steamclient.so" "$HOME/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
-mkdir -p "$HOME/save-data/Settings"
+mkdir -p "$HOME/save-data/Settings" "$HOME/logs"
 if [ -f "$HOME/VRisingServer_Data/StreamingAssets/Settings/ServerHostSettings.json" ]; then
-  dos2unix -n "$HOME/VRisingServer_Data/StreamingAssets/Settings/ServerHostSettings.json" "$HOME/save-data/Settings/ServerHostSettings.json" 2>/dev/null || cp "$HOME/VRisingServer_Data/StreamingAssets/Settings/ServerHostSettings.json" "$HOME/save-data/Settings/ServerHostSettings.json"
+  if command -v dos2unix &> /dev/null; then
+    dos2unix -n "$HOME/VRisingServer_Data/StreamingAssets/Settings/ServerHostSettings.json" "$HOME/save-data/Settings/ServerHostSettings.json" 2>/dev/null \
+      || cp "$HOME/VRisingServer_Data/StreamingAssets/Settings/ServerHostSettings.json" "$HOME/save-data/Settings/ServerHostSettings.json"
+  else
+    cp "$HOME/VRisingServer_Data/StreamingAssets/Settings/ServerHostSettings.json" "$HOME/save-data/Settings/ServerHostSettings.json"
+  fi
 fi
 
 if [ ! -f "$HOME/VRisingServer.exe" ]; then
-  echo "VRisingServer.exe not found after install"
+  echo "ERROR: VRisingServer.exe not found after install" >&2
   find "$HOME" -maxdepth 3 -type f | sort | tail -50
   exit 1
 fi
 
-echo "V Rising server installed successfully"`,
-    startCommand: `cd {{INSTALL_PATH}} && wine ./VRisingServer.exe -persistentDataPath save-data -address 0.0.0.0`,
+echo "V Rising server installed successfully (runs under wine)"`,
+    startCommand: `cd {{INSTALL_PATH}} && if command -v xvfb-run >/dev/null 2>&1; then exec xvfb-run -a wine ./VRisingServer.exe -persistentDataPath ./save-data -serverName "{{SERVER_NAME}}" -saveName "{{SAVE_NAME}}" -logFile ./logs/VRisingServer.log; else exec wine ./VRisingServer.exe -persistentDataPath ./save-data -serverName "{{SERVER_NAME}}" -saveName "{{SAVE_NAME}}" -logFile ./logs/VRisingServer.log; fi`,
     stopCommand: null,
-    configFiles: { "VRisingServer_Data/StreamingAssets/Settings/ServerHostSettings.json": "ServerHostSettings.json" },
+    configFiles: { "save-data/Settings/ServerHostSettings.json": "ServerHostSettings.json" },
     defaultConfig: {},
   },
   {
@@ -1602,14 +2039,23 @@ export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Project Zomboid (AppID: $STEAM_APPID)..."
-"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+STEAMCMD_ATTEMPT=1
+until "$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit; do
+  STEAMCMD_ATTEMPT=$((STEAMCMD_ATTEMPT + 1))
+  if [ "$STEAMCMD_ATTEMPT" -gt 3 ]; then
+    echo "ERROR: SteamCMD failed to install AppID $STEAM_APPID after 3 attempts" >&2
+    exit 1
+  fi
+  echo "SteamCMD attempt failed, retrying ($STEAMCMD_ATTEMPT/3)..."
+  sleep 10
+done
 
 ## Set up Steam SDK libraries
 cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
 cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
 echo "Project Zomboid server installed successfully"`,
-    startCommand: `cd {{INSTALL_PATH}} && ./start-server.sh -servername {{SERVER_NAME}}`,
+    startCommand: `cd {{INSTALL_PATH}} && ./start-server.sh -servername "{{SERVER_NAME}}" -adminpassword "{{ADMIN_PASSWORD}}" -ip 0.0.0.0 -port {{PORT}} -steamport1 {{QUERY_PORT}} -steamport2 $(( {{QUERY_PORT}} + 1 ))`,
     stopCommand: "quit",
     configFiles: { "Server/servertest.ini": "servertest.ini" },
     defaultConfig: {},
@@ -1638,9 +2084,19 @@ cd "$INSTALL_DIR"
 
 ## Download Factorio Headless Server
 echo "Downloading Factorio Headless Server..."
-curl -sSL -o factorio.tar.xz "https://factorio.com/get-download/stable/headless/linux64"
+curl -fSL --retry 3 -A "Mozilla/5.0 (compatible; GSM-Panel)" -o factorio.tar.xz "https://factorio.com/get-download/stable/headless/linux64"
+if ! tar tf factorio.tar.xz > /dev/null 2>&1; then
+  echo "ERROR: downloaded Factorio archive is corrupt" >&2
+  rm -f factorio.tar.xz
+  exit 1
+fi
 tar xf factorio.tar.xz --strip-components=1
 rm -f factorio.tar.xz
+
+if [ ! -x ./bin/x64/factorio ]; then
+  echo "ERROR: factorio binary missing after extraction" >&2
+  exit 1
+fi
 
 ## Create initial save
 mkdir -p saves
@@ -1693,14 +2149,41 @@ export HOME="$INSTALL_DIR"
 
 ## Install game server
 echo "Installing Don't Starve Together (AppID: $STEAM_APPID)..."
-"$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit
+STEAMCMD_ATTEMPT=1
+until "$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous +app_update $STEAM_APPID validate +quit; do
+  STEAMCMD_ATTEMPT=$((STEAMCMD_ATTEMPT + 1))
+  if [ "$STEAMCMD_ATTEMPT" -gt 3 ]; then
+    echo "ERROR: SteamCMD failed to install AppID $STEAM_APPID after 3 attempts" >&2
+    exit 1
+  fi
+  echo "SteamCMD attempt failed, retrying ($STEAMCMD_ATTEMPT/3)..."
+  sleep 10
+done
 
 ## Set up Steam SDK libraries
 cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
 cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 
+## Create the cluster directory everywhere the server looks for it.
+## The dedicated server refuses to start without cluster_token.txt.
+CLUSTER_DIR="$INSTALL_DIR/DoNotStarveTogether/{{CLUSTER_NAME}}"
+mkdir -p "$CLUSTER_DIR/Master" "$CLUSTER_DIR/Caves"
+if [ -n "{{CLUSTER_TOKEN}}" ]; then
+  printf '%s' "{{CLUSTER_TOKEN}}" > "$CLUSTER_DIR/cluster_token.txt"
+  echo "Cluster token written to $CLUSTER_DIR/cluster_token.txt"
+else
+  echo "WARNING: No cluster token set — the server will not start until"
+  echo "         $CLUSTER_DIR/cluster_token.txt contains a valid Klei token."
+fi
+
+## Keep the server script reachable even if HOME differs at runtime
+if [ ! -e "$HOME/.klei/DoNotStarveTogether" ]; then
+  mkdir -p "$HOME/.klei"
+  ln -sfn "$INSTALL_DIR/DoNotStarveTogether" "$HOME/.klei/DoNotStarveTogether" 2>/dev/null || true
+fi
+
 echo "Don't Starve Together server installed successfully"`,
-    startCommand: `cd {{INSTALL_PATH}}/bin64 && ./dontstarve_dedicated_server_nullrenderer_x64 -console -cluster {{CLUSTER_NAME}} -shard Master`,
+    startCommand: `cd {{INSTALL_PATH}} && ./bin64/dontstarve_dedicated_server_nullrenderer_x64 -console -persistent_storage_root "{{INSTALL_PATH}}" -conf_dir DoNotStarveTogether -cluster {{CLUSTER_NAME}} -shard Master`,
     stopCommand: null,
     configFiles: { "DoNotStarveTogether/{{CLUSTER_NAME}}/cluster.ini": "cluster.ini" },
     defaultConfig: {
@@ -1717,7 +2200,9 @@ echo "Don't Starve Together server installed successfully"`,
     name: "Assetto Corsa",
     engine: "Custom",
     defaultPort: 9600,
-    steamAppId: "302550",
+    // Installed via AssettoServer (GitHub), not SteamCMD — the AC app requires
+    // an account that owns the game, so anonymous app_update always fails.
+    steamAppId: null,
     iconEmoji: "🏎️",
     supportsIpv6: false,
     category: "Racing",
@@ -1734,23 +2219,33 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-apt-get update -qq && apt-get install -y -qq curl jq tar 2>/dev/null || true
-
 ## AssettoServer is distributed from compujuckel/AssettoServer releases
-LATEST_JSON=$(curl --silent "https://api.github.com/repos/compujuckel/AssettoServer/releases/latest")
-MATCH=$([[ "$(uname -m)" == "x86_64" ]] && echo "linux-x64" || echo "linux-arm64")
-DOWNLOAD_URL=$(echo "$LATEST_JSON" | jq -r '.assets[].browser_download_url' | grep -i "$MATCH" | head -1)
+case "$(uname -m)" in
+  x86_64|amd64)  MATCH="linux-x64" ;;
+  aarch64|arm64) MATCH="linux-arm64" ;;
+  *) echo "ERROR: unsupported architecture for AssettoServer: $(uname -m)" >&2; exit 1 ;;
+esac
+
+LATEST_JSON=$(curl -fsSL --retry 3 "https://api.github.com/repos/compujuckel/AssettoServer/releases/latest")
+DOWNLOAD_URL=$(echo "$LATEST_JSON" | grep -oP '"browser_download_url"\s*:\s*"\K[^"]+' | grep -- "-$MATCH\\.tar\\.gz" | head -1)
 
 if [ -z "$DOWNLOAD_URL" ]; then
-  echo "Could not find AssettoServer release asset for architecture: $MATCH"
+  echo "ERROR: could not find an AssettoServer release asset for: $MATCH" >&2
   exit 1
 fi
 
 echo "Downloading AssettoServer from: $DOWNLOAD_URL"
-curl -sSL -o assetto-server-linux.tar.gz "$DOWNLOAD_URL"
-tar xvf assetto-server-linux.tar.gz
+curl -fSL --retry 3 -o assetto-server-linux.tar.gz "$DOWNLOAD_URL"
+tar xf assetto-server-linux.tar.gz
 rm -f assetto-server-linux.tar.gz
 chmod +x AssettoServer
+
+## AssettoServer refuses to start when the admin password is shorter than 8 chars
+ADMIN_PW="{{ADMIN_PASSWORD}}"
+if [ \${#ADMIN_PW} -lt 8 ]; then
+  ADMIN_PW=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \\n' | cut -c1-12)
+  echo "NOTE: Admin password was empty/too short — generated: $ADMIN_PW"
+fi
 
 mkdir -p cfg/
 if [ ! -f "cfg/server_cfg.ini" ]; then
@@ -1758,7 +2253,7 @@ if [ ! -f "cfg/server_cfg.ini" ]; then
 [SERVER]
 NAME={{SERVER_NAME}}
 PASSWORD=
-ADMIN_PASSWORD={{ADMIN_PASSWORD}}
+ADMIN_PASSWORD=$ADMIN_PW
 UDP_PORT={{PORT}}
 TCP_PORT={{PORT}}
 MAX_CLIENTS={{MAX_PLAYERS}}
@@ -1766,6 +2261,14 @@ TRACK={{TRACK}}
 EOF
 fi
 [ -f "cfg/entry_list.ini" ] || touch cfg/entry_list.ini
+
+## NOTE: AssettoServer needs Assetto Corsa game content (content/ folder with
+## car & track files) to actually load sessions. Upload it via the Files panel
+## after install, otherwise the server starts but every track fails to load.
+if [ ! -d content ]; then
+  echo "WARNING: no Assetto Corsa content/ folder found."
+  echo "         Upload the game's content via the Files panel before starting."
+fi
 
 echo "Assetto Corsa server installed successfully"`,
     startCommand: `cd {{INSTALL_PATH}} && ./AssettoServer`,
@@ -1797,13 +2300,13 @@ export const EXPECTED_ARTIFACTS_BY_SLUG: Record<string, string[]> = {
   "terraria": ["TShock.Server"],
   "enshrouded": ["enshrouded_server"],
   "insurgency-sandstorm": ["Insurgency/Binaries/Linux/InsurgencyServer-Linux-Shipping"],
-  "squad": ["SquadGame/Binaries/Linux/SquadGameServer"],
+  "squad": ["SquadGame/Binaries/Linux/SquadGameServer*"],
   "arma3": ["arma3server_x64"],
   "wolfenstein-et": ["etlded", "etmain/pak0.pk3"],
   "openra": ["OpenRA.AppImage|openra-extracted/AppRun"],
   "quake-live": ["run_server_x64.sh"],
   "xonotic": ["xonotic-linux64-dedicated"],
-  "vrising": ["VRisingServer.sh|VRisingServer.exe"],
+  "vrising": ["VRisingServer.exe"],
   "project-zomboid": ["start-server.sh"],
   "factorio": ["bin/x64/factorio"],
   "dont-starve-together": ["bin64/dontstarve_dedicated_server_nullrenderer_x64"],

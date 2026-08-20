@@ -186,16 +186,56 @@ async function exists(path: string) {
   }
 }
 
+// Recursively substitute {{VAR}} placeholders in config values so generated
+// config files never contain raw template tokens.
+function substituteConfigValues(input: unknown, variables: Record<string, unknown>): unknown {
+  if (typeof input === "string") return replaceTemplateVariables(input, variables);
+  if (Array.isArray(input)) return input.map((v) => substituteConfigValues(v, variables));
+  if (input && typeof input === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+      out[k] = substituteConfigValues(v, variables);
+    }
+    return out;
+  }
+  return input;
+}
+
+// For JSON configs, game servers expect typed values (number/boolean), not
+// strings that merely look like numbers/booleans.
+function coerceJsonScalar(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  if (trimmed !== "" && !Number.isNaN(Number(trimmed))) return Number(trimmed);
+  return value;
+}
+
+function coerceJsonTree(input: unknown): unknown {
+  if (typeof input === "string") return coerceJsonScalar(input);
+  if (Array.isArray(input)) return input.map(coerceJsonTree);
+  if (input && typeof input === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+      out[k] = coerceJsonTree(v);
+    }
+    return out;
+  }
+  return input;
+}
+
 function renderConfigFile(filePath: string, config: Record<string, unknown>) {
   const lower = filePath.toLowerCase();
   if (lower.endsWith(".json")) {
-    return `${JSON.stringify(config, null, 2)}\n`;
+    return `${JSON.stringify(coerceJsonTree(config), null, 2)}\n`;
   }
   if (lower.endsWith(".xml")) {
+    // ServerSettings/property format used by 7 Days to Die et al.
     const items = Object.entries(config)
-      .map(([k, v]) => `  <setting key="${k}">${String(v)}</setting>`)
+      .map(([k, v]) => `  <property name="${k}" value="${String(v).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;")}"/>`)
       .join("\n");
-    return `<settings>\n${items}\n</settings>\n`;
+    return `<ServerSettings>\n${items}\n</ServerSettings>\n`;
   }
   if (lower.endsWith(".yml") || lower.endsWith(".yaml")) {
     return `${Object.entries(config).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join("\n")}\n`;
@@ -243,10 +283,15 @@ async function materializeServerFiles(options: {
     generated.push("gsm-stop.sh");
   }
 
-  // Config files (create if missing)
+  // Config files (create if missing).
+  // Both the target path and the config values may contain {{VAR}} tokens —
+  // substitute them, otherwise generated configs contain literal placeholders
+  // (e.g. Don't Starve Together's DoNotStarveTogether/{{CLUSTER_NAME}} folder).
   const configFiles = options.configFiles || {};
-  const defaultConfig = options.defaultConfig || {};
-  for (const configPath of Object.keys(configFiles)) {
+  const defaultConfig = substituteConfigValues(options.defaultConfig || {}, options.variables) as Record<string, unknown>;
+  for (const rawPath of Object.keys(configFiles)) {
+    const configPath = replaceTemplateVariables(rawPath, options.variables);
+    if (!configPath || configPath.includes("{{")) continue; // unresolved token — skip writing
     const absolute = join(options.installPath, configPath);
     await mkdir(dirname(absolute), { recursive: true });
     if (!(await exists(absolute))) {
