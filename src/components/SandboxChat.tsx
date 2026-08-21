@@ -26,6 +26,9 @@ export default function SandboxChat({ user }: { user: AuthUser }) {
   const [sending, setSending] = useState(false);
   const [onlineCount, setOnlineCount] = useState(0);
   const [minimized, setMinimized] = useState(false);
+  // fetchMessages reads this instead of depending on `minimized`, which would
+  // otherwise recreate the callback and restart polling on every toggle.
+  const minimizedRef = useRef(false);
   const [unread, setUnread] = useState(0);
   const [error, setError] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -80,8 +83,11 @@ export default function SandboxChat({ user }: { user: AuthUser }) {
   }, [minimized, scrollToBottom]);
 
   // Initial fetch
+  const didInitialFetch = useRef(false);
   useEffect(() => {
-    fetchMessages(true);
+    if (didInitialFetch.current) return;
+    didInitialFetch.current = true;
+    void fetchMessages(true);
   }, [fetchMessages]);
 
   // Polling for new messages
@@ -91,12 +97,22 @@ export default function SandboxChat({ user }: { user: AuthUser }) {
   }, [fetchMessages]);
 
   // Scroll to bottom when un-minimized
+  // Keep the ref in step, and scroll once the panel is actually visible.
   useEffect(() => {
-    if (!minimized) {
-      setUnread(0);
-      setTimeout(() => scrollToBottom(true), 100);
-    }
+    minimizedRef.current = minimized;
+    if (minimized) return;
+    const t = setTimeout(() => scrollToBottom(true), 100);
+    return () => clearTimeout(t);
   }, [minimized, scrollToBottom]);
+
+  function toggleMinimized() {
+    setMinimized((prev) => {
+      const next = !prev;
+      minimizedRef.current = next;
+      if (!next) setUnread(0);
+      return next;
+    });
+  }
 
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
@@ -182,7 +198,7 @@ export default function SandboxChat({ user }: { user: AuthUser }) {
     <div className="gaming-surface rounded-xl overflow-hidden flex flex-col">
       {/* Chat Header */}
       <button
-        onClick={() => setMinimized(!minimized)}
+        onClick={toggleMinimized}
         className="flex items-center justify-between px-4 py-3 bg-bg-secondary/60 border-b border-border/50 hover:bg-bg-hover/50 transition-colors cursor-pointer w-full text-left"
       >
         <div className="flex items-center gap-2">

@@ -32,6 +32,9 @@ export default function PublicChatWidget({
   const [sending, setSending] = useState(false);
   const [onlineCount, setOnlineCount] = useState(0);
   const [minimized, setMinimized] = useState(false);
+  // fetchMessages reads this instead of depending on `minimized`, which would
+  // otherwise recreate the callback and restart polling on every toggle.
+  const minimizedRef = useRef(false);
   const [unread, setUnread] = useState(0);
   const [error, setError] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -74,7 +77,7 @@ export default function PublicChatWidget({
           });
           lastIdRef.current = msgs[msgs.length - 1].id;
 
-          if (minimized) {
+          if (minimizedRef.current) {
             setUnread((prev) => prev + msgs.length);
           } else {
             setTimeout(() => scrollToBottom(), 50);
@@ -84,11 +87,14 @@ export default function PublicChatWidget({
         /* network error */
       }
     },
-    [minimized, scrollToBottom]
+    [scrollToBottom]
   );
 
+  const didInitialFetch = useRef(false);
   useEffect(() => {
-    fetchMessages(true);
+    if (didInitialFetch.current) return;
+    didInitialFetch.current = true;
+    void fetchMessages(true);
   }, [fetchMessages]);
 
   useEffect(() => {
@@ -96,12 +102,22 @@ export default function PublicChatWidget({
     return () => clearInterval(interval);
   }, [fetchMessages]);
 
+  // Keep the ref in step, and scroll once the panel is actually visible.
   useEffect(() => {
-    if (!minimized) {
-      setUnread(0);
-      setTimeout(() => scrollToBottom(true), 100);
-    }
+    minimizedRef.current = minimized;
+    if (minimized) return;
+    const t = setTimeout(() => scrollToBottom(true), 100);
+    return () => clearTimeout(t);
   }, [minimized, scrollToBottom]);
+
+  function toggleMinimized() {
+    setMinimized((prev) => {
+      const next = !prev;
+      minimizedRef.current = next;
+      if (!next) setUnread(0);
+      return next;
+    });
+  }
 
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
@@ -170,7 +186,7 @@ export default function PublicChatWidget({
     <div className="gaming-surface rounded-xl overflow-hidden flex flex-col">
       {/* Chat Header */}
       <button
-        onClick={() => setMinimized(!minimized)}
+        onClick={toggleMinimized}
         className="flex items-center justify-between px-4 py-3 bg-bg-secondary/60 border-b border-border/50 hover:bg-bg-hover/50 transition-colors cursor-pointer w-full text-left"
       >
         <div className="flex items-center gap-2">

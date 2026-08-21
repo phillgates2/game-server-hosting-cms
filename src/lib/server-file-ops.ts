@@ -1,5 +1,5 @@
 import { readdir, stat, readFile, writeFile, mkdir, rm, rename } from "node:fs/promises";
-import { join, resolve, relative, extname, basename, dirname } from "node:path";
+import { join, resolve, relative, extname, basename, dirname, sep } from "node:path";
 
 export interface ServerFileItem {
   name: string;
@@ -24,7 +24,10 @@ function resolveBasePath(basePath: string): string {
 export function safePath(basePath: string, requestedPath: string): string | null {
   const base = resolveBasePath(basePath);
   const resolved = resolve(/* turbopackIgnore: true */ base, requestedPath || ".");
-  if (!resolved.startsWith(base)) return null;
+  // A plain startsWith() is a string test, not a path-boundary test: with a base
+  // of /srv/mc it also accepts /srv/mc-evil. Compare against base + separator so
+  // only the directory itself and its real descendants pass.
+  if (resolved !== base && !resolved.startsWith(base + sep)) return null;
   return resolved;
 }
 
