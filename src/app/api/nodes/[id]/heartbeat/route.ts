@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { nodes, nodeMetrics } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { timingSafeEqual } from "node:crypto";
+
+/** Constant-time compare so the key cannot be recovered by timing. */
+function secretsMatch(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
 
 // POST /api/nodes/[id]/heartbeat - Node sends heartbeat with metrics
 export async function POST(
@@ -24,8 +33,16 @@ export async function POST(
       return NextResponse.json({ error: "Node not found" }, { status: 404 });
     }
 
-    // Validate API key if set
-    if (node.apiKey && node.apiKey !== apiKey) {
+    // A node with no configured key previously accepted heartbeats from anyone,
+    // letting an unauthenticated caller forge node status and flood the metrics
+    // table. Require the key to be configured and to match.
+    if (!node.apiKey) {
+      return NextResponse.json(
+        { error: "Node has no API key configured. Set one before sending heartbeats." },
+        { status: 401 }
+      );
+    }
+    if (!apiKey || !secretsMatch(node.apiKey, apiKey)) {
       return NextResponse.json({ error: "Invalid API key" }, { status: 401 });
     }
 

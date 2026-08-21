@@ -321,12 +321,17 @@ export async function getRolePermissions(roleId: number): Promise<Record<string,
 export async function getUserPermissions(userId: number): Promise<Record<string, boolean>> {
   try {
     const [user] = await db
-      .select({ role: users.role, roleId: users.roleId })
+      .select({ role: users.role, roleId: users.roleId, status: users.status })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1);
 
     if (!user) return {};
+
+    // Tokens live for 7 days, so status was previously only enforced at login:
+    // suspending or banning a signed-in user did nothing until their token
+    // expired. Denying every permission revokes access on the next request.
+    if (user.status !== "active") return {};
 
     // Legacy admin check — "admin" role gets everything
     if (user.role === "admin") {

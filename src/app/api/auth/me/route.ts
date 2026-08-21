@@ -30,6 +30,18 @@ export async function GET(req: NextRequest) {
 
     if (!user) return NextResponse.json({ user: null }, { status: 401 });
 
+    // A suspended or banned user may still hold a valid 7-day token. Report the
+    // session as dead so the client clears it instead of rendering a dashboard
+    // whose every action will fail the permission check.
+    if (user.status !== "active") {
+      const res = NextResponse.json(
+        { user: null, error: `Account ${user.status}` },
+        { status: 403 }
+      );
+      res.cookies.set("gsm_token", "", { httpOnly: true, path: "/", maxAge: 0 });
+      return res;
+    }
+
     const permissions = await getUserPermissions(user.id);
 
     return NextResponse.json({

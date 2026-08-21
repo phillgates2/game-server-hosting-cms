@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import PublicChatWidget from "@/components/PublicChatWidget";
 
 /* ── Types ──────────────────────────────────────────────────────────────────── */
@@ -104,7 +104,13 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
       }
     } catch { /* */ } finally { setLoaded(true); }
   }, []);
-  useEffect(() => { void loadCms(); }, [loadCms]);
+  // Load once on mount rather than whenever the callback identity changes.
+  const didLoadCms = useRef(false);
+  useEffect(() => {
+    if (didLoadCms.current) return;
+    didLoadCms.current = true;
+    void loadCms();
+  }, [loadCms]);
 
   const loadCategories = useCallback(async () => {
     try { const r = await fetch("/api/forum/categories"); if (r.ok) setForumCategories((await r.json()).categories || []); } catch { /* */ }
@@ -136,10 +142,22 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
     } catch { /* */ }
   }, []);
 
+  // Fetch each section the first time its tab is opened. Depending on
+  // forumCategories.length / ladderEntries.length made this effect re-run as a
+  // direct result of its own setState, which is the cascading-render pattern.
+  const didLoadForum = useRef(false);
+  const didLoadLadder = useRef(false);
   useEffect(() => {
-    if ((tab === "forums" || tab === "forum-cat" || tab === "forum-thread") && forumCategories.length === 0) void loadCategories();
-    if (tab === "ladder" && ladderEntries.length === 0) void loadLadder();
-  }, [tab, forumCategories.length, ladderEntries.length, loadCategories, loadLadder]);
+    const onForumTab = tab === "forums" || tab === "forum-cat" || tab === "forum-thread";
+    if (onForumTab && !didLoadForum.current) {
+      didLoadForum.current = true;
+      void loadCategories();
+    }
+    if (tab === "ladder" && !didLoadLadder.current) {
+      didLoadLadder.current = true;
+      void loadLadder();
+    }
+  }, [tab, loadCategories, loadLadder]);
 
   // Close mobile menu on tab change
   function goTab(t: Tab) { setTab(t); setSelectedPost(null); setSelectedCat(null); setSelectedThread(null); setShowNewThread(false); setMobileMenuOpen(false); }

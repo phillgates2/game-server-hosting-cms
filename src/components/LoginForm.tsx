@@ -18,6 +18,10 @@ export default function LoginForm({ onLogin }: Props) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  // Set once the server reports the account has 2FA enabled, which reveals the
+  // code field and keeps it visible while the user retries.
+  const [twoFactorRequired, setTwoFactorRequired] = useState(false);
+  const [twoFactorCode, setTwoFactorCode] = useState("");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -25,7 +29,10 @@ export default function LoginForm({ onLogin }: Props) {
     setError("");
 
     const endpoint = mode === "login" ? "/api/auth/login" : "/api/auth/register";
-    const body = mode === "login" ? { username: form.username, password: form.password } : form;
+    const body =
+      mode === "login"
+        ? { username: form.username, password: form.password, ...(twoFactorCode ? { twoFactorCode } : {}) }
+        : form;
 
     try {
       const res = await fetch(endpoint, {
@@ -34,8 +41,17 @@ export default function LoginForm({ onLogin }: Props) {
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok) setError(data.error || "Authentication failed");
-      else onLogin(data.user);
+      if (!res.ok) {
+        if (data.twoFactorRequired) {
+          setTwoFactorRequired(true);
+          setTwoFactorCode("");
+        }
+        setError(data.error || "Authentication failed");
+      } else {
+        setTwoFactorRequired(false);
+        setTwoFactorCode("");
+        onLogin(data.user);
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Network error");
     } finally {
@@ -118,6 +134,26 @@ export default function LoginForm({ onLogin }: Props) {
               />
               {mode === "register" && <p className="text-[10px] text-text-muted mt-1">Use at least 6 characters.</p>}
             </div>
+
+            {mode === "login" && twoFactorRequired && (
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-1">Two-Factor Code</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  value={twoFactorCode}
+                  onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, ""))}
+                  className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-text-primary tracking-[0.4em] text-center font-mono focus:outline-none focus:ring-2 focus:ring-accent"
+                  placeholder="000000"
+                  autoFocus
+                  required
+                />
+                <p className="text-[10px] text-text-muted mt-1">Enter the 6-digit code from your authenticator app.</p>
+              </div>
+            )}
 
             {error && (
               <div className="bg-danger/10 border border-danger/30 text-danger text-sm rounded-lg p-3">

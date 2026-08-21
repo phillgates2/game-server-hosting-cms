@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import SandboxChat from "@/components/SandboxChat";
 
 interface AuthUser { id: number; username: string; role: string }
@@ -57,7 +57,14 @@ export default function ForumPanel({ user }: { user: AuthUser }) {
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => { loadCategories(); }, [loadCategories]);
+  // Load once on mount. Keying the effect on the callback makes it a
+  // synchronous setState-in-effect that React flags as a cascading render.
+  const didLoadCategories = useRef(false);
+  useEffect(() => {
+    if (didLoadCategories.current) return;
+    didLoadCategories.current = true;
+    void loadCategories();
+  }, [loadCategories]);
 
   const loadThreads = useCallback(async (catId: number) => {
     const d = await (await fetch(`/api/forum/threads?categoryId=${catId}`)).json();
