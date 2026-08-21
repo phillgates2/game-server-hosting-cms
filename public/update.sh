@@ -206,7 +206,12 @@ if [[ "$ROLLBACK" == "true" ]]; then
   log "Reinstalling dependencies..."
   su - "$GSM_USER" -c "cd $INSTALL_DIR && npm ci" > /dev/null 2>&1 || true
   log "Rebuilding..."
-  su - "$GSM_USER" -c "cd $INSTALL_DIR && npx next build" > /dev/null 2>&1 || true
+  su - "$GSM_USER" -c "cd $INSTALL_DIR && rm -rf .next && npx next build" > /tmp/gsm-rollback-build.log 2>&1 || true
+  if ! su - "$GSM_USER" -c "test -f $INSTALL_DIR/.next/BUILD_ID" 2>/dev/null; then
+    err "Rollback rebuild failed!"
+    tail -30 /tmp/gsm-rollback-build.log
+    die "The restored code did not build. Full log: /tmp/gsm-rollback-build.log"
+  fi
   su - "$GSM_USER" -c "cd $INSTALL_DIR && npm prune --omit=dev" > /dev/null 2>&1 || true
 
   log "Starting panel..."
@@ -387,6 +392,35 @@ NEW_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 chown -R "$GSM_USER:$GSM_USER" "$INSTALL_DIR"
 ok "Updated: $CURRENT_COMMIT → $NEW_COMMIT"
 
+# ── Migrate .env for newer requirements ──────────────────────────────────────
+# As of 1.5.0 JWT_SECRET is mandatory in production (the app refuses to boot
+# and `next build` fails without it). Installs made before that release may
+# have relied on the old auto-generated fallback, so backfill it here.
+ENV_FILE="$INSTALL_DIR/.env"
+if [[ -f "$ENV_FILE" ]]; then
+  EXISTING_JWT=$(grep -E "^JWT_SECRET=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true)
+  if [[ -z "$EXISTING_JWT" || ${#EXISTING_JWT} -lt 32 ]]; then
+    NEW_JWT=$(openssl rand -base64 48 2>/dev/null | tr -d '=/+' || head -c 64 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    # Drop any empty/short existing entry, then append the new one.
+    sed -i '/^JWT_SECRET=/d' "$ENV_FILE"
+    echo "JWT_SECRET=$NEW_JWT" >> "$ENV_FILE"
+    chown "$GSM_USER:$GSM_USER" "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+    if [[ -z "$EXISTING_JWT" ]]; then
+      warn "JWT_SECRET was missing from .env — generated one (required since 1.5.0)."
+    else
+      warn "JWT_SECRET in .env was shorter than 32 chars — replaced it."
+    fi
+    warn "Existing login sessions will be invalidated; users must sign in again."
+  fi
+fi
+
+# NODE_ENV=production is what makes the panel enforce the JWT policy.
+if [[ -f "$ENV_FILE" ]] && ! grep -qE "^NODE_ENV=" "$ENV_FILE" 2>/dev/null; then
+  echo "NODE_ENV=production" >> "$ENV_FILE"
+  log "Added NODE_ENV=production to .env"
+fi
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  STEP 4: Install dependencies
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -426,9 +460,11 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════════
 step "Building production bundle"
 
-su - "$GSM_USER" -c "cd $INSTALL_DIR && npx next build" > /tmp/gsm-update-build.log 2>&1 || true
+su - "$GSM_USER" -c "cd $INSTALL_DIR && rm -rf .next && npx next build" > /tmp/gsm-update-build.log 2>&1 || true
 
-if ! su - "$GSM_USER" -c "test -d $INSTALL_DIR/.next" 2>/dev/null; then
+# A failed build still leaves a partial .next directory behind, so check for
+# BUILD_ID, which Next only writes once the build completes successfully.
+if ! su - "$GSM_USER" -c "test -f $INSTALL_DIR/.next/BUILD_ID" 2>/dev/null; then
   err "Build failed!"
   tail -30 /tmp/gsm-update-build.log
   die "Cannot continue without a successful build. Rollback with:  bash update.sh --rollback"

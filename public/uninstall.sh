@@ -8,6 +8,8 @@
 #  Options:
 #    --purge          Remove everything: database, system user, Caddy, SteamCMD
 #    --keep-servers   Keep game server files when purging (default: removed)
+#    --install-dir P  Panel directory to remove (default: /opt/gsm-panel)
+#    -y, --yes        Skip the confirmation prompt
 #
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -34,11 +36,18 @@ STEAMCMD_DIR="/opt/steamcmd"
 GAMESERVERS_DIR="/opt/gameservers"
 PURGE="false"
 KEEP_SERVERS="false"
+ASSUME_YES="false"
 
-for arg in "$@"; do
-  case "$arg" in
-    --purge)        PURGE="true" ;;
-    --keep-servers) KEEP_SERVERS="true" ;;
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --purge)        PURGE="true"; shift ;;
+    --keep-servers) KEEP_SERVERS="true"; shift ;;
+    -y|--yes)       ASSUME_YES="true"; shift ;;
+    --install-dir)  INSTALL_DIR="${2:-}"; [[ -z "$INSTALL_DIR" ]] && die "--install-dir requires a path"; shift 2 ;;
+    -h|--help)
+      echo "Usage: sudo bash uninstall.sh [--purge] [--keep-servers] [--install-dir PATH] [-y]"
+      exit 0 ;;
+    *) die "Unknown option: $1  (try --help)" ;;
   esac
 done
 
@@ -46,7 +55,11 @@ done
 
 # Read install info if available
 if [[ -f "$INSTALL_DIR/.install-info" ]]; then
+  # Remember the CLI value: .install-info also defines INSTALL_DIR and would
+  # otherwise override an explicit --install-dir.
+  _CLI_INSTALL_DIR="$INSTALL_DIR"
   source "$INSTALL_DIR/.install-info" 2>/dev/null || true
+  INSTALL_DIR="$_CLI_INSTALL_DIR"
 fi
 
 echo ""
@@ -69,8 +82,10 @@ if [[ "$PURGE" == "true" ]]; then
   echo ""
 fi
 
-read -rp "Are you sure you want to uninstall? [y/N]: " confirm
-[[ "${confirm,,}" != "y" ]] && { log "Cancelled."; exit 0; }
+if [[ "$ASSUME_YES" != "true" ]]; then
+  read -rp "Are you sure you want to uninstall? [y/N]: " confirm
+  [[ "${confirm,,}" != "y" ]] && { log "Cancelled."; exit 0; }
+fi
 
 # Stop PM2 process
 log "Stopping panel..."

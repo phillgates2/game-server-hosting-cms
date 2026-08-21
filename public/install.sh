@@ -475,6 +475,10 @@ if [[ -z "$DB_PASS" ]]; then
 fi
 if [[ -z "$JWT_SECRET" ]]; then
   JWT_SECRET="$(openssl rand -base64 48 | tr -d '=/+')"
+elif [[ ${#JWT_SECRET} -lt 32 ]]; then
+  # The panel refuses to start in production with a secret shorter than this,
+  # so fail now rather than after a full install.
+  die "--jwt-secret must be at least 32 characters (got ${#JWT_SECRET}). Generate one with: openssl rand -hex 32"
 fi
 
 TOTAL_STEPS=10
@@ -953,9 +957,11 @@ fi
 log "Building production bundle (this may take a minute)..."
 su - "$GSM_USER" -c "cd $INSTALL_DIR && npx next build" > /tmp/gsm-next-build.log 2>&1 || true
 
-# Check if .next directory was created (proof the build succeeded)
-if ! su - "$GSM_USER" -c "test -d $INSTALL_DIR/.next" 2>/dev/null; then
-  err "Build failed! .next directory was not created."
+# Check for .next/BUILD_ID (proof the build succeeded). A failed build still
+# leaves a partial .next directory behind, so testing the directory alone
+# reports success on a broken build.
+if ! su - "$GSM_USER" -c "test -f $INSTALL_DIR/.next/BUILD_ID" 2>/dev/null; then
+  err "Build failed! .next/BUILD_ID was not created."
   echo "─── Build log (last 40 lines) ───"
   tail -40 /tmp/gsm-next-build.log
   echo "──────────────────────────────────"
