@@ -410,23 +410,15 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
     return current !== undefined && current !== "" && current !== v.default_value;
   }).length;
   const inputCls = "w-full px-3 py-2.5 gaming-chip rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/50 transition-colors";
+  // Stable across renders so VarField's props do not change identity on every
+  // keystroke (which is what remounted the input and stole focus).
+  const setVarValue = useCallback((envVariable: string, next: string) => {
+    setVarValues((prev) => ({ ...prev, [envVariable]: next }));
+  }, []);
   const hasActiveFilters = Boolean(searchQuery.trim()) || statusFilter !== "all";
   const installPathPreview = selectedNode && selectedGame && form.name
     ? `${selectedNode.gameServerPath || "/home/gameservers"}/${slugify(selectedGame.slug)}/${slugify(form.name)}`
     : (selectedNode?.gameServerPath || form.installPath || "");
-
-  function VarField({ v }: { v: TemplateVar }) {
-    const val = varValues[v.env_variable] ?? v.default_value ?? "";
-    const set = (nv: string) => setVarValues((p) => ({ ...p, [v.env_variable]: nv }));
-    const req = v.rules?.includes("required");
-    if (v.field_type === "select" || (v.enum_values && Object.keys(v.enum_values).length > 0)) {
-      return (<div><label className="block text-xs font-medium text-text-secondary mb-1.5">{v.name}</label><select value={val} onChange={(e) => set(e.target.value)} className={inputCls} required={req}>{Object.entries(v.enum_values || {}).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>{v.description && <p className="text-[10px] text-text-muted mt-1">{v.description}</p>}</div>);
-    }
-    if (v.field_type === "checkbox") {
-      return (<div className="flex items-start gap-3 py-1"><input type="checkbox" checked={["true","1","True"].includes(val)} onChange={(e) => set(e.target.checked ? "true" : "false")} className="rounded mt-0.5 w-4 h-4 accent-accent" /><div><p className="text-sm font-medium">{v.name}</p>{v.description && <p className="text-[10px] text-text-muted">{v.description}</p>}</div></div>);
-    }
-    return (<div><label className="block text-xs font-medium text-text-secondary mb-1.5">{v.name} {req && <span className="text-warning">*</span>}</label><input type={v.field_type === "password" ? "password" : v.field_type === "number" ? "number" : "text"} value={val} onChange={(e) => set(e.target.value)} className={inputCls} placeholder={v.default_value || v.description || v.name} required={req} />{v.description && <p className="text-[10px] text-text-muted mt-1">{v.description}</p>}</div>);
-  }
 
   function clearFilters() {
     setSearchQuery("");
@@ -566,14 +558,14 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                               <span className="text-[11px] font-normal text-text-muted">{g.vars.length} option{g.vars.length !== 1 ? "s" : ""}</span>
                             </summary>
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 p-4 border-t border-border">
-                              {g.vars.map((v) => <VarField key={v.env_variable} v={v} />)}
+                              {g.vars.map((v) => <VarField key={v.env_variable} v={v} value={varValues[v.env_variable] ?? v.default_value ?? ""} onChange={setVarValue} inputCls={inputCls} />)}
                             </div>
                           </details>
                         );
                       })}
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">{visibleVars.map((v) => <VarField key={v.env_variable} v={v} />)}</div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">{visibleVars.map((v) => <VarField key={v.env_variable} v={v} value={varValues[v.env_variable] ?? v.default_value ?? ""} onChange={setVarValue} inputCls={inputCls} />)}</div>
                   )
                 ) : (<div className="bg-bg-secondary rounded-lg p-6 text-center text-text-muted text-sm">{varQuery ? "No settings match your search." : "No additional settings for this game."}</div>)}
                 <div className="flex justify-between pt-2"><button type="button" onClick={() => setWizardStep(0)} className="px-5 py-2.5 gaming-chip rounded-lg text-sm font-medium">← Back</button><button type="button" onClick={() => setWizardStep(2)} className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium">Next →</button></div>
@@ -760,6 +752,77 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * A single game-template option field.
+ *
+ * Defined at module scope on purpose. It used to live inside ServersPanel,
+ * which meant React saw a brand-new component type on every render: each
+ * keystroke re-created the function, so the old input was unmounted and a
+ * fresh one mounted in its place. The DOM node changed identity, focus was
+ * lost, and the caret jumped out of the field after a single character.
+ * Hoisting it keeps the element identity stable across renders.
+ */
+function VarField({
+  v,
+  value,
+  onChange,
+  inputCls,
+}: {
+  v: TemplateVar;
+  value: string;
+  onChange: (envVariable: string, next: string) => void;
+  inputCls: string;
+}) {
+  const req = v.rules?.includes("required");
+  const set = (nv: string) => onChange(v.env_variable, nv);
+
+  if (v.field_type === "select" || (v.enum_values && Object.keys(v.enum_values).length > 0)) {
+    return (
+      <div>
+        <label className="block text-xs font-medium text-text-secondary mb-1.5">{v.name}</label>
+        <select value={value} onChange={(e) => set(e.target.value)} className={inputCls} required={req}>
+          {Object.entries(v.enum_values || {}).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        </select>
+        {v.description && <p className="text-[10px] text-text-muted mt-1">{v.description}</p>}
+      </div>
+    );
+  }
+
+  if (v.field_type === "checkbox") {
+    return (
+      <div className="flex items-start gap-3 py-1">
+        <input
+          type="checkbox"
+          checked={["true", "1", "True"].includes(value)}
+          onChange={(e) => set(e.target.checked ? "true" : "false")}
+          className="rounded mt-0.5 w-4 h-4 accent-accent"
+        />
+        <div>
+          <p className="text-sm font-medium">{v.name}</p>
+          {v.description && <p className="text-[10px] text-text-muted">{v.description}</p>}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <label className="block text-xs font-medium text-text-secondary mb-1.5">
+        {v.name} {req && <span className="text-warning">*</span>}
+      </label>
+      <input
+        type={v.field_type === "password" ? "password" : v.field_type === "number" ? "number" : "text"}
+        value={value}
+        onChange={(e) => set(e.target.value)}
+        className={inputCls}
+        placeholder={v.default_value || v.description || v.name}
+        required={req}
+      />
+      {v.description && <p className="text-[10px] text-text-muted mt-1">{v.description}</p>}
     </div>
   );
 }
