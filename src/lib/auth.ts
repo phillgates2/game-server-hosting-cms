@@ -64,10 +64,28 @@ export function getTokenFromHeaders(headers: Headers): string | null {
   return match ? match[1] : null;
 }
 
-export async function getCurrentUser(headers: Headers) {
+/**
+ * Identify the caller, from either a session cookie or an API key.
+ *
+ * The session cookie is checked first because it is the common case and costs
+ * nothing. Failing that, an `Authorization: Bearer gsm_...` header is resolved
+ * against the api_keys table - the panel has always told users to send that
+ * header, but nothing read it until now.
+ */
+export async function getCurrentUser(
+  headers: Headers
+): Promise<{ userId: number; role: string } | null> {
   const token = getTokenFromHeaders(headers);
-  if (!token) return null;
-  return verifyToken(token);
+  if (token) {
+    const session = verifyToken(token);
+    if (session) return session;
+  }
+
+  // Imported lazily: the API-key path touches the database, and pulling that
+  // in at module load would drag the db client into every consumer of auth.ts.
+  const { authenticateApiKey } = await import("./api-key-auth");
+  const viaKey = await authenticateApiKey(headers);
+  return viaKey ? { userId: viaKey.userId, role: viaKey.role } : null;
 }
 
 // Cookie options — secure only when behind HTTPS (detected via x-forwarded-proto)

@@ -4,6 +4,63 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.9.0] — 2026-08-22
+
+### 🔑 API Keys Were Completely Inert
+- **The entire API key feature did nothing.** The panel generated a key, hashed it into `api_keys.key_hash`, and displayed instructions telling users to send `Authorization: Bearer gsm_...` — but **no code on the server ever read that header**, and the stored hash was never compared against anything. Every documented external integration failed with a `401`.
+- **Now implemented properly** — wired into `getCurrentUser()`, so all 151 call sites accept API keys with no per-route changes. The lookup narrows by the indexed (non-secret) key prefix, compares the full SHA-256 digest with `timingSafeEqual`, rejects expired keys and keys whose owner is suspended or banned, and updates `last_used_at` on a best-effort basis.
+- SHA-256 rather than bcrypt is deliberate: an API key is 32 bytes of CSPRNG output with no dictionary to attack, and this runs on the hot path for every API request.
+
+### 🧪 The First Unit Tests
+- **The repo had no tests.** The verify harnesses cover installers and grep the source for security fixes, but nothing exercised the logic that runs at request time. Added **81 tests** using Node's built-in runner — no new dependencies.
+- **`config-render` (22)** — ten output formats, XML escaping, nested objects, `__files` routing, directive stripping. This is the code that writes every game's config, so a regression here produces a file the engine rejects or, worse, silently accepts with wrong values.
+- **`server-file-ops` (18)** — `safePath()`, the guard on every file-manager operation, including the sibling-prefix case (`/srv/mc` vs `/srv/mc-evil`) that was a real vulnerability. **Verified these tests fail when the old buggy implementation is restored**, so they genuinely catch it.
+- **`auth` (17)** — salted one-way password hashing, JWT round-trips, rejection of tampered and re-encoded payloads, cookie flags, and the login throttle.
+- **`pagination` (14)** and **`api-key` (10)**.
+- `npm test` runs them; `npm run verify` and CI now include them.
+
+### 🔒 Verification
+- Security suite grows to **57 checks**, pinning the API key verification path.
+
+---
+
+## [1.8.0] — 2026-08-22
+
+### 🗄️ Unbounded Data Growth
+- **The metrics tables had no cleanup whatsoever.** `node_metrics`, `server_metrics` and `audit_log` are append-only and nothing in the application ever deleted a row. A node heartbeating every 10 seconds writes roughly **8,600 rows per day**, so a five-node panel reaches about **16 million rows and ~2.4 GB within a year** — while the dashboards only ever read the recent tail.
+- **Retention is now amortised onto the writes** — a heartbeat occasionally (2% of the time, at most once a minute) prunes rows past the retention window. No external cron, no extra moving parts, and failures are logged and swallowed so retention can never fail a heartbeat.
+- **Configurable windows** — `METRICS_RETENTION_DAYS` (default 30) and `AUDIT_RETENTION_DAYS` (default 365, since audit trails are usually a compliance concern). Set either to `0` to keep everything.
+- **Two more missing indexes** — `server_metrics(server_id, recorded_at)`. Without `recorded_at` the prune `DELETE` would sequential-scan the largest table in the schema.
+- **`/api/maintenance/retention`** — admin-only endpoint to inspect row counts and force a prune on demand.
+
+### 🔢 Pagination Hardening
+- **Six unclamped query parameters across four routes** went straight from `parseInt` into SQL. `?limit=999999999` read an entire table into memory — a single authenticated request could exhaust server RAM against the very tables that grow without bound. `?limit=abc` produced `NaN` and `?limit=-1` a negative `LIMIT`, both of which Postgres rejects with a syntax error surfaced as a 500.
+- Added `src/lib/pagination.ts`, which always returns a sane integer inside a fixed 500-row ceiling, and switched `audit-log`, `cms` and the database table browser over to it. (The chat endpoint already clamped correctly.)
+
+### 🧪 Verification
+- Security suite grows to **52 checks**, including a sweep that fails if any route reintroduces a raw `parseInt` on a pagination parameter.
+
+---
+
+## [1.7.0] — 2026-08-22
+
+### 🛡️ Security Headers
+- **The panel shipped with no security headers at all.** Since it executes shell commands, edits files on disk and holds database credentials, an XSS or clickjacking attack against a logged-in admin is effectively remote code execution on the host. Added a Content-Security-Policy plus `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy` and HSTS.
+- **`X-Powered-By` disabled** — the exact framework version is no longer advertised to anyone scanning the panel.
+- The CSP permits `'unsafe-inline'` for styles (Tailwind and the custom theme editor set inline style attributes) but **never `'unsafe-eval'` in production**. Verified against a running server: all headers present, every JS chunk still loads, page renders unchanged. The app references no external origins, so `default-src 'self'` breaks nothing.
+
+### 🔐 Dependencies
+- **Three high-severity CVEs cleared** — `npm audit` flagged advisories reaching production dependencies transitively through Next.js: `sharp` (inherited libvips CVE-2026-33327, -33328, -35590, -35591), `postcss`, and Next itself. Upgrading **16.2.6 → 16.3.2** — a patch-level bump inside the existing major, no migration required — takes the audit to **0 vulnerabilities**.
+
+### ⚙️ Continuous Integration
+- **The repo had no CI.** Every gate built over the last few releases only ran when someone remembered to run it. A GitHub Actions workflow now runs typecheck, lint, the template and installer harnesses, the security suite, a production build, and a high-severity dependency audit on every push and pull request.
+- **Weekly upstream monitoring** — `check-upstreams.sh` runs on a schedule and on demand rather than per-PR, so a game download endpoint going stale gets noticed without failing unrelated pull requests.
+
+### 📄 Licensing
+- **Added the missing `LICENSE` file.** The README advertised MIT, but no license text existed anywhere in the repo — which legally left the project as all-rights-reserved regardless of what the docs claimed.
+
+---
+
 ## [1.6.0] — 2026-08-21
 
 ### 🎮 Three Game Installers Were Completely Broken

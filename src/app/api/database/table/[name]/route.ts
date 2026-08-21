@@ -3,6 +3,7 @@ import { pool } from "@/db";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { apiError } from "@/lib/api-error";
+import { limitParam, pageParam } from "@/lib/pagination";
 
 export async function GET(
   req: NextRequest,
@@ -16,8 +17,8 @@ export async function GET(
 
   const { name: tableName } = await params;
   const url = new URL(req.url);
-  const page = parseInt(url.searchParams.get("page") || "1");
-  const limit = parseInt(url.searchParams.get("limit") || "50");
+  const page = pageParam(url.searchParams);
+  const limit = limitParam(url.searchParams, 50);
   const offset = (page - 1) * limit;
 
   try {

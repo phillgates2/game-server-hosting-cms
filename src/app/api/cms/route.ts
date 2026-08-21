@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq, desc, and } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
+import { limitParam } from "@/lib/pagination";
 
 // GET /api/cms?type=blog|changelog|page&published=true
 export async function GET(req: NextRequest) {
@@ -12,7 +13,7 @@ export async function GET(req: NextRequest) {
     const url = new URL(req.url);
     const type = url.searchParams.get("type");
     const publishedOnly = url.searchParams.get("published") !== "false";
-    const limit = parseInt(url.searchParams.get("limit") || "50");
+    const limit = limitParam(url.searchParams, 50);
 
     const conditions = [];
     if (type) conditions.push(eq(cmsPages.type, type));

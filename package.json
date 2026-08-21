@@ -9,9 +9,10 @@
     "typecheck": "tsc --noEmit",
     "verify:templates": "tsx scripts/verify-templates.ts",
     "verify:security": "tsx scripts/verify-security.ts",
-    "verify": "npm run typecheck && npm run lint && npm run verify:templates && npm run verify:installers && npm run verify:security",
+    "verify": "npm run typecheck && npm run lint && npm test && npm run verify:templates && npm run verify:installers && npm run verify:security",
     "verify:installers": "tsx scripts/verify-installers.ts",
-    "check:upstreams": "bash scripts/check-upstreams.sh"
+    "check:upstreams": "bash scripts/check-upstreams.sh",
+    "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -23,7 +24,7 @@
     "drizzle-orm": "0.45.2",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.33.0",
-    "next": "16.2.6",
+    "next": "16.3.2",
     "nodemailer": "^9.0.5",
     "otpauth": "^9.5.1",
     "pg": "8.20.0",
@@ -44,7 +45,7 @@
     "eslint-config-next": "16.2.6",
     "postcss": "8.5.8",
     "tailwindcss": "4.1.17",
-    "typescript": "5.9.3",
-    "tsx": "^4.19.2"
+    "tsx": "^4.19.2",
+    "typescript": "5.9.3"
   }
 }

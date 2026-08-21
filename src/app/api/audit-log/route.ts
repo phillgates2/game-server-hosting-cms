@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { desc, eq } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
+import { limitParam, offsetParam } from "@/lib/pagination";
 
 // GET /api/audit-log — List audit log entries
 export async function GET(req: NextRequest) {
@@ -15,8 +16,8 @@ export async function GET(req: NextRequest) {
   }
 
   const url = new URL(req.url);
-  const limit = parseInt(url.searchParams.get("limit") || "100");
-  const offset = parseInt(url.searchParams.get("offset") || "0");
+  const limit = limitParam(url.searchParams, 100);
+  const offset = offsetParam(url.searchParams);
 
   try {
     const entries = await db

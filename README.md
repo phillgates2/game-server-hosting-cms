@@ -282,6 +282,8 @@ Only running non-Steam games? Skip it entirely with `--no-steamcmd`.
 | `SMTP_PASS` | optional | SMTP password |
 | `SMTP_FROM` | optional | From address |
 | `DISCORD_WEBHOOK_URL` | optional | Default webhook for server notifications |
+| `METRICS_RETENTION_DAYS` | optional | Days of node/server metric samples to keep *(default `30`, `0` disables pruning)* |
+| `AUDIT_RETENTION_DAYS` | optional | Days of audit history to keep *(default `365`, `0` disables pruning)* |
 
 Start from `.env.example`, which documents all of the above.
 
@@ -524,11 +526,15 @@ One command chains all four checks, exiting non-zero on the first failure — dr
 
 | Script | Checks |
 |:--|:--|
+| `npm test` | 81 unit tests over the config renderer, path guard, auth, pagination and API keys |
 | `npm run typecheck` | `tsc --noEmit` across the project |
 | `npm run lint` | ESLint, including React hooks rules |
 | `npm run verify:templates` | All 1,551 template options — types, enums, defaults, and that every declared variable is actually consumed |
 | `npm run verify:installers` | Renders every game's install script, runs `bash -n` + shellcheck, then **executes** it in a sandbox with SteamCMD/curl/apt mocked, and asserts the artifacts the panel needs were produced |
-| `npm run verify:security` | 40 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, and a sweep for leaked exception messages |
+| `npm run verify:security` | 57 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, and a sweep for leaked exception messages |
+
+All of these run automatically in CI on every push and pull request, along
+with a production build and a high-severity dependency audit.
 
 One extra check is **not** part of `npm run verify`, because it needs the
 public internet and upstream outages are not repo regressions:

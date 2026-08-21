@@ -6,10 +6,11 @@ import { hasPermission } from "@/lib/permissions";
 import { and, eq } from "drizzle-orm";
 import { randomBytes, createHash } from "crypto";
 import { apiError } from "@/lib/api-error";
+import { hashApiKey } from "@/lib/api-key-auth";
 
-function hashKey(key: string): string {
-  return createHash("sha256").update(key).digest("hex");
-}
+// Re-exported from the shared module so the generator and the verifier can
+// never drift apart.
+const hashKey = hashApiKey;
 
 // GET /api/api-keys — List user's API keys
 export async function GET(req: NextRequest) {

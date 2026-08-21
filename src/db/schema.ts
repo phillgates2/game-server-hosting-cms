@@ -185,7 +185,10 @@ export const serverMetrics = pgTable("server_metrics", {
   playerCount: integer("player_count"),
   maxPlayers: integer("max_players"),
   recordedAt: timestamp("recorded_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  server_metrics_server_id_idx: index("server_metrics_server_id_idx").on(t.serverId),
+  server_metrics_recorded_at_idx: index("server_metrics_recorded_at_idx").on(t.recordedAt),
+}));
 
 // ── Forum categories ──────────────────────────────────────────
 export const forumCategories = pgTable("forum_categories", {

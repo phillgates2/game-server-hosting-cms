@@ -4,6 +4,7 @@ import { nodes, nodeMetrics } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { timingSafeEqual } from "node:crypto";
 import { apiError } from "@/lib/api-error";
+import { maybePruneInBackground } from "@/lib/retention";
 
 /** Constant-time compare so the key cannot be recovered by timing. */
 function secretsMatch(a: string, b: string): boolean {
@@ -93,6 +94,10 @@ export async function POST(
       serverCount,
       ipv6Enabled,
     });
+
+    // node_metrics is append-only and never had any cleanup, so it grew without
+    // bound. Prune opportunistically from the write path (see src/lib/retention).
+    maybePruneInBackground();
 
     return NextResponse.json({ ok: true, timestamp: new Date().toISOString() });
   } catch (e: unknown) {

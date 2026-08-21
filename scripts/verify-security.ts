@@ -171,6 +171,51 @@ console.log("\nH2/H3 auth enforcement wiring");
   });
   check(`no API route returns a raw exception message (found ${leaky.length})`, leaky.length === 0);
 
+  // The panel runs shell commands and edits files, so XSS or clickjacking
+  // against a logged-in admin is effectively RCE on the host.
+  const nextCfg = read("../next.config.ts");
+  check("CSP is configured", /Content-Security-Policy/.test(nextCfg));
+  check("CSP forbids framing", /frame-ancestors 'none'/.test(nextCfg));
+  check("CSP blocks plugins/objects", /object-src 'none'/.test(nextCfg));
+  check("clickjacking header set", /X-Frame-Options/.test(nextCfg) && /DENY/.test(nextCfg));
+  check("MIME sniffing disabled", /nosniff/.test(nextCfg));
+  check("framework version not advertised", /poweredByHeader:\s*false/.test(nextCfg));
+  check(
+    "production CSP does not allow unsafe-eval",
+    /script-src 'self' 'unsafe-inline'"/.test(nextCfg) || !/unsafe-eval/.test(nextCfg.split("isDev")[2] ?? "")
+  );
+
+  // Unclamped pagination lets one request read an entire table into memory.
+  const apiDir2 = new URL("../src/app/api/", import.meta.url);
+  const unclamped = listRoutes(apiDir2).filter((f) => {
+    const src = readFileAbs(f);
+    return /parseInt\(\s*(?:url|req\.nextUrl)\.searchParams\.get\(\s*["'](?:limit|offset|page)["']/.test(src);
+  });
+  check(
+    `pagination params are clamped, not raw parseInt (found ${unclamped.length})`,
+    unclamped.length === 0
+  );
+
+  const pagination = read("../src/lib/pagination.ts");
+  check("pagination enforces a maximum page size", /MAX_LIMIT/.test(pagination));
+
+  // Append-only tables previously grew without any cleanup at all.
+  const retention = read("../src/lib/retention.ts");
+  check("metrics retention is implemented", /pruneMetrics/.test(retention));
+  check("retention window is configurable", /METRICS_RETENTION_DAYS/.test(retention));
+  const heartbeat2 = read("../src/app/api/nodes/[id]/heartbeat/route.ts");
+  check("heartbeat prunes old metrics", /maybePruneInBackground/.test(heartbeat2));
+
+  // The API Keys panel documents "Authorization: Bearer gsm_..." but nothing
+  // read that header, so every documented integration failed with a 401.
+  const keyAuth = read("../src/lib/api-key-auth.ts");
+  check("API keys are actually verified against stored hashes", /authenticateApiKey/.test(keyAuth));
+  check("API key comparison is constant time", /timingSafeEqual/.test(keyAuth));
+  check("expired API keys are rejected", /expiresAt/.test(keyAuth));
+  check("API keys of non-active owners are rejected", /status !== "active"/.test(keyAuth));
+  const authSrc = read("../src/lib/auth.ts");
+  check("getCurrentUser accepts API keys", /authenticateApiKey/.test(authSrc));
+
   const backup = read("../src/app/api/servers/[id]/backup/route.ts");
   check("backup no longer spawns a shell", !/spawn\("sh"/.test(backup));
   check("backup passes tar an argument array", /spawn\(file, args/.test(backup));
