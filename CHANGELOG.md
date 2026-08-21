@@ -4,6 +4,54 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.5.0] — 2026-08-21
+
+### 🔒 Security Audit — 11 Issues Found, 11 Fixed
+
+A full-repository audit covering build/type/lint gates, correctness, security, and runtime behaviour. Two critical findings, five high, three medium, one low. See `DEBUG-REPORT.md` for the complete write-up.
+
+**Critical**
+- **Remote code execution in the backup route** — `POST/DELETE /api/servers/[id]/backup` interpolated the caller-supplied backup name into a shell string, so a name containing `;` or a backtick ran arbitrary commands as the panel user. Backups now spawn `tar` directly with an argument array (no shell), names must match `^backup-[A-Za-z0-9._-]+\.tar\.gz$`, and the resolved path is required to sit inside the server's backup directory.
+- **SQL injection in the database row editor** — `/api/database/table/[name]/row` built `UPDATE`/`DELETE` statements by string-concatenating column names from the request body. Columns are now validated against a live `information_schema.columns` allowlist, identifiers are quoted with a dedicated `quoteIdent()` helper, and empty or unbounded statements are rejected before they reach the driver.
+
+**High**
+- **Path traversal in the file manager** — `safePath()` accepted sibling directories whose names merely started with the base path (`/opt/gameservers/foo-evil` passed the check for `/opt/gameservers/foo`). Containment is now an exact match or a `base + separator` prefix, which also fixes the file upload route that depends on it.
+- **Hardcoded fallback JWT secret** — the shipped default `gsm-panel-secret-change-me` let anyone forge a session token against a deployment that never set `JWT_SECRET`. The fallback is gone; production requires the variable and refuses to boot without it, and development derives a random per-process secret.
+- **2FA could be bypassed** — the login endpoint enforced TOTP but the login form never asked for a code, so accounts with 2FA enabled were unreachable rather than protected. The form now handles the `twoFactorRequired` response and submits the code.
+- **Suspended and banned users kept working sessions** — account status was checked at login but nowhere afterwards. `getUserPermissions()` now denies everything for non-active users, and `/api/auth/me` returns 403 and clears the session cookie.
+- **Node heartbeat accepted unconfigured keys** — a node with a `NULL` API key authenticated any caller, and the comparison was a plain string equality vulnerable to timing analysis. Heartbeats now require a configured key and compare with `timingSafeEqual`.
+
+**Medium & low**
+- **Brute-force protection on login** — 10 attempts per IP + username within a 15-minute window, answered with `429` and a `Retry-After` header.
+- **Internal errors leaked to clients** — a new `apiError()` helper logs the detail server-side and returns a generic message in production.
+- **Five `react-hooks/set-state-in-effect` violations** — `PublicChatWidget`, `SandboxChat`, `ForumPanel`, and `PublicSite` set state during render-phase effects, causing redundant re-renders and duplicate fetches. All are ref-guarded now, and ESLint is clean.
+
+### 🎮 Complete Game Template Library
+- **27 games, 1,551 configurable options** — every template now exposes its game's full server config surface, categorized, typed, validated, with enums and defaults, and each option is genuinely consumed by the install script, config files, or start command.
+- **One module per game** — the monolithic seed file was split into `src/db/games/`, with shared `types.ts`, a reusable `steamcmd.ts` installer, and a `src/db/seeds.ts` shim so existing importers keep working unchanged.
+- **Multi-file config rendering** — templates can emit several config files in different formats (INI with sections, JSON, key=value, Quake 3 `set` syntax) via `src/lib/config-render.ts`. V Rising writes both `ServerHostSettings.json` and `ServerGameSettings.json`; Assetto Corsa writes a sectioned `server_cfg.ini` alongside `entry_list.ini`.
+
+### 🧪 Tooling
+- **`npm run verify`** — one command chaining `typecheck`, `lint`, `verify:templates`, and `verify:security`.
+- **`npm run verify:security`** — 33 regression checks pinning every fix above, so the vulnerabilities cannot silently return.
+- **`npm run verify:templates`** — validates all 1,551 template options and reports unused or undeclared variables per game.
+- **`.env.example`** — documents every supported environment variable, required and optional.
+- **`.gitignore`** — added; build output, `node_modules`, and local `.env` files are no longer tracked.
+
+### 📦 Installer, Updater & Uninstaller
+- **The updater no longer breaks on the new `JWT_SECRET` requirement** — `update.sh` now backfills a secret into `.env` after pulling code if the variable is missing, empty, or shorter than 32 characters, and adds `NODE_ENV=production` when absent. Without this, every pre-1.5.0 install would have failed at the build step. Secrets that are already valid are left untouched, so sessions survive the upgrade.
+- **Build success is detected correctly** — `install.sh` and `update.sh` checked for a `.next` *directory*, which Next.js creates even when the build fails; a broken build was reported as successful and the panel was restarted onto stale output. Both now check for `.next/BUILD_ID`, which is only written on success, and the build directory is cleared first so a previous build cannot mask a failure.
+- **Rollback verifies its own rebuild** — `update.sh --rollback` discarded all build output and never checked the result, so a failed rollback looked clean. It now logs to `/tmp/gsm-rollback-build.log` and aborts loudly if the restored code does not build.
+- **`--jwt-secret` is validated up front** — passing a secret shorter than 32 characters previously produced a fully installed panel that crashed on first boot. The installer now rejects it before making any system changes.
+- **Uninstaller gained `--install-dir` and `-y`** — it hardcoded `/opt/gsm-panel`, so panels installed with `--install-dir` could not be removed. It also now rejects unknown flags instead of ignoring them, supports `--help`, and no longer lets `.install-info` override an explicitly passed directory.
+
+### ⚠️ Breaking Changes
+- **`JWT_SECRET` is now required in production** and must be at least 32 characters. The panel exits at startup if it is missing. Generate one with `openssl rand -hex 32`.
+  - Installs created by `install.sh` are **unaffected** — the installer already generates a 62-character secret and writes it to `.env`.
+  - Only manual installations that relied on the old auto-generated fallback need to add the variable before upgrading. Existing sessions are invalidated the first time the secret changes.
+
+---
+
 ## [1.4.0] — 2026-01-01
 
 ### 🐺 Wolfenstein: Enemy Territory — Full server.cfg Options in the Installer

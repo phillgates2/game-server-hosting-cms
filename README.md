@@ -353,7 +353,18 @@ sudo bash /opt/gsm-panel/public/uninstall.sh --purge
 
 # Purge but keep game server files
 sudo bash /opt/gsm-panel/public/uninstall.sh --purge --keep-servers
+
+# Non-interactive, or for a panel installed outside /opt/gsm-panel
+sudo bash /opt/gsm-panel/public/uninstall.sh --purge -y
+sudo bash /opt/gsm-panel/public/uninstall.sh --install-dir /srv/gsm
 ```
+
+| Flag | Description |
+|------|-------------|
+| `--purge` | Also drop the database, remove the `gsm` user, Caddy, and SteamCMD |
+| `--keep-servers` | Keep `/opt/gameservers` when purging |
+| `--install-dir` | Panel directory to remove (default: `/opt/gsm-panel`) |
+| `-y`, `--yes` | Skip the confirmation prompt |
 
 ---
 
@@ -362,7 +373,7 @@ sudo bash /opt/gsm-panel/public/uninstall.sh --purge --keep-servers
 | Feature | Description |
 |---------|-------------|
 | 🖥️ **Multi-Node** | Manage game servers across multiple machines via SSH/API |
-| 🎮 **30+ Game Templates** | Minecraft, CS2, Rust, ARK, Valheim, Palworld, Terraria, and more |
+| 🎮 **27 Game Templates** | Minecraft, CS2, Rust, ARK, Valheim, Palworld, Terraria, and more — 1,551 configurable options, fully typed and validated |
 | 📊 **Real-Time Monitoring** | CPU, RAM, disk, network metrics with live charts |
 | 🔧 **RCON Console** | Remote server management from the browser |
 | 📁 **File Manager** | Browse, edit, upload, and download server files |
@@ -405,7 +416,9 @@ curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.g
 
 # 3. Configure
 cp .env.example .env
-# Edit .env with your DATABASE_URL and JWT_SECRET
+# Edit .env and set DATABASE_URL, then generate a JWT_SECRET:
+#   openssl rand -hex 32
+# JWT_SECRET is mandatory in production — the panel refuses to start without it.
 
 # 4. Install & build
 npm ci
@@ -443,7 +456,7 @@ Then visit `http://your-server:3000` to complete setup via the install wizard.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DATABASE_URL` | ✅ | PostgreSQL connection string |
-| `JWT_SECRET` | ⚠️ | JWT signing secret (auto-generated if missing) |
+| `JWT_SECRET` | ✅ | JWT signing secret, **min 32 characters**. Required in production — the panel exits at startup if unset. Generate with `openssl rand -hex 32`. In development a random per-process secret is used instead (sessions drop on restart) |
 | `PORT` | ❌ | Panel port (default: 3000) |
 | `STEAMCMD_PATH` | ❌ | SteamCMD directory (default: /opt/steamcmd) |
 | `GAMESERVERS_PATH` | ❌ | Game servers directory (default: /opt/gameservers) |
@@ -452,6 +465,44 @@ Then visit `http://your-server:3000` to complete setup via the install wizard.
 | `SMTP_USER` | ❌ | SMTP username |
 | `SMTP_PASS` | ❌ | SMTP password |
 | `SMTP_FROM` | ❌ | From email address |
+| `DISCORD_WEBHOOK_URL` | ❌ | Default Discord webhook for server notifications |
+
+Copy `.env.example` to `.env` as a starting point — it documents every variable above.
+
+> **Upgrading an existing install?** `JWT_SECRET` used to be optional and was
+> auto-generated at runtime if missing. It is now **required in production**.
+> Deployments made with `install.sh` are unaffected: the installer already
+> generates a 62-character secret and writes it to `.env`. Only manual installs
+> that never set the variable need to add one before upgrading.
+
+---
+
+## ✅ Verification & Quality Gates
+
+The repo ships with four checks, wired together behind a single command:
+
+```bash
+npm run verify
+```
+
+| Script | What it checks |
+|--------|----------------|
+| `npm run typecheck` | `tsc --noEmit` across the whole project |
+| `npm run lint` | ESLint, including the React hooks rules |
+| `npm run verify:templates` | Every game template: option types, enum values, defaults, and that each declared variable is actually consumed by the install script, config files, or start command |
+| `npm run verify:security` | 33 regression checks covering the fixes from the security audit — path traversal containment, backup-name allowlisting, SQL identifier quoting, and JWT secret policy |
+
+All four must pass before a release. `npm run verify` exits non-zero on the
+first failure, so it drops straight into CI.
+
+Building the app requires the environment to be populated, since route modules
+connect at import time:
+
+```bash
+DATABASE_URL="postgres://user:pass@127.0.0.1:5432/gsm" \
+JWT_SECRET="$(openssl rand -hex 32)" \
+npx next build
+```
 
 ---
 
