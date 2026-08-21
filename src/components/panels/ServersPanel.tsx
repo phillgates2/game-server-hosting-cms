@@ -70,6 +70,8 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   const [loaded, setLoaded] = useState(false);
   const [gameVars, setGameVars] = useState<TemplateVar[]>([]);
   const [varValues, setVarValues] = useState<Record<string, string>>({});
+  const [varSearch, setVarSearch] = useState("");
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [consoleId, setConsoleId] = useState<number | null>(null);
   const [consoleLog, setConsoleLog] = useState("");
   const [consoleInfo, setConsoleInfo] = useState<{ status: string; pid: number | null; lines: number; fileSizeKb: number } | null>(null);
@@ -168,6 +170,8 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
         }
       } catch { setGameVars([]); }
     } else { setForm((f) => ({ ...f, gameId })); setGameVars([]); setVarValues({}); }
+    setVarSearch("");
+    setOpenGroups({});
   }
 
   async function createServer(e: React.FormEvent) {
@@ -367,9 +371,19 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   );
   const groupedServers = groupServersByNode(filteredServers);
   const serverSummary = summarizeServerStatus(servers);
-  const visibleVars = gameVars.filter((v) => !["SERVER_NAME","PORT","INSTALL_PATH","QUERY_PORT"].includes(v.env_variable));
-  // Group template variables by category (e.g. Wolfenstein: ET ships 140+ options
-  // across Server Identity / Network / Voting / ...) so big option sets stay navigable.
+  const allVisibleVars = gameVars.filter((v) => !["SERVER_NAME","PORT","INSTALL_PATH","QUERY_PORT"].includes(v.env_variable));
+  // Templates now ship full option sets (Wolfenstein: ET alone has 150+), so the
+  // wizard needs a filter to stay usable.
+  const varQuery = varSearch.trim().toLowerCase();
+  const visibleVars = varQuery
+    ? allVisibleVars.filter((v) =>
+        [v.name, v.env_variable, v.description, v.category].some((field) =>
+          (field || "").toLowerCase().includes(varQuery)
+        )
+      )
+    : allVisibleVars;
+  // Group template variables by category (Server Identity / Network / Voting / ...)
+  // so big option sets stay navigable.
   const varGroups = visibleVars.reduce<{ name: string; vars: TemplateVar[] }[]>((acc, v) => {
     const name = (v.category || "").trim() || "General";
     const last = acc[acc.length - 1];
@@ -382,10 +396,19 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
     return acc;
   }, []);
   const hasVarCategories = varGroups.some((g) => g.name !== "General") && varGroups.length > 1;
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   function toggleGroup(name: string, open: boolean) {
     setOpenGroups((p) => ({ ...p, [name]: open }));
   }
+  function setAllGroups(open: boolean) {
+    setOpenGroups(Object.fromEntries(varGroups.map((g) => [g.name, open])));
+  }
+  // A search should reveal its matches rather than hide them behind collapsed groups.
+  const groupsForceOpen = varQuery.length > 0;
+  // Count how many options the user has changed away from the template default.
+  const changedVarCount = allVisibleVars.filter((v) => {
+    const current = varValues[v.env_variable];
+    return current !== undefined && current !== "" && current !== v.default_value;
+  }).length;
   const inputCls = "w-full px-3 py-2.5 gaming-chip rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/50 transition-colors";
   const hasActiveFilters = Boolean(searchQuery.trim()) || statusFilter !== "all";
   const installPathPreview = selectedNode && selectedGame && form.name
@@ -496,12 +519,43 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
             )}
             {wizardStep === 1 && (
               <div className="space-y-5">
-                <p className="text-text-secondary text-sm">Configure {selectedGame?.name || "game"} settings. Defaults are already filled in.</p>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-text-secondary text-sm">Configure {selectedGame?.name || "game"} settings. Defaults are already filled in.</p>
+                    <p className="text-text-muted text-xs mt-0.5">
+                      {allVisibleVars.length} option{allVisibleVars.length !== 1 ? "s" : ""} available
+                      {changedVarCount > 0 ? ` · ${changedVarCount} changed` : ""}
+                    </p>
+                  </div>
+                  {allVisibleVars.length > 8 && (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="search"
+                        value={varSearch}
+                        onChange={(e) => setVarSearch(e.target.value)}
+                        placeholder="Search settings…"
+                        className="px-3 py-2 gaming-chip rounded-lg text-sm w-full sm:w-56 focus:outline-none focus:ring-2 focus:ring-accent/50"
+                      />
+                      {hasVarCategories && (
+                        <>
+                          <button type="button" onClick={() => setAllGroups(true)} className="px-2.5 py-2 gaming-chip rounded-lg text-xs whitespace-nowrap" title="Expand all groups">Expand</button>
+                          <button type="button" onClick={() => setAllGroups(false)} className="px-2.5 py-2 gaming-chip rounded-lg text-xs whitespace-nowrap" title="Collapse all groups">Collapse</button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {varQuery && (
+                  <p className="text-xs text-text-muted">
+                    {visibleVars.length} match{visibleVars.length !== 1 ? "es" : ""} for “{varSearch.trim()}”
+                    {visibleVars.length === 0 ? " — try a different term." : ""}
+                  </p>
+                )}
                 {visibleVars.length > 0 ? (
                   hasVarCategories ? (
                     <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
                       {varGroups.map((g, gi) => {
-                        const isOpen = openGroups[g.name] ?? gi === 0;
+                        const isOpen = groupsForceOpen || (openGroups[g.name] ?? gi === 0);
                         return (
                           <details key={g.name} open={isOpen} onToggle={(e) => toggleGroup(g.name, (e.target as HTMLDetailsElement).open)} className="group rounded-xl border border-border bg-bg-secondary/40 overflow-hidden">
                             <summary className="flex cursor-pointer select-none items-center justify-between px-4 py-3 text-sm font-semibold text-text-primary hover:bg-bg-hover/40 transition-colors list-none">
@@ -521,7 +575,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">{visibleVars.map((v) => <VarField key={v.env_variable} v={v} />)}</div>
                   )
-                ) : (<div className="bg-bg-secondary rounded-lg p-6 text-center text-text-muted text-sm">No additional settings for this game.</div>)}
+                ) : (<div className="bg-bg-secondary rounded-lg p-6 text-center text-text-muted text-sm">{varQuery ? "No settings match your search." : "No additional settings for this game."}</div>)}
                 <div className="flex justify-between pt-2"><button type="button" onClick={() => setWizardStep(0)} className="px-5 py-2.5 gaming-chip rounded-lg text-sm font-medium">← Back</button><button type="button" onClick={() => setWizardStep(2)} className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium">Next →</button></div>
               </div>
             )}

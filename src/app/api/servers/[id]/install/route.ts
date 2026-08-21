@@ -9,6 +9,7 @@ import { tmpdir, homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { getTemplateBySlug, getExpectedArtifactsBySlug, type TemplateVariable } from "@/db/seeds";
+import { renderConfigFile, resolveConfigFiles } from "@/lib/config-render";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -201,59 +202,6 @@ function substituteConfigValues(input: unknown, variables: Record<string, unknow
   return input;
 }
 
-// For JSON configs, game servers expect typed values (number/boolean), not
-// strings that merely look like numbers/booleans.
-function coerceJsonScalar(value: unknown): unknown {
-  if (typeof value !== "string") return value;
-  const trimmed = value.trim();
-  if (trimmed === "true") return true;
-  if (trimmed === "false") return false;
-  if (trimmed !== "" && !Number.isNaN(Number(trimmed))) return Number(trimmed);
-  return value;
-}
-
-function coerceJsonTree(input: unknown): unknown {
-  if (typeof input === "string") return coerceJsonScalar(input);
-  if (Array.isArray(input)) return input.map(coerceJsonTree);
-  if (input && typeof input === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
-      out[k] = coerceJsonTree(v);
-    }
-    return out;
-  }
-  return input;
-}
-
-function renderConfigFile(filePath: string, config: Record<string, unknown>) {
-  const lower = filePath.toLowerCase();
-  // Entries prefixed with "__" are panel directives (e.g. __gsm_format), not cvars.
-  const entries = Object.entries(config).filter(([k]) => !k.startsWith("__"));
-  const cvarEntries = entries.length > 0 ? entries : Object.entries(config);
-  if (lower.endsWith(".json")) {
-    return `${JSON.stringify(coerceJsonTree(config), null, 2)}\n`;
-  }
-  if (lower.endsWith(".xml")) {
-    // ServerSettings/property format used by 7 Days to Die et al.
-    const items = cvarEntries
-      .map(([k, v]) => `  <property name="${k}" value="${String(v).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;")}"/>`)
-      .join("\n");
-    return `<ServerSettings>\n${items}\n</ServerSettings>\n`;
-  }
-  if (lower.endsWith(".yml") || lower.endsWith(".yaml")) {
-    return `${cvarEntries.map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join("\n")}\n`;
-  }
-  if (lower.endsWith(".cfg") || lower.endsWith(".conf") || lower.endsWith(".ini") || lower.endsWith(".properties") || lower.endsWith(".dat")) {
-    // id Tech 3 (Quake 3 / Wolfenstein: ET / ET:Legacy) expects `set cvar "value"` lines.
-    if (String(config.__gsm_format || "") === "quake3") {
-      const esc = (v: unknown) => String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-      return `${cvarEntries.map(([k, v]) => `set ${k} "${esc(v)}"`).join("\n")}\n`;
-    }
-    return `${cvarEntries.map(([k, v]) => `${k}=${String(v)}`).join("\n")}\n`;
-  }
-  return `${cvarEntries.map(([k, v]) => `${k}=${String(v)}`).join("\n")}\n`;
-}
-
 // Wizard checkboxes round-trip as "true"/"false", but engines like id Tech 3
 // (Wolfenstein: ET) treat any non-numeric string as 0. For checkbox variables
 // whose template default is numeric ("0"/"1"), normalize to "0"/"1".
@@ -310,19 +258,30 @@ async function materializeServerFiles(options: {
   }
 
   // Config files (create if missing).
+  //
+  // A template may ship several config files with different contents — the
+  // per-file values come from `defaultConfig.__files`, keyed by the same path
+  // used in `configFiles`. Templates without __files write the same option set
+  // into every file they declare.
+  //
   // Both the target path and the config values may contain {{VAR}} tokens —
   // substitute them, otherwise generated configs contain literal placeholders
   // (e.g. Don't Starve Together's DoNotStarveTogether/{{CLUSTER_NAME}} folder).
   const configFiles = options.configFiles || {};
-  const defaultConfig = substituteConfigValues(options.defaultConfig || {}, options.variables) as Record<string, unknown>;
-  for (const rawPath of Object.keys(configFiles)) {
+  const byFile = resolveConfigFiles(configFiles, options.defaultConfig || {});
+
+  for (const [rawPath, rawValues] of Object.entries(byFile)) {
     const configPath = replaceTemplateVariables(rawPath, options.variables);
     // Skip unresolved tokens and paths whose tokenized folder vanished (e.g. {{ET_MOD}} unset).
     if (!configPath || configPath.includes("{{") || configPath.startsWith("/")) continue;
+
+    const values = substituteConfigValues(rawValues, options.variables) as Record<string, unknown>;
     const absolute = join(options.installPath, configPath);
     await mkdir(dirname(absolute), { recursive: true });
     if (!(await exists(absolute))) {
-      const body = renderConfigFile(configPath, defaultConfig);
+      // Render using the *template* path so __gsm_format and the file extension
+      // are both resolved against what the template declared.
+      const body = renderConfigFile(rawPath, values);
       await writeFile(absolute, body, "utf8");
       generated.push(configPath);
     }
