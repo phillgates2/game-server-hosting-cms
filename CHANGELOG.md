@@ -4,6 +4,13 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.3.1] — 2026-08-20
+
+### 🔥 Firewall / Installer Changes
+- **UFW removed from the installer** — `install.sh` no longer installs the `ufw` package, no longer opens SSH/panel/game ports, and no longer runs `ufw --force enable`. The "Configure firewall" step is replaced with an informational note listing the ports to open manually (SSH, panel or Caddy 80/443, and game ports as needed).
+- Firewall rules and port forwarding are now fully left to the host OS, router, or hosting provider — identical behavior on bare metal, VMs, and LXC/Docker containers.
+- Runtime firewall management (Firewall API + automatic per-server port rules via `src/lib/firewall.ts`) remains available on systems that have a supported firewall installed.
+
 ## [1.3.0] — 2026-08-15
 
 ### 💬 Public Chat Widget (Guest-Visible, Configurable)

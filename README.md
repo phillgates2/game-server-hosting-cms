@@ -192,13 +192,13 @@ journalctl -u caddy             # View logs
 
 ## 🔥 Automatic Firewall Management
 
-### Installer — Opens All Game Ports
+### Installer — No Firewall Changes
 
-The installer detects your SSH port (including non-standard ports) and allows it **before** enabling UFW. It then opens TCP+UDP for every game in the template library:
+The installer **does not install or configure UFW** (or any other host firewall). Firewall rules and port forwarding are left entirely to your OS, router, or hosting provider. The installer prints the ports to open at the end of the run. Use the table below as a reference for the ports you may need to open manually for panel access and for every game in the template library:
 
 | Port | Protocol | Service |
 |------|----------|---------|
-| Auto-detected | TCP | SSH (reads `sshd_config` + active session) |
+| 22 (default) | TCP | SSH — open your custom port if you changed it |
 | 80 | TCP | HTTP (Caddy) |
 | 443 | TCP | HTTPS (Caddy) |
 | 3000 | TCP | Panel (if no Caddy) |
@@ -226,9 +226,7 @@ The installer detects your SSH port (including non-standard ports) and allows it
 | 10999–11000 | UDP | Don't Starve Together |
 | 9600 | TCP/UDP | Assetto Corsa |
 
-> **Containers:** UFW is **never enabled** inside LXC/Docker containers. The host OS and your router manage the firewall — enabling UFW inside a container conflicts with the host's iptables/nftables and will drop SSH connections. The installer detects containers and skips the UFW step entirely, printing a reminder of which ports to forward on your router instead.
->
-> **Bare-metal / VM:** UFW is configured and enabled. Port 22 is always allowed as a safety net even if SSH is on a non-standard port.
+> **Your network manages the firewall:** on bare metal, VMs, and LXC/Docker containers alike, the installer never touches firewall rules. Open/forward the relevant ports on your router, host OS, or cloud security group. If you want host-level rules, install and configure your preferred firewall yourself (e.g. `sudo ufw allow 25565/tcp`).
 
 ### Runtime — Dynamic Port Management
 

@@ -506,7 +506,7 @@ CORE_PKGS="curl wget ca-certificates gnupg lsb-release git tar gzip unzip psmisc
 # Build tools (required for native npm modules)
 BUILD_PKGS="build-essential"
 # Security (optional but recommended)
-SECURITY_PKGS="ufw fail2ban"
+SECURITY_PKGS="fail2ban"
 # Ubuntu-only package — skip on Debian
 if [[ "$OS_ID" == "ubuntu" ]]; then
   EXTRA_PKGS="software-properties-common"
@@ -530,7 +530,7 @@ if ! apt-get install -y $BUILD_PKGS > /tmp/gsm-apt-build.log 2>&1; then
 fi
 
 # Security packages (non-fatal if missing)
-log "  → Security packages (ufw, fail2ban)..."
+log "  → Security packages (fail2ban)..."
 apt-get install -y $SECURITY_PKGS > /tmp/gsm-apt-security.log 2>&1 || {
   warn "Some security packages could not be installed (non-fatal)"
 }
@@ -1277,124 +1277,23 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Configure firewall
+#  Firewall — not configured by this installer
 # ═══════════════════════════════════════════════════════════════════════════════
-log "Configuring firewall..."
-
-# ── Skip UFW entirely inside containers ──────────────────────────────────────
-# Enabling UFW inside an LXC container fights with the host's iptables/nftables
-# and will drop SSH connections.  The host OS (ASUSTOR, Proxmox, etc.) manages
-# the firewall.  Port forwarding is done on the router, not inside the container.
-if [[ "${IS_CONTAINER:-false}" == "true" ]]; then
-  log "Container detected — skipping UFW firewall configuration"
-  log "Your host OS / router handles the firewall and port forwarding"
-  log "Ensure your router forwards the following ports to this container's IP:"
-  log "  - TCP $PANEL_PORT (panel)"
-  if [[ "$SETUP_CADDY" == "true" ]]; then
-    log "  - TCP 80 + 443 (Caddy HTTPS)"
-  fi
-  log "  - Game server ports as needed (see README for full list)"
-  ok "Firewall step skipped (container — host manages firewall)"
-elif ! command -v ufw &>/dev/null; then
-  warn "UFW is not installed — skipping firewall configuration"
-  warn "You should manually configure your firewall to allow:"
-  warn "  - SSH (port 22 or your custom port)"
-  warn "  - Panel (port $PANEL_PORT)"
-  warn "  - Game server ports as needed"
-  ok "Firewall step skipped (no UFW)"
+# This installer does not install or configure a host firewall. Your OS,
+# router, or hosting provider is responsible for firewall rules and port
+# forwarding. The panel's built-in firewall manager (Firewall API) can manage
+# rules at runtime on systems that have a supported firewall installed.
+log "Skipping firewall configuration — this installer does not manage a host firewall"
+log "Make sure the following ports are open (OS firewall, router, or provider):"
+log "  - TCP 22 (or your custom SSH port)"
+if [[ "$SETUP_CADDY" == "true" ]]; then
+  log "  - TCP 80 + 443 (Caddy HTTPS)"
 else
-  # ── Bare-metal / VM: configure UFW ─────────────────────────────────────────
-
-  # Detect SSH port to avoid locking ourselves out
-  SSH_PORT="22"
-  if [[ -f /etc/ssh/sshd_config ]]; then
-    DETECTED_PORT=$(grep -E "^[[:space:]]*Port[[:space:]]+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1 || true)
-    if [[ -n "${DETECTED_PORT:-}" && "${DETECTED_PORT:-}" =~ ^[0-9]+$ ]]; then
-      SSH_PORT="$DETECTED_PORT"
-    fi
-  fi
-
-  # Check drop-in configs (Ubuntu 24.04+, Debian 12+)
-  if [[ -d /etc/ssh/sshd_config.d ]]; then
-    for cfg in /etc/ssh/sshd_config.d/*.conf; do
-      [[ -f "$cfg" ]] || continue
-      DROP_PORT=$(grep -E "^[[:space:]]*Port[[:space:]]+" "$cfg" 2>/dev/null | awk '{print $2}' | head -1 || true)
-      if [[ -n "${DROP_PORT:-}" && "${DROP_PORT:-}" =~ ^[0-9]+$ ]]; then
-        SSH_PORT="$DROP_PORT"
-      fi
-    done
-  fi
-
-  # Check current SSH session port as a safeguard
-  if [[ -n "${SSH_CONNECTION:-}" ]]; then
-    CONN_PORT=$(echo "$SSH_CONNECTION" | awk '{print $4}' || true)
-    if [[ -n "${CONN_PORT:-}" && "${CONN_PORT:-}" =~ ^[0-9]+$ && "$CONN_PORT" != "$SSH_PORT" ]]; then
-      warn "Current SSH session is on port $CONN_PORT (sshd_config says $SSH_PORT) — allowing both"
-      ufw allow "$CONN_PORT/tcp" comment "SSH (active session)" > /dev/null 2>&1 || true
-    fi
-  fi
-
-  # Allow SSH FIRST — before anything else and before enabling UFW
-  ufw allow "$SSH_PORT/tcp" comment "SSH" > /dev/null 2>&1 || true
-  # Also always allow port 22 as a safety net even if sshd is on another port
-  ufw allow 22/tcp comment "SSH (fallback)" > /dev/null 2>&1 || true
-  if [[ "$SSH_PORT" != "22" ]]; then
-    log "SSH detected on port $SSH_PORT (non-default) — both 22 and $SSH_PORT allowed"
-  fi
-
-  # Panel / Caddy
-  if [[ "$SETUP_CADDY" == "true" ]]; then
-    ufw allow 80/tcp  comment "HTTP  (Caddy)" > /dev/null 2>&1 || true
-    ufw allow 443/tcp comment "HTTPS (Caddy)" > /dev/null 2>&1 || true
-  else
-    ufw allow "$PANEL_PORT/tcp" comment "GSM Panel" > /dev/null 2>&1 || true
-  fi
-
-  # Game server ports (every game in the template library)
-  ufw allow 27015:27030/tcp comment "Source engine"         > /dev/null 2>&1 || true
-  ufw allow 27015:27030/udp comment "Source engine"         > /dev/null 2>&1 || true
-  ufw allow 25565/tcp     comment "Minecraft Java"          > /dev/null 2>&1 || true
-  ufw allow 25565/udp     comment "Minecraft Java"          > /dev/null 2>&1 || true
-  ufw allow 19132/udp     comment "Minecraft Bedrock"       > /dev/null 2>&1 || true
-  ufw allow 28015/tcp     comment "Rust"                    > /dev/null 2>&1 || true
-  ufw allow 28015/udp     comment "Rust"                    > /dev/null 2>&1 || true
-  ufw allow 28016/tcp     comment "Rust RCON"               > /dev/null 2>&1 || true
-  ufw allow 7777:7778/tcp comment "ARK/Satisfactory/Terraria" > /dev/null 2>&1 || true
-  ufw allow 7777:7778/udp comment "ARK/Satisfactory/Terraria" > /dev/null 2>&1 || true
-  ufw allow 15000/udp     comment "Satisfactory beacon"     > /dev/null 2>&1 || true
-  ufw allow 2456:2458/tcp comment "Valheim"                 > /dev/null 2>&1 || true
-  ufw allow 2456:2458/udp comment "Valheim"                 > /dev/null 2>&1 || true
-  ufw allow 26900:26902/tcp comment "7 Days to Die"         > /dev/null 2>&1 || true
-  ufw allow 26900:26902/udp comment "7 Days to Die"         > /dev/null 2>&1 || true
-  ufw allow 8211/tcp      comment "Palworld"                > /dev/null 2>&1 || true
-  ufw allow 8211/udp      comment "Palworld"                > /dev/null 2>&1 || true
-  ufw allow 15636:15637/tcp comment "Enshrouded"            > /dev/null 2>&1 || true
-  ufw allow 15636:15637/udp comment "Enshrouded"            > /dev/null 2>&1 || true
-  ufw allow 27102/tcp     comment "Insurgency: Sandstorm"   > /dev/null 2>&1 || true
-  ufw allow 27102/udp     comment "Insurgency: Sandstorm"   > /dev/null 2>&1 || true
-  ufw allow 27131/udp     comment "Insurgency query"        > /dev/null 2>&1 || true
-  ufw allow 7787/tcp      comment "Squad"                   > /dev/null 2>&1 || true
-  ufw allow 7787/udp      comment "Squad"                   > /dev/null 2>&1 || true
-  ufw allow 2302:2306/udp comment "Arma 3"                  > /dev/null 2>&1 || true
-  ufw allow 27960/tcp     comment "ET:Legacy/QuakeLive"     > /dev/null 2>&1 || true
-  ufw allow 27960/udp     comment "ET:Legacy/QuakeLive"     > /dev/null 2>&1 || true
-  ufw allow 1234/tcp      comment "OpenRA"                  > /dev/null 2>&1 || true
-  ufw allow 1234/udp      comment "OpenRA"                  > /dev/null 2>&1 || true
-  ufw allow 26000/tcp     comment "Xonotic"                 > /dev/null 2>&1 || true
-  ufw allow 26000/udp     comment "Xonotic"                 > /dev/null 2>&1 || true
-  ufw allow 9876:9877/tcp comment "V Rising"                > /dev/null 2>&1 || true
-  ufw allow 9876:9877/udp comment "V Rising"                > /dev/null 2>&1 || true
-  ufw allow 16261:16262/tcp comment "Project Zomboid"       > /dev/null 2>&1 || true
-  ufw allow 16261:16262/udp comment "Project Zomboid"       > /dev/null 2>&1 || true
-  ufw allow 34197/udp     comment "Factorio"                > /dev/null 2>&1 || true
-  ufw allow 10999:11000/udp comment "Don't Starve Together" > /dev/null 2>&1 || true
-  ufw allow 9600/tcp      comment "Assetto Corsa"           > /dev/null 2>&1 || true
-  ufw allow 9600/udp      comment "Assetto Corsa"           > /dev/null 2>&1 || true
-
-  # Enable UFW
-  ufw --force enable > /dev/null 2>&1 || true
-  ok "Firewall configured (SSH $SSH_PORT + panel + all game server ports)"
+  log "  - TCP $PANEL_PORT (panel)"
 fi
+log "  - Game server ports as needed (see README for the full list)"
+ok "Firewall step skipped (manual configuration required)"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Done!
