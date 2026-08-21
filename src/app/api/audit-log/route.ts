@@ -4,6 +4,7 @@ import { auditLog, users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { desc, eq } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 // GET /api/audit-log — List audit log entries
 export async function GET(req: NextRequest) {
@@ -61,6 +62,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
+    return apiError(e, "Failed", 500);
   }
 }

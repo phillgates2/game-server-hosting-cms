@@ -4,6 +4,7 @@ import { gameDefinitions, leagueLadderEntries } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 function normalizeTeamTag(value: string | null | undefined) {
   if (!value) return null;
@@ -173,7 +174,7 @@ export async function GET(req: NextRequest) {
       games,
     });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
+    return apiError(e, "Failed", 500);
   }
 }
 
@@ -253,6 +254,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ entry: created }, { status: 201 });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
+    return apiError(e, "Failed", 500);
   }
 }

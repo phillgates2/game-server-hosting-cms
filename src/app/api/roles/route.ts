@@ -4,6 +4,7 @@ import { roles, users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission, invalidateRoleCache, PERMISSION_CATEGORIES } from "@/lib/permissions";
 import { sql } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 // GET /api/roles — List all roles with user counts
 export async function GET(req: NextRequest) {
@@ -63,6 +64,6 @@ export async function POST(req: NextRequest) {
     invalidateRoleCache();
     return NextResponse.json({ role }, { status: 201 });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }

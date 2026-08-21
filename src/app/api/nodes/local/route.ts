@@ -9,6 +9,7 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import { hostname, homedir } from "os";
 import { join } from "path";
+import { apiError } from "@/lib/api-error";
 
 const execAsync = promisify(exec);
 
@@ -114,7 +115,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ node }, { status: 201 });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return apiError(e, "Unknown error", 500);
   }
 }

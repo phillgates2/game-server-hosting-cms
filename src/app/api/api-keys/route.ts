@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { and, eq } from "drizzle-orm";
 import { randomBytes, createHash } from "crypto";
+import { apiError } from "@/lib/api-error";
 
 function hashKey(key: string): string {
   return createHash("sha256").update(key).digest("hex");
@@ -72,7 +73,7 @@ export async function POST(req: NextRequest) {
       message: "Save this key now — it will not be shown again.",
     }, { status: 201 });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
+    return apiError(e, "Failed", 500);
   }
 }
 
@@ -91,6 +92,6 @@ export async function DELETE(req: NextRequest) {
       .where(and(eq(apiKeys.id, Number(id)), eq(apiKeys.userId, auth.userId)));
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
+    return apiError(e, "Failed", 500);
   }
 }

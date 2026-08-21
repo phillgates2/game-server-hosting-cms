@@ -4,6 +4,7 @@ import { forumThreads, forumPosts, users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq, desc, sql } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 export async function GET(req: NextRequest) {
   // Forum threads are publicly readable — no auth required
@@ -62,6 +63,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ thread }, { status: 201 });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }

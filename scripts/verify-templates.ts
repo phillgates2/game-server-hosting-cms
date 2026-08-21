@@ -109,6 +109,34 @@ function verify(template: GameTemplate): Report {
     if (count > 1) errors.push(`variable ${name} declared ${count} times`);
   }
 
+  // 1b. Regex metacharacters eaten by the template literal.
+  //
+  // Install scripts live inside untagged template literals, so a single
+  // backslash is consumed by JS before bash ever sees it: `\s` becomes `s`
+  // and `\K` becomes `K`, silently turning a working PCRE into one that
+  // matches nothing. Three shipped installers were broken this way. Any
+  // backslash intended for the shell must be written `\\` in the source.
+  const PCRE_LINE = /grep\s+-o?P|grep\s+-P|sed\s+-E|perl\s+-/;
+  const MANGLED = [
+    { re: /[^\\]s\*\s*:/, hint: "\\s* lost its backslash" },
+    { re: /:\s*[^\\]?s\*/, hint: "\\s* lost its backslash" },
+    { re: /"K\[/, hint: "\\K lost its backslash" },
+    { re: /[^\\]\bK\[0-9/, hint: "\\K lost its backslash" },
+    { re: /[^\\]Khttps?:/, hint: "\\K lost its backslash" },
+    { re: /\[0-9\]\+\.\[0-9\]\+\(\./, hint: "\\. lost its backslash" },
+  ];
+  for (const [i, line] of template.installScript.split("\n").entries()) {
+    if (!PCRE_LINE.test(line)) continue;
+    for (const m of MANGLED) {
+      if (m.re.test(line)) {
+        errors.push(
+          `installScript line ${i + 1}: ${m.hint} — write \\\\ in the source. (${line.trim().slice(0, 70)})`
+        );
+        break;
+      }
+    }
+  }
+
   // 2. Variable metadata sanity
   for (const v of template.variables) {
     if (!v.name.trim()) errors.push(`variable ${v.env_variable} has no display name`);

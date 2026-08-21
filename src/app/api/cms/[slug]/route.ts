@@ -4,6 +4,7 @@ import { cmsPages, users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 // GET /api/cms/[slug]
 export async function GET(
@@ -96,7 +97,7 @@ export async function PATCH(
 
     return NextResponse.json({ post });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }
 
@@ -116,6 +117,6 @@ export async function DELETE(
     await db.delete(cmsPages).where(eq(cmsPages.slug, slug));
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }

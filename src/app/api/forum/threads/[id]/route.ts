@@ -4,6 +4,7 @@ import { forumThreads, forumPosts, users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq, asc, sql } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 // GET thread with posts and rich user data — publicly readable
 export async function GET(
@@ -53,7 +54,7 @@ export async function GET(
 
     return NextResponse.json({ thread, posts });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }
 
@@ -83,7 +84,7 @@ export async function POST(
 
     return NextResponse.json({ post }, { status: 201 });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }
 
@@ -130,7 +131,7 @@ export async function PATCH(
     const [updated] = await db.update(forumThreads).set(update).where(eq(forumThreads.id, Number(id))).returning();
     return NextResponse.json({ thread: updated });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }
 
@@ -162,6 +163,6 @@ export async function DELETE(
 
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }

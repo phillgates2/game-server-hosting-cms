@@ -4,6 +4,7 @@ import { users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { eq } from "drizzle-orm";
 import * as OTPAuth from "otpauth";
+import { apiError } from "@/lib/api-error";
 
 // POST /api/auth/2fa/verify — Verify TOTP code and enable 2FA
 export async function POST(req: NextRequest) {
@@ -48,6 +49,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
+    return apiError(e, "Failed", 500);
   }
 }

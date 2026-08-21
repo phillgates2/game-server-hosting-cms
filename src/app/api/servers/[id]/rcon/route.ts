@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { sendRcon, detectRconProtocol } from "@/lib/rcon";
 import { eq } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 function asRecord(v: unknown): Record<string, unknown> {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
@@ -145,6 +146,6 @@ export async function GET(
       status: server.status,
     });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }

@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { settings, roles, gameDefinitions, forumCategories } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
+import { apiError } from "@/lib/api-error";
 
 // GET /api/settings/export — Export panel config as JSON
 export async function GET(req: NextRequest) {
@@ -36,6 +37,6 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Export failed" }, { status: 500 });
+    return apiError(e, "Export failed", 500);
   }
 }

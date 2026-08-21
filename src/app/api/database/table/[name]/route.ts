@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { pool } from "@/db";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
+import { apiError } from "@/lib/api-error";
 
 export async function GET(
   req: NextRequest,
@@ -54,7 +55,6 @@ export async function GET(
       totalPages: Math.ceil(totalRows / limit),
     });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return apiError(e, "Unknown error", 500);
   }
 }

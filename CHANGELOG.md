@@ -4,6 +4,29 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.6.0] — 2026-08-21
+
+### 🎮 Three Game Installers Were Completely Broken
+- **Terraria, Assetto Corsa and Minecraft Paper could never install** — install scripts live inside untagged template literals, so a single backslash is consumed by JavaScript before bash sees it. `\s` became `s` and `\K` became `K`, silently turning each PCRE into one that matches nothing. All three aborted with "could not find/resolve" every single time. Fixed by escaping the patterns, and verified end to end.
+- **Minecraft Java installed the wrong JDK** — the script grepped Mojang's version JSON for `"major_version"`, but the real key is `"majorVersion"`. The pattern never matched, so the required Java version silently fell back to 21. Checked against the live API: Minecraft 26.2 needs Java **25**, so the installer provisioned a JDK too old to run the server. It now reads the correct key and keeps the old spelling as a fallback.
+- **SteamCMD `chown` was a no-op** — the shared installer ran `chown -R $(whoami)` unquoted, which does nothing useful unless running as root. It now runs only as root, with the user and group quoted.
+
+### 🧪 Installers Are Now Actually Executed in CI
+- **`npm run verify:installers`** — renders each of the 27 templates, runs `bash -n` and shellcheck, then **runs the install script for real** inside a throwaway directory in a user + mount namespace, with `steamcmd`, `curl`, `wget` and `apt` mocked and a tmpfs over `/opt`. It then asserts the runtime artifacts the panel needs to launch the server were actually produced, and that the start command resolves to something that exists. All 27 games pass.
+- **`npm run check:upstreams`** — hits the real download endpoints and release APIs and confirms our parsing expressions still match what upstream returns today (18/18 passing). Kept out of `npm run verify` because upstream outages are not repo regressions.
+- **The mangled-backslash bug now fails the build** — `verify:templates` detects the pattern itself, so this class of bug cannot return.
+
+### 🔒 Security & Correctness
+- **69 error sites across 46 API routes leaked internal detail** — failures returned the raw exception message, exposing SQL fragments, driver internals and absolute filesystem paths. All now route through `apiError()`, which logs the detail server-side and returns a generic message in production.
+- **`/api/health` leaked database credentials** — the endpoint is unauthenticated (the installer and updater poll it) and returned the driver's error verbatim, which includes the host, port and sometimes the password from the connection string.
+- **Registration accepted almost anything** — no password strength requirement, no length caps (an over-long username produced a `500` from the database instead of a `400`), no rate limiting despite creating rows and running bcrypt, raw error text returned to the caller, and a race between the duplicate check and the insert. It now validates the username format and every field length, requires 8+ character passwords, reuses the login throttle, uses a single existence query, and handles the unique-violation race it cannot prevent.
+- **Security regression suite grew from 33 to 40 checks**, including a sweep that fails if any route reintroduces a raw exception message.
+
+### ⚡ Performance
+- **14 database indexes added** — the schema declared 19 foreign keys and *zero* indexes, so every join and filter was a sequential scan. Indexed the columns the code actually filters on: `game_servers(user_id, node_id, game_id)`, `node_metrics(node_id, recorded_at)`, `forum_threads(category_id, user_id)`, `forum_posts(thread_id, user_id)`, `chat_messages(created_at, user_id)` — polled every 2.5 seconds by the chat widget — plus `audit_log(user_id, created_at)` and `api_keys(user_id)`. Applied automatically by `drizzle-kit push` during install and update.
+
+---
+
 ## [1.5.0] — 2026-08-21
 
 ### 🔒 Security Audit — 11 Issues Found, 11 Fixed

@@ -8,6 +8,7 @@ import { allowServerPorts, denyServerPorts, updateServerPorts } from "@/lib/fire
 import { eq } from "drizzle-orm";
 import { rm } from "node:fs/promises";
 import { resolve, relative } from "node:path";
+import { apiError } from "@/lib/api-error";
 
 function isProcessAlive(pid: number): boolean {
   try {
@@ -93,7 +94,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!server) return NextResponse.json({ error: "Not found" }, { status: 404 });
     return NextResponse.json({ server });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }
 
@@ -168,7 +169,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     return NextResponse.json({ server: updated });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }
 
@@ -280,6 +281,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
     return NextResponse.json({ ok: true, filesDeleted, filesDeleteSkippedReason });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }

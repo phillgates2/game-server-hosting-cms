@@ -56,7 +56,11 @@ if [ ! -x "$STEAMCMD_BIN" ]; then
 fi
 
 mkdir -p "$INSTALL_DIR/.steam/sdk32" "$INSTALL_DIR/.steam/sdk64"${extraDirs}
-chown -R $(whoami) "$INSTALL_DIR" 2>/dev/null || true
+## Only meaningful when the script runs as root (the panel may install as the
+## service user, in which case the files are already owned correctly).
+if [ "$(id -u)" = "0" ]; then
+  chown -R "$(id -un)":"$(id -gn)" "$INSTALL_DIR" 2>/dev/null || true
+fi
 export HOME="$INSTALL_DIR"
 
 ## Install game server

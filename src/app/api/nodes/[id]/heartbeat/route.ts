@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { nodes, nodeMetrics } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { timingSafeEqual } from "node:crypto";
+import { apiError } from "@/lib/api-error";
 
 /** Constant-time compare so the key cannot be recovered by timing. */
 function secretsMatch(a: string, b: string): boolean {
@@ -95,7 +96,6 @@ export async function POST(
 
     return NextResponse.json({ ok: true, timestamp: new Date().toISOString() });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return apiError(e, "Unknown error", 500);
   }
 }

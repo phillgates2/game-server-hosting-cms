@@ -4,6 +4,7 @@ import { forumCategories, forumThreads, forumPosts } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { asc, eq, sql } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 export async function GET(_req: NextRequest) {
   // Forum categories are publicly readable — no auth required
@@ -90,8 +91,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ category }, { status: 201 });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return apiError(e, "Unknown error", 500);
   }
 }
 
@@ -151,8 +151,7 @@ export async function PATCH(req: NextRequest) {
 
     return NextResponse.json({ category });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return apiError(e, "Unknown error", 500);
   }
 }
 
@@ -196,7 +195,6 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return apiError(e, "Unknown error", 500);
   }
 }

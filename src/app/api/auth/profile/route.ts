@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { users, gameServers, forumPosts } from "@/db/schema";
 import { getCurrentUser, verifyPassword, hashPassword } from "@/lib/auth";
 import { eq, sql } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 async function ensureThemeConfigColumn() {
   await db.execute(sql`
@@ -65,7 +66,7 @@ export async function GET(req: NextRequest) {
       servers: myServers,
     });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }
 
@@ -118,6 +119,6 @@ export async function PATCH(req: NextRequest) {
 
     return NextResponse.json({ profile: updated });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }

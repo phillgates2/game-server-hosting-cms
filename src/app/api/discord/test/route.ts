@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { sendDiscordWebhook } from "@/lib/discord";
+import { apiError } from "@/lib/api-error";
 
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
@@ -31,7 +32,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return apiError(e, "Unknown error", 500);
   }
 }

@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { eq } from "drizzle-orm";
 import * as OTPAuth from "otpauth";
 import QRCode from "qrcode";
+import { apiError } from "@/lib/api-error";
 
 // POST /api/auth/2fa/setup — Generate TOTP secret and QR code
 export async function POST(req: NextRequest) {
@@ -26,6 +27,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ secret, qrCode: qrDataUrl, uri });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
+    return apiError(e, "Failed", 500);
   }
 }

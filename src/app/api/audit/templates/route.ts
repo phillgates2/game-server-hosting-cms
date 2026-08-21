@@ -7,6 +7,7 @@ import { gameTemplates, EXPECTED_ARTIFACTS_BY_SLUG } from "@/db/seeds";
 import { eq, sql } from "drizzle-orm";
 import { access, constants, readdir, stat } from "node:fs/promises";
 import { join, dirname, basename } from "node:path";
+import { apiError } from "@/lib/api-error";
 
 interface AuditResult {
   slug: string;
@@ -248,6 +249,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ results, summary });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Audit failed" }, { status: 500 });
+    return apiError(e, "Audit failed", 500);
   }
 }

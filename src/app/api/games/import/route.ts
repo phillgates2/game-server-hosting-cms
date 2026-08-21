@@ -4,6 +4,7 @@ import { gameDefinitions } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 // POST /api/games/import — Import a Pterodactyl egg JSON or AMP template
 export async function POST(req: NextRequest) {
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest) {
       format: detectedFormat,
     }, { status: 201 });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Import failed" }, { status: 500 });
+    return apiError(e, "Import failed", 500);
   }
 }
 

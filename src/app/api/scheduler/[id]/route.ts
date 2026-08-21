@@ -4,6 +4,7 @@ import { scheduledTasks } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 // PATCH /api/scheduler/[id] — Update a task
 export async function PATCH(
@@ -28,7 +29,7 @@ export async function PATCH(
     const [updated] = await db.update(scheduledTasks).set(update).where(eq(scheduledTasks.id, Number(id))).returning();
     return NextResponse.json({ task: updated });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
+    return apiError(e, "Failed", 500);
   }
 }
 
@@ -47,6 +48,6 @@ export async function DELETE(
     await db.delete(scheduledTasks).where(eq(scheduledTasks.id, Number(id)));
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
+    return apiError(e, "Failed", 500);
   }
 }

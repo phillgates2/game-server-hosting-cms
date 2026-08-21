@@ -105,8 +105,28 @@ console.log("\nH4 JWT secret policy (src/lib/auth.ts)");
   check("32-byte hex secret accepted", productionAccepts("a".repeat(64)));
 }
 
+
+function readFileAbs(p: string): string {
+  return require("node:fs").readFileSync(p, "utf8") as string;
+}
+
+/** Recursively collect every route.ts under a directory URL. */
+function listRoutes(dir: URL): string[] {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const out: string[] = [];
+  const walk = (d: string) => {
+    for (const e of fs.readdirSync(d)) {
+      const full = path.join(d, e);
+      if (fs.statSync(full).isDirectory()) walk(full);
+      else if (e === "route.ts") out.push(full);
+    }
+  };
+  walk(dir.pathname);
+  return out;
+}
+
 function readAuthSource(): string {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require("node:fs").readFileSync(
     new URL("../src/lib/auth.ts", import.meta.url),
     "utf8"
@@ -132,6 +152,24 @@ console.log("\nH2/H3 auth enforcement wiring");
   const heartbeat = read("../src/app/api/nodes/[id]/heartbeat/route.ts");
   check("heartbeat requires a configured API key", /if \(!node\.apiKey\)/.test(heartbeat));
   check("heartbeat compares keys in constant time", /timingSafeEqual/.test(heartbeat));
+
+  const register = read("../src/app/api/auth/register/route.ts");
+  check("register enforces a minimum password length", /MIN_PASSWORD/.test(register));
+  check("register validates the username format", /USERNAME_RE/.test(register));
+  check("register is rate limited", /loginRetryAfter/.test(register));
+  check("register does not leak raw errors", /apiError\(/.test(register) && !/e instanceof Error \? e\.message/.test(register));
+  check("register handles the unique-violation race", /23505/.test(register));
+
+  const health = read("../src/app/api/health/route.ts");
+  check("health endpoint does not leak driver errors", !/e instanceof Error \? e\.message/.test(health));
+
+  // Raw exception text leaks SQL, driver internals and absolute paths.
+  const apiDir = new URL("../src/app/api/", import.meta.url);
+  const leaky = listRoutes(apiDir).filter((f) => {
+    const src = readFileAbs(f);
+    return /return NextResponse\.json\(\s*\{\s*error:\s*\w+ instanceof Error/.test(src);
+  });
+  check(`no API route returns a raw exception message (found ${leaky.length})`, leaky.length === 0);
 
   const backup = read("../src/app/api/servers/[id]/backup/route.ts");
   check("backup no longer spawns a shell", !/spawn\("sh"/.test(backup));

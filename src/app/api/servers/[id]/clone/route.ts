@@ -4,6 +4,7 @@ import { gameServers, gameDefinitions } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 // POST /api/servers/[id]/clone — Clone a server with all settings
 export async function POST(
@@ -66,6 +67,6 @@ export async function POST(
       server: clone,
     }, { status: 201 });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Clone failed" }, { status: 500 });
+    return apiError(e, "Clone failed", 500);
   }
 }

@@ -177,19 +177,19 @@ ensure_java() {
 
 ## Download Paper server — PaperMC "fill" v3 API (the old v2 API was retired)
 FILL_API="https://fill.papermc.io/v3/projects/paper"
-LATEST_VERSION=$(curl -fsSL --retry 3 "$FILL_API" | grep -oP '"[0-9]+\.[0-9]+(\.[0-9]+)?"' | tr -d '"' | sort -V | tail -1)
+LATEST_VERSION=$(curl -fsSL --retry 3 "$FILL_API" | grep -oP '"[0-9]+\\.[0-9]+(\\.[0-9]+)?"' | tr -d '"' | sort -V | tail -1)
 if [ -z "$LATEST_VERSION" ]; then
   echo "ERROR: could not determine latest Paper version" >&2
   exit 1
 fi
 
 BUILD_JSON=$(curl -fsSL --retry 3 "$FILL_API/versions/$LATEST_VERSION/builds/latest")
-LATEST_BUILD=$(echo "$BUILD_JSON" | grep -oP '"id"\s*:\s*\K[0-9]+' | head -1)
-DOWNLOAD_URL=$(echo "$BUILD_JSON" | grep -oP '"server:default"\s*:\s*\{.*?"url"\s*:\s*"\Khttps?://[^"]+' | head -1)
-EXPECTED_SHA=$(echo "$BUILD_JSON" | grep -oP '"sha256"\s*:\s*"\K[0-9a-f]{64}' | head -1)
+LATEST_BUILD=$(echo "$BUILD_JSON" | grep -oP '"id"\\s*:\\s*\\K[0-9]+' | head -1)
+DOWNLOAD_URL=$(echo "$BUILD_JSON" | grep -oP '"server:default"\\s*:\\s*\\{.*?"url"\\s*:\\s*"\\Khttps?://[^"]+' | head -1)
+EXPECTED_SHA=$(echo "$BUILD_JSON" | grep -oP '"sha256"\\s*:\\s*"\\K[0-9a-f]{64}' | head -1)
 
 ## The version metadata declares the minimum Java Paper can run on
-REQUIRED_JAVA=$(curl -fsSL "$FILL_API/versions/$LATEST_VERSION" | grep -oP '"minimum"\s*:\s*\K[0-9]+' | head -1)
+REQUIRED_JAVA=$(curl -fsSL "$FILL_API/versions/$LATEST_VERSION" | grep -oP '"minimum"\\s*:\\s*\\K[0-9]+' | head -1)
 REQUIRED_JAVA=\${REQUIRED_JAVA:-21}
 ensure_java "$REQUIRED_JAVA"
 

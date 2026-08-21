@@ -8,6 +8,7 @@ import {
   timestamp,
   jsonb,
   real,
+  index,
 } from "drizzle-orm/pg-core";
 
 // ── Roles & Permissions ───────────────────────────────────────
@@ -104,7 +105,10 @@ export const nodeMetrics = pgTable("node_metrics", {
   serverCount: integer("server_count"),
   ipv6Enabled: boolean("ipv6_enabled"),
   recordedAt: timestamp("recorded_at").defaultNow().notNull(),
-});
+}, (t) => ({
+    node_metrics_node_id_idx: index("node_metrics_node_id_idx").on(t.nodeId),
+    node_metrics_recorded_at_idx: index("node_metrics_recorded_at_idx").on(t.recordedAt),
+}));
 
 // ── Game definitions (templates installed by admin) ───────────
 export const gameDefinitions = pgTable("game_definitions", {
@@ -159,7 +163,11 @@ export const gameServers = pgTable("game_servers", {
   lastStopped: timestamp("last_stopped"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => ({
+    game_servers_user_id_idx: index("game_servers_user_id_idx").on(t.userId),
+    game_servers_node_id_idx: index("game_servers_node_id_idx").on(t.nodeId),
+    game_servers_game_id_idx: index("game_servers_game_id_idx").on(t.gameId),
+}));
 
 // ── Server metrics (monitoring) ────────────────────────────────
 export const serverMetrics = pgTable("server_metrics", {
@@ -203,7 +211,10 @@ export const forumThreads = pgTable("forum_threads", {
   locked: boolean("locked").default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => ({
+    forum_threads_category_id_idx: index("forum_threads_category_id_idx").on(t.categoryId),
+    forum_threads_user_id_idx: index("forum_threads_user_id_idx").on(t.userId),
+}));
 
 // ── Forum posts ───────────────────────────────────────────────
 export const forumPosts = pgTable("forum_posts", {
@@ -217,7 +228,10 @@ export const forumPosts = pgTable("forum_posts", {
   body: text("body").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => ({
+    forum_posts_thread_id_idx: index("forum_posts_thread_id_idx").on(t.threadId),
+    forum_posts_user_id_idx: index("forum_posts_user_id_idx").on(t.userId),
+}));
 
 // ── League ladder standings ─────────────────────────────────
 export const leagueLadderEntries = pgTable("league_ladder_entries", {
@@ -284,7 +298,9 @@ export const apiKeys = pgTable("api_keys", {
   lastUsedAt: timestamp("last_used_at"),
   expiresAt: timestamp("expires_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+    api_keys_user_id_idx: index("api_keys_user_id_idx").on(t.userId),
+}));
 
 // ── Audit Log ─────────────────────────────────────────────────
 export const auditLog = pgTable("audit_log", {
@@ -296,7 +312,10 @@ export const auditLog = pgTable("audit_log", {
   details: jsonb("details"),
   ipAddress: varchar("ip_address", { length: 45 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+    audit_log_user_id_idx: index("audit_log_user_id_idx").on(t.userId),
+    audit_log_created_at_idx: index("audit_log_created_at_idx").on(t.createdAt),
+}));
 
 // ── Forum sandbox chat messages ───────────────────────────────
 export const chatMessages = pgTable("chat_messages", {
@@ -306,7 +325,10 @@ export const chatMessages = pgTable("chat_messages", {
     .notNull(),
   body: text("body").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+    chat_messages_created_at_idx: index("chat_messages_created_at_idx").on(t.createdAt),
+    chat_messages_user_id_idx: index("chat_messages_user_id_idx").on(t.userId),
+}));
 
 // ── CMS: Pages / Blog Posts / Changelogs ──────────────────────
 export const cmsPages = pgTable("cms_pages", {

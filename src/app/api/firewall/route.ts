@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { listManagedRules, allowServerPorts, denyServerPorts } from "@/lib/firewall";
 import { execFile } from "node:child_process";
+import { apiError } from "@/lib/api-error";
 
 function ufwStatus(): Promise<string> {
   return new Promise((resolve) => {
@@ -35,8 +36,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ status, managedRules });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return apiError(e, "Unknown error", 500);
   }
 }
 
@@ -76,7 +76,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "action must be 'allow' or 'deny'" }, { status: 400 });
     }
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return apiError(e, "Unknown error", 500);
   }
 }

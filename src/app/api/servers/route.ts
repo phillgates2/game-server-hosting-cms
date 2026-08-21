@@ -8,6 +8,7 @@ import { eq } from "drizzle-orm";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
+import { apiError } from "@/lib/api-error";
 
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
@@ -143,7 +144,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ server }, { status: 201 });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return apiError(e, "Unknown error", 500);
   }
 }

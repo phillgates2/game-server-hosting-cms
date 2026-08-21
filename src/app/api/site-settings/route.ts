@@ -4,6 +4,7 @@ import { settings } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 // Public settings keys that are safe to expose without auth
 const PUBLIC_KEYS = [
@@ -79,7 +80,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, updated: Object.keys(updates) });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return apiError(e, "Unknown error", 500);
   }
 }

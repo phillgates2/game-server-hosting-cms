@@ -527,7 +527,18 @@ One command chains all four checks, exiting non-zero on the first failure — dr
 | `npm run typecheck` | `tsc --noEmit` across the project |
 | `npm run lint` | ESLint, including React hooks rules |
 | `npm run verify:templates` | All 1,551 template options — types, enums, defaults, and that every declared variable is actually consumed |
-| `npm run verify:security` | 33 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy |
+| `npm run verify:installers` | Renders every game's install script, runs `bash -n` + shellcheck, then **executes** it in a sandbox with SteamCMD/curl/apt mocked, and asserts the artifacts the panel needs were produced |
+| `npm run verify:security` | 40 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, and a sweep for leaked exception messages |
+
+One extra check is **not** part of `npm run verify`, because it needs the
+public internet and upstream outages are not repo regressions:
+
+```bash
+npm run check:upstreams
+```
+
+It hits every real download endpoint and API the installers depend on and
+confirms the parsing expressions still match what upstream returns today.
 
 Route modules connect to the database at import time, so a production build needs both variables present:
 

@@ -226,7 +226,7 @@ case "$(uname -m)" in
 esac
 
 LATEST_JSON=$(curl -fsSL --retry 3 "https://api.github.com/repos/compujuckel/AssettoServer/releases/latest")
-DOWNLOAD_URL=$(echo "$LATEST_JSON" | grep -oP '"browser_download_url"\s*:\s*"\K[^"]+' | grep -- "-$MATCH\\.tar\\.gz" | head -1)
+DOWNLOAD_URL=$(echo "$LATEST_JSON" | grep -oP '"browser_download_url"\\s*:\\s*"\\K[^"]+' | grep -- "-$MATCH\\.tar\\.gz" | head -1)
 
 if [ -z "$DOWNLOAD_URL" ]; then
   echo "ERROR: could not find an AssettoServer release asset for: $MATCH" >&2

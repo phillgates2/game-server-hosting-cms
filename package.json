@@ -9,7 +9,9 @@
     "typecheck": "tsc --noEmit",
     "verify:templates": "tsx scripts/verify-templates.ts",
     "verify:security": "tsx scripts/verify-security.ts",
-    "verify": "npm run typecheck && npm run lint && npm run verify:templates && npm run verify:security"
+    "verify": "npm run typecheck && npm run lint && npm run verify:templates && npm run verify:installers && npm run verify:security",
+    "verify:installers": "tsx scripts/verify-installers.ts",
+    "check:upstreams": "bash scripts/check-upstreams.sh"
   },
   "dependencies": {
     "@types/bcryptjs": "^2.4.6",

@@ -4,6 +4,7 @@ import { forumPosts } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 // PATCH /api/forum/posts/[id] — Edit post
 export async function PATCH(
@@ -30,7 +31,7 @@ export async function PATCH(
     const [updated] = await db.update(forumPosts).set({ body, updatedAt: new Date() }).where(eq(forumPosts.id, Number(id))).returning();
     return NextResponse.json({ post: updated });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }
 
@@ -56,6 +57,6 @@ export async function DELETE(
     await db.delete(forumPosts).where(eq(forumPosts.id, Number(id)));
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }

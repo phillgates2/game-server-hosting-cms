@@ -9,6 +9,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { gameTemplates } from "@/db/seeds";
 import { DEFAULT_ROLES, hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 function buildDatabaseUrlWithPassword(databaseUrl: string, password: string) {
   try {
@@ -494,8 +495,7 @@ export async function POST(req: NextRequest) {
       }
     });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return apiError(e, "Unknown error", 500);
   }
 }
 

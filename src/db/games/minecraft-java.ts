@@ -193,7 +193,12 @@ fi
 VERSION_JSON_URL=$(echo "$MANIFEST" | grep -oP '"id":\\s*"'"$LATEST"'".{0,500}?"url":\\s*"\\Khttps?://[^"]+' | head -1)
 VERSION_JSON=$(curl -fsSL "$VERSION_JSON_URL")
 SERVER_URL=$(echo "$VERSION_JSON" | grep -oP '"server"\\s*:\\s*\\{[^}]*"url"\\s*:\\s*"\\K[^"]+' | head -1)
-REQUIRED_JAVA=$(echo "$VERSION_JSON" | grep -oP '"major_version"\\s*:\\s*\\K[0-9]+' | head -1)
+## Mojang spells this key "majorVersion" (camelCase) inside javaVersion.
+## Accept the snake_case spelling too in case the API ever changes.
+REQUIRED_JAVA=$(echo "$VERSION_JSON" | grep -oP '"majorVersion"\\s*:\\s*\\K[0-9]+' | head -1)
+if [ -z "$REQUIRED_JAVA" ]; then
+  REQUIRED_JAVA=$(echo "$VERSION_JSON" | grep -oP '"major_version"\\s*:\\s*\\K[0-9]+' | head -1)
+fi
 REQUIRED_JAVA=\${REQUIRED_JAVA:-21}
 
 ensure_java "$REQUIRED_JAVA"

@@ -161,7 +161,7 @@ esac
 ## Download latest TShock release from GitHub for this architecture
 echo "Fetching latest TShock release ($RID)..."
 RELEASE_JSON=$(curl -fsSL --retry 3 "https://api.github.com/repos/Pryaxis/TShock/releases/latest")
-LATEST_URL=$(echo "$RELEASE_JSON" | grep -oP '"browser_download_url"\s*:\s*"\K[^"]+' | grep -- "-$RID-" | head -1)
+LATEST_URL=$(echo "$RELEASE_JSON" | grep -oP '"browser_download_url"\\s*:\\s*"\\K[^"]+' | grep -- "-$RID-" | head -1)
 
 if [ -z "$LATEST_URL" ]; then
   echo "ERROR: could not find a TShock asset for $RID in the latest release" >&2

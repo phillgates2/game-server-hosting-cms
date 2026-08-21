@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { getTemplateBySlug } from "@/db/seeds";
 import { eq } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 // POST /api/templates/[slug]/install - Install a game template to make it available
 export async function POST(
@@ -60,8 +61,7 @@ export async function POST(
       game,
     });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return apiError(e, "Unknown error", 500);
   }
 }
 
@@ -81,7 +81,6 @@ export async function DELETE(
     await db.delete(gameDefinitions).where(eq(gameDefinitions.slug, slug));
     return NextResponse.json({ ok: true, message: "Game template uninstalled" });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return apiError(e, "Unknown error", 500);
   }
 }

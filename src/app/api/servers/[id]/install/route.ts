@@ -10,6 +10,7 @@ import { basename, dirname, join } from "node:path";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { getTemplateBySlug, getExpectedArtifactsBySlug, type TemplateVariable } from "@/db/seeds";
 import { renderConfigFile, resolveConfigFiles } from "@/lib/config-render";
+import { apiError } from "@/lib/api-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -626,7 +627,6 @@ echo "=== Installation Complete ==="
       await rm(tempDir, { recursive: true, force: true }).catch(() => {});
     }
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return apiError(e, "Unknown error", 500);
   }
 }

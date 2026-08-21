@@ -4,6 +4,7 @@ import { roles } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission, invalidateRoleCache } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 // PATCH /api/roles/[id]
 export async function PATCH(
@@ -31,7 +32,7 @@ export async function PATCH(
     invalidateRoleCache();
     return NextResponse.json({ role: updated });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }
 
@@ -56,6 +57,6 @@ export async function DELETE(
     invalidateRoleCache();
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }

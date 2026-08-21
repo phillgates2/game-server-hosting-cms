@@ -6,6 +6,7 @@ import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { apiError } from "@/lib/api-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -91,6 +92,6 @@ export async function GET(
       pid: server.pid,
     });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
+    return apiError(e, "Failed", 500);
   }
 }

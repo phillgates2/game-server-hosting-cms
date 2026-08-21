@@ -4,6 +4,7 @@ import { nodes, gameServers } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq, sql } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 // GET /api/nodes/[id] - Get single node details
 export async function GET(
@@ -38,8 +39,7 @@ export async function GET(
 
     return NextResponse.json({ node, servers });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return apiError(e, "Unknown error", 500);
   }
 }
 
@@ -70,8 +70,7 @@ export async function PATCH(
 
     return NextResponse.json({ node: updated });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return apiError(e, "Unknown error", 500);
   }
 }
 
@@ -104,7 +103,6 @@ export async function DELETE(
     await db.delete(nodes).where(eq(nodes.id, Number(id)));
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return apiError(e, "Unknown error", 500);
   }
 }

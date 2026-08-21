@@ -4,6 +4,7 @@ import { users, gameServers, forumPosts } from "@/db/schema";
 import { getCurrentUser, hashPassword } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq, sql } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 // GET /api/users/[id] — Admin: get user detail
 export async function GET(
@@ -57,7 +58,7 @@ export async function GET(
 
     return NextResponse.json({ user, servers, postCount: postCount?.count || 0 });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }
 
@@ -108,7 +109,7 @@ export async function PATCH(
     const [updated] = await db.update(users).set(updateData).where(eq(users.id, Number(id))).returning();
     return NextResponse.json({ user: updated });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }
 
@@ -131,6 +132,6 @@ export async function DELETE(
     await db.delete(users).where(eq(users.id, Number(id)));
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }

@@ -4,6 +4,7 @@ import { gameDefinitions } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
+import { apiError } from "@/lib/api-error";
 
 // GET /api/games/[id] — Full game definition
 export async function GET(
@@ -21,7 +22,7 @@ export async function GET(
     if (!game) return NextResponse.json({ error: "Not found" }, { status: 404 });
     return NextResponse.json({ game });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }
 
@@ -65,6 +66,6 @@ export async function PATCH(
     const [updated] = await db.update(gameDefinitions).set(update).where(eq(gameDefinitions.id, Number(id))).returning();
     return NextResponse.json({ game: updated });
   } catch (e: unknown) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown" }, { status: 500 });
+    return apiError(e, "Unknown", 500);
   }
 }
