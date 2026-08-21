@@ -4,12 +4,26 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
-## [1.3.1] — 2026-08-20
+## [1.4.0] — 2026-01-01
 
-### 🔥 Firewall / Installer Changes
-- **UFW removed from the installer** — `install.sh` no longer installs the `ufw` package, no longer opens SSH/panel/game ports, and no longer runs `ufw --force enable`. The "Configure firewall" step is replaced with an informational note listing the ports to open manually (SSH, panel or Caddy 80/443, and game ports as needed).
-- Firewall rules and port forwarding are now fully left to the host OS, router, or hosting provider — identical behavior on bare metal, VMs, and LXC/Docker containers.
-- Runtime firewall management (Firewall API + automatic per-server port rules via `src/lib/firewall.ts`) remains available on systems that have a supported firewall installed.
+### 🐺 Wolfenstein: Enemy Territory — Full server.cfg Options in the Installer
+- **Every ET server.cfg option is now exposed in the server creation installer** — the Wolfenstein: Enemy Territory / ET:Legacy template grew from 2 variables to **150+ template variables**, covering the complete official `etl_server.cfg` and `legacy.cfg` option sets.
+- **Grouped, collapsible option categories** — the Create Server wizard's "Game Settings" step now groups template variables by category with collapsible sections, so large option sets stay navigable:
+  - Server Identity (mod, game type select with labels, start map, 2.60 rotation override, all 6 MOTD lines)
+  - Clients, Passwords (server/RCON/referee/shoutcast), Network (advertising, timeouts, ping limits, IPv4/IPv6 bind overrides)
+  - Master Servers (all 6 `sv_master*` cvars), Download (rates, allow/web download, www redirect URLs)
+  - Logging & Protection (logfile, pure, DDoS protection, flood protect, per-IP limits, PunkBuster)
+  - Mod Logging & Protection (g_log, GUID check), Optimizations (anti-warp)
+  - XP Skill Levels (all 7 `skill_*` thresholds), Class Limits (all 5), Weapon Limits (all 9)
+  - Gameplay (34 cvars incl. friendly fire, lives, warmup, intermission, complaints, pmove physics)
+  - Match (6 cvars), LMS (5 cvars), Voting (all 23 `vote_allow_*` flags + percent/limit), Map Voting, Lua, Omni-Bot, Watchdog
+- **Complete generated server.cfg** — the installer now writes a fully populated server.cfg with all 140+ cvars (mirroring upstream `etl_server.cfg` + `legacy.cfg`), with bash-derived map-rotation directives matching the chosen game type (`objectivecycle.cfg` / `campaigncycle.cfg` / `lmscycle.cfg` / `mapvotecycle.cfg` / single map / legacy `sv_mapRotation`).
+- **Template-driven default config** — `defaultConfig` now carries the full cvar map so the panel's config materializer regenerates a complete config; new `__gsm_format: "quake3"` directive renders `.cfg` files as `set cvar "value"` lines.
+- **Numeric checkbox normalization** — wizard checkboxes with `0`/`1` defaults are normalized to `"0"`/`"1"` at install time (id Tech 3 treats the strings "true"/"false" as 0), keeping other engines' `true`/`false` semantics untouched.
+- **Safer tokenized config paths** — `configFiles` entries like `{{ET_MOD}}/server.cfg` are skipped if the token resolved to an empty value instead of writing to a stray root path.
+- **Improved start command** — ET launches with `+set vm_game 0` for reliable `.so` game-module loading, honoring the selected mod folder.
+
+---
 
 ## [1.3.0] — 2026-08-15
 

@@ -1407,9 +1407,10 @@ echo "Arma 3 server installed successfully"`,
     estimatedSize: "~650 MB",
     variables: [
       ...COMMON_VARS,
-      V("Game Type", "GAMETYPE", "2=Objective, 3=Stopwatch, 4=Campaign", "2", { required: false, type: "number" }),
+
+      // ── Server Identity ──
       V("Mod", "ET_MOD", "Server mod / fs_game folder to run", "legacy", {
-        required: false, type: "select",
+        required: false, type: "select", category: "Server Identity",
         enum_values: {
           "legacy": "ET:Legacy (default, 64-bit)",
           "jaymod": "Jaymod 2.2.0 (32-bit)",
@@ -1417,6 +1418,222 @@ echo "Arma 3 server installed successfully"`,
           "nitmod": "N!tmod 2.3.5 (32-bit)",
         },
       }),
+      V("Game Type", "GAMETYPE", "g_gametype — which game mode the server runs", "2", {
+        required: false, type: "select", category: "Server Identity",
+        enum_values: {
+          "1": "1 — Single-Map Objective",
+          "2": "2 — Objective (map cycle)",
+          "3": "3 — Stopwatch",
+          "4": "4 — Campaign",
+          "5": "5 — Last Man Standing (ET:Legacy)",
+          "6": "6 — Map Voting (ET:Legacy)",
+        },
+      }),
+      V("Start Map", "START_MAP", "Map loaded for single-map modes and rotation fallbacks", "oasis", {
+        required: false, type: "select", category: "Server Identity",
+        enum_values: {
+          "oasis": "Oasis", "battery": "Battery", "goldrush": "Gold Rush",
+          "radar": "Radar", "railgun": "Railgun", "fueldump": "Fuel Dump",
+        },
+      }),
+      V("2.60 Map Rotation", "MAP_ROTATION", "Optional old-style rotation, e.g.: map oasis; map battery. Leave empty to use the cycle config matching the game type", "", { required: false, category: "Server Identity" }),
+      V("MOTD Line 1", "MOTD0", "Join-screen message line 1 (max ~26 chars without color codes)", " ^NET: Legacy ^7MOTD ", { required: false, category: "Server Identity" }),
+      V("MOTD Line 2", "MOTD1", "Join-screen message line 2", "", { required: false, category: "Server Identity" }),
+      V("MOTD Line 3", "MOTD2", "Join-screen message line 3", "", { required: false, category: "Server Identity" }),
+      V("MOTD Line 4", "MOTD3", "Join-screen message line 4", "", { required: false, category: "Server Identity" }),
+      V("MOTD Line 5", "MOTD4", "Join-screen message line 5", "", { required: false, category: "Server Identity" }),
+      V("MOTD Line 6", "MOTD5", "Join-screen message line 6", "", { required: false, category: "Server Identity" }),
+
+      // ── Clients ──
+      V("Private Client Slots", "SV_PRIVATECLIENTS", "Slots reserved for players connecting with the private password (0 = none)", "0", { required: false, type: "number", category: "Clients", min_value: 0, max_value: 64 }),
+      V("Private Slots Password", "SV_PRIVATEPASSWORD", "Password clients set to use the reserved private slots", "", { required: false, type: "password", category: "Clients" }),
+
+      // ── Passwords ──
+      V("Server Password", "G_PASSWORD", "Server join password (empty = public server)", "", { required: false, type: "password", category: "Passwords" }),
+      V("RCON Password", "RCON_PASSWORD", "Remote console (rcon) access password", "", { required: false, type: "password", category: "Passwords" }),
+      V("Referee Password", "REFEREE_PASSWORD", "Password that grants referee status", "", { required: false, type: "password", category: "Passwords" }),
+      V("Shoutcast Password", "SHOUTCAST_PASSWORD", "Shoutcast spectator status password", "", { required: false, type: "password", category: "Passwords" }),
+
+      // ── Network ──
+      V("Advertise Server", "SV_ADVERT", "sv_advert — 0 = off, 1 = send master heartbeats, 3 = also send stats to Trackbase", "3", {
+        required: false, type: "select", category: "Network",
+        enum_values: { "0": "0 — Off", "1": "1 — Master server only", "3": "3 — Master + Trackbase stats" },
+      }),
+      V("Client Timeout", "SV_TIMEOUT", "Seconds without a message before a connected client times out (sv_timeout)", "40", { required: false, type: "number", category: "Network", min_value: 10, max_value: 600 }),
+      V("Download Timeout", "SV_DL_TIMEOUT", "Seconds without a message before a downloading/preparing client times out (sv_dl_timeout)", "240", { required: false, type: "number", category: "Network", min_value: 30, max_value: 3600 }),
+      V("Minimum Ping", "SV_MINPING", "Minimum ping required on connect, 0 = no minimum (sv_minping)", "0", { required: false, type: "number", category: "Network", min_value: 0, max_value: 999 }),
+      V("Maximum Ping", "SV_MAXPING", "Maximum ping allowed on connect, 0 = no maximum (sv_maxping)", "0", { required: false, type: "number", category: "Network", min_value: 0, max_value: 999 }),
+      V("IPv4 Bind Override", "NET_IP", "Optional IPv4 address to bind (net_ip). Empty = automatic", "", { required: false, category: "Network" }),
+      V("IPv6 Bind Override", "NET_IP6", "Optional IPv6 address to bind (net_ip6). Empty = automatic", "", { required: false, category: "Network" }),
+      V("IPv6 Port", "NET_PORT6", "IPv6 listen port (net_port6)", "27960", { required: false, type: "number", category: "Network", min_value: 1024, max_value: 65535 }),
+
+      // ── Master Servers ──
+      V("Master Server 1", "SV_MASTER1", "sv_master1 — primary master server", "etmaster.idsoftware.com", { required: false, category: "Master Servers" }),
+      V("Master Server 2", "SV_MASTER2", "sv_master2", "master0.etmaster.net", { required: false, category: "Master Servers" }),
+      V("Master Server 3", "SV_MASTER3", "sv_master3", "master3.idsoftware.com", { required: false, category: "Master Servers" }),
+      V("Master Server 4", "SV_MASTER4", "sv_master4", "wolfmaster.idsoftware.com", { required: false, category: "Master Servers" }),
+      V("Master Server 5", "SV_MASTER5", "sv_master5", "master3.idsoftware.com:27900", { required: false, category: "Master Servers" }),
+      V("Master Server 6", "SV_MASTER6", "sv_master6 — ET:Legacy master", "master.etlegacy.com", { required: false, category: "Master Servers" }),
+
+      // ── Download ──
+      V("Max Rate", "SV_MAXRATE", "Per-client bandwidth cap in bytes/sec (sv_maxRate). 10000 standard but poor for ET; 0 = unlimited", "25000", { required: false, type: "number", category: "Download", min_value: 0, max_value: 100000 }),
+      V("Download Rate", "SV_DLRATE", "Download bandwidth reserve % — raise/lower with spare bandwidth (sv_dlRate)", "100", { required: false, type: "number", category: "Download", min_value: 0, max_value: 1000 }),
+      V("Allow Downloads", "SV_ALLOWDOWNLOAD", "Global toggle for both legacy download and web download (sv_allowDownload)", "1", { required: false, type: "boolean", category: "Download" }),
+      V("Enable Web Download", "SV_WWWDOWNLOAD", "Toggle to enable web (HTTP) download (sv_wwwDownload)", "0", { required: false, type: "boolean", category: "Download" }),
+      V("Web Download Base URL", "SV_WWWBASEURL", "Base URL clients are redirected to for downloads (sv_wwwBaseURL)", "", { required: false, category: "Download" }),
+      V("Download While Disconnected", "SV_WWWDLDISCONNECTED", "Clients perform their downloads while disconnected from the server (sv_wwwDlDisconnected)", "0", { required: false, type: "boolean", category: "Download" }),
+      V("Web Download Fallback URL", "SV_WWWFALLBACKURL", "URL sent when an http/ftp download fails or is refused client side (sv_wwwFallbackURL)", "", { required: false, category: "Download" }),
+
+      // ── Logging & Protection ──
+      V("Console Logfile", "LOGFILE", "Console logging to etconsole.log: 0 = off, 1 = enabled, 2 = enabled and synchronized (logfile)", "2", { required: false, type: "number", category: "Logging & Protection", min_value: 0, max_value: 3 }),
+      V("Pure Server", "SV_PURE", "Hash-check client pk3 files (sv_pure)", "1", { required: false, type: "boolean", category: "Logging & Protection" }),
+      V("DDoS Protection", "SV_PROTECT", "1 = ioquake3 getstatus/getchallenge protection, 2 = OpenWolf getstatus/getinfo/getchallenge protection (sv_protect)", "1", {
+        required: false, type: "select", category: "Logging & Protection",
+        enum_values: { "0": "0 — Off", "1": "1 — ioquake3 DDoS protection", "2": "2 — OpenWolf DRDoS protection" },
+      }),
+      V("Protection Log File", "SV_PROTECT_LOG", "File for sv_protect and security-related messages (sv_protectLog)", "sv_protect.log", { required: false, category: "Logging & Protection" }),
+      V("Flood Protection", "SV_FLOODPROTECT", "Prevent server flooding (sv_floodProtect)", "1", { required: false, type: "boolean", category: "Logging & Protection" }),
+      V("Userinfo Flood Protection", "SV_USERINFOFLOODPROTECT", "Prevent userinfo flooding (sv_userInfofloodProtect)", "1", { required: false, type: "boolean", category: "Logging & Protection" }),
+      V("Max Clients Per IP", "SV_IPMAXCLIENTS", "Connections allowed per IP, 0 = no maximum (sv_ipMaxClients)", "0", { required: false, type: "number", category: "Logging & Protection", min_value: 0, max_value: 64 }),
+      V("PunkBuster", "SV_PUNKBUSTER", "Enable PunkBuster master queries (ET 2.60 clients only; keep off on ET:Legacy)", "0", { required: false, type: "boolean", category: "Logging & Protection" }),
+
+      // ── Mod Logging & Protection ──
+      V("Game Log File", "G_LOG", "Game logging file (weapon changes, kills, connects). Empty = disabled (g_log)", "", { required: false, category: "Mod Logging & Protection" }),
+      V("Game Log Sync", "G_LOGSYNC", "0 = buffered, 1 = synchronized game logging (g_logSync)", "1", { required: false, type: "boolean", category: "Mod Logging & Protection" }),
+      V("GUID Check", "G_GUIDCHECK", "Check GUID validity of connecting players (1 blocks 2.60b clients without PB) (g_guidCheck)", "1", { required: false, type: "boolean", category: "Mod Logging & Protection" }),
+      V("Mod Protection", "G_PROTECT", "Mod-side security options (g_protect)", "1", { required: false, type: "boolean", category: "Mod Logging & Protection" }),
+
+      // ── Optimizations ──
+      V("Anti-Warp", "G_ANTIWARP", "Compensate for warping players (g_antiwarp)", "1", { required: false, type: "boolean", category: "Optimizations" }),
+      V("Max Warp", "G_MAXWARP", "Maximum warp compensation before kicking (g_maxWarp)", "4", { required: false, type: "number", category: "Optimizations", min_value: 0, max_value: 10 }),
+
+      // ── XP Skill Levels ──
+      V("Soldier XP Thresholds", "SKILL_SOLDIER", "XP required for soldier levels L2 L3 L4 (skill_soldier)", "20 50 90 140", { required: false, category: "XP Skill Levels" }),
+      V("Medic XP Thresholds", "SKILL_MEDIC", "XP required for medic levels L2 L3 L4 (skill_medic)", "20 50 90 140", { required: false, category: "XP Skill Levels" }),
+      V("Field Ops XP Thresholds", "SKILL_FIELDOPS", "XP required for field ops levels L2 L3 L4 (skill_fieldops)", "20 50 90 140", { required: false, category: "XP Skill Levels" }),
+      V("Engineer XP Thresholds", "SKILL_ENGINEER", "XP required for engineer levels L2 L3 L4 (skill_engineer)", "20 50 90 140", { required: false, category: "XP Skill Levels" }),
+      V("Covert Ops XP Thresholds", "SKILL_COVERTOPS", "XP required for covert ops levels L2 L3 L4 (skill_covertops)", "20 50 90 140", { required: false, category: "XP Skill Levels" }),
+      V("Battle Sense XP Thresholds", "SKILL_BATTLESENSE", "XP required for battle sense levels L2 L3 L4 (skill_battlesense)", "20 50 90 140", { required: false, category: "XP Skill Levels" }),
+      V("Light Weapons XP Thresholds", "SKILL_LIGHTWEAPONS", "XP required for light weapons levels L2 L3 L4 (skill_lightweapons)", "20 50 90 140", { required: false, category: "XP Skill Levels" }),
+
+      // ── Class Limits ──
+      V("Max Soldiers / Team", "TEAM_MAXSOLDIERS", "team_maxSoldiers — -1 = unlimited", "-1", { required: false, type: "number", category: "Class Limits", min_value: -1, max_value: 32 }),
+      V("Max Medics / Team", "TEAM_MAXMEDICS", "team_maxMedics — -1 = unlimited", "-1", { required: false, type: "number", category: "Class Limits", min_value: -1, max_value: 32 }),
+      V("Max Engineers / Team", "TEAM_MAXENGINEERS", "team_maxEngineers — -1 = unlimited", "-1", { required: false, type: "number", category: "Class Limits", min_value: -1, max_value: 32 }),
+      V("Max Field Ops / Team", "TEAM_MAXFIELDOPS", "team_maxFieldops — -1 = unlimited", "-1", { required: false, type: "number", category: "Class Limits", min_value: -1, max_value: 32 }),
+      V("Max Covert Ops / Team", "TEAM_MAXCOVERTOPS", "team_maxCovertops — -1 = unlimited", "-1", { required: false, type: "number", category: "Class Limits", min_value: -1, max_value: 32 }),
+
+      // ── Weapon Limits ──
+      V("Max Mortars / Team", "TEAM_MAXMORTARS", "team_maxMortars — -1 = unlimited", "-1", { required: false, type: "number", category: "Weapon Limits", min_value: -1, max_value: 32 }),
+      V("Max Flamethrowers / Team", "TEAM_MAXFLAMERS", "team_maxFlamers — -1 = unlimited", "-1", { required: false, type: "number", category: "Weapon Limits", min_value: -1, max_value: 32 }),
+      V("Max Machine Guns / Team", "TEAM_MAXMACHINEGUNS", "team_maxMachineguns — -1 = unlimited", "-1", { required: false, type: "number", category: "Weapon Limits", min_value: -1, max_value: 32 }),
+      V("Max Rockets / Team", "TEAM_MAXROCKETS", "team_maxRockets (panzerfaust) — -1 = unlimited", "-1", { required: false, type: "number", category: "Weapon Limits", min_value: -1, max_value: 32 }),
+      V("Max Rifle Grenades / Team", "TEAM_MAXRIFLEGRENADES", "team_maxRiflegrenades — -1 = unlimited", "-1", { required: false, type: "number", category: "Weapon Limits", min_value: -1, max_value: 32 }),
+      V("Max Airstrikes / Team", "TEAM_MAXAIRSTRIKES", "team_maxAirstrikes — simultaneous airstrikes allowed", "0", { required: false, type: "number", category: "Weapon Limits", min_value: -1, max_value: 32 }),
+      V("Max Artillery / Team", "TEAM_MAXARTILLERY", "team_maxArtillery — simultaneous artillery strikes allowed", "0", { required: false, type: "number", category: "Weapon Limits", min_value: -1, max_value: 32 }),
+      V("Max Landmines / Team", "TEAM_MAXLANDMINES", "team_maxLandmines", "10", { required: false, type: "number", category: "Weapon Limits", min_value: -1, max_value: 32 }),
+      V("Allow Rifle Grenades", "TEAM_RIFLEGRENADES", "Weight if rifle grenades are enabled (team_riflegrenades)", "1", { required: false, type: "boolean", category: "Weapon Limits" }),
+
+      // ── Gameplay ──
+      V("Friendly Fire", "G_FRIENDLYFIRE", "Allow team damage (g_friendlyFire)", "1", { required: false, type: "boolean", category: "Gameplay" }),
+      V("Anti-Lag", "G_ANTILAG", "Enable server-side lag compensation (g_antilag)", "1", { required: false, type: "boolean", category: "Gameplay" }),
+      V("Max Lives", "G_MAXLIVES", "Respawns a player has per match, 0 = unlimited (g_maxlives)", "0", { required: false, type: "number", category: "Gameplay", min_value: 0, max_value: 250 }),
+      V("Allied Max Lives", "G_ALLIEDMAXLIVES", "Lives available to the allied team, 0 = unlimited (g_alliedmaxlives)", "0", { required: false, type: "number", category: "Gameplay", min_value: 0, max_value: 250 }),
+      V("Axis Max Lives", "G_AXISMAXLIVES", "Lives available to the axis team, 0 = unlimited (g_axismaxlives)", "0", { required: false, type: "number", category: "Gameplay", min_value: 0, max_value: 250 }),
+      V("Force Team Balance", "G_TEAMFORCEBALANCE", "Stop players joining a team with more players (g_teamforcebalance)", "1", { required: false, type: "boolean", category: "Gameplay" }),
+      V("No Team Switching", "G_NOTEAMSWITCHING", "Disallow switching teams mid-match (g_noTeamSwitching)", "0", { required: false, type: "boolean", category: "Gameplay" }),
+      V("Max Players / Team", "TEAM_MAXPLAYERS", "Maximum players per team, 0 = unlimited (team_maxplayers)", "0", { required: false, type: "number", category: "Gameplay", min_value: 0, max_value: 64 }),
+      V("No Team Controls", "TEAM_NOCONTROLS", "Disallow players having team controls (team_nocontrols)", "1", { required: false, type: "boolean", category: "Gameplay" }),
+      V("Min Game Clients", "G_MINGAMECLIENTS", "Minimum players needed to start a match (g_minGameClients)", "8", { required: false, type: "number", category: "Gameplay", min_value: 0, max_value: 64 }),
+      V("Heavy Weapon Restriction %", "G_HEAVYWEAPONRESTRICTION", "Percent of a team that may hold heavy weapons, 100 = unrestricted (g_heavyWeaponRestriction)", "100", { required: false, type: "number", category: "Gameplay", min_value: 0, max_value: 100 }),
+      V("Drop Ammo", "G_DROPAMMO", "Ammo packs dropped on field ops death (g_dropAmmo)", "2", { required: false, type: "number", category: "Gameplay", min_value: 0, max_value: 10 }),
+      V("Drop Health", "G_DROPHEALTH", "Health packs dropped on medic death (g_dropHealth)", "2", { required: false, type: "number", category: "Gameplay", min_value: 0, max_value: 10 }),
+      V("Shove Distance", "G_SHOVE", "Shove push force (g_shove)", "60", { required: false, type: "number", category: "Gameplay", min_value: 0, max_value: 500 }),
+      V("Fast Respawn", "G_FASTRES", "Instantly active player after medic revive (g_fastres)", "0", { required: false, type: "boolean", category: "Gameplay" }),
+      V("Alt Stopwatch Mode", "G_ALTSTOPWATCHMODE", "ABAB stopwatch team format (g_altStopwatchMode)", "0", { required: false, type: "boolean", category: "Gameplay" }),
+      V("Auto Fireteams", "G_AUTOFIRETEAMS", "Automatically put team players into fireteams (g_autofireteams)", "1", { required: false, type: "boolean", category: "Gameplay" }),
+      V("Voice Chats Allowed", "G_VOICECHATSALLOWED", "VSays a player may use in 30 seconds (g_voiceChatsAllowed)", "5", { required: false, type: "number", category: "Gameplay", min_value: 0, max_value: 100 }),
+      V("Do Warmup", "G_DOWARMUP", "Players have a warm up period (g_doWarmup)", "0", { required: false, type: "boolean", category: "Gameplay" }),
+      V("Warmup Time (s)", "G_WARMUP", "Warm up time in seconds (g_warmup)", "10", { required: false, type: "number", category: "Gameplay", min_value: 0, max_value: 600 }),
+      V("Intermission Time (s)", "G_INTERMISSIONTIME", "Intermission time in seconds (g_intermissionTime)", "30", { required: false, type: "number", category: "Gameplay", min_value: 0, max_value: 300 }),
+      V("Intermission Ready %", "G_INTERMISSIONREADYPERCENT", "% of players ready to start the next map (g_intermissionReadyPercent)", "60", { required: false, type: "number", category: "Gameplay", min_value: 0, max_value: 100 }),
+      V("Spectator Inactivity (s)", "G_SPECTATORINACTIVITY", "Seconds before inactive spectators are kicked, 0 = never (g_spectatorInactivity)", "0", { required: false, type: "number", category: "Gameplay", min_value: 0, max_value: 3600 }),
+      V("Country Flags", "G_COUNTRYFLAGS", "Show player country flags (g_countryflags)", "1", { required: false, type: "boolean", category: "Gameplay" }),
+      V("Skill Rating", "G_SKILLRATING", "Skill rating system (g_skillRating)", "2", { required: false, type: "number", category: "Gameplay", min_value: 0, max_value: 2 }),
+      V("Misc Flags", "G_MISC", "Misc bit-flagged options (g_misc)", "0", { required: false, type: "number", category: "Gameplay", min_value: 0, max_value: 1023 }),
+      V("Complaint Limit", "G_COMPLAINTLIMIT", "Complaints needed to kick a player (g_complaintlimit)", "6", { required: false, type: "number", category: "Gameplay", min_value: 0, max_value: 32 }),
+      V("Disable Complaints", "G_DISABLECOMPLAINTS", "Disable complaints for airstrike/artillery/mortar/landmine team kills (g_disableComplaints)", "1", { required: false, type: "boolean", category: "Gameplay" }),
+      V("IP Complaint Limit", "G_IPCOMPLAINTLIMIT", "Different player complaints needed to kick (g_ipcomplaintlimit)", "3", { required: false, type: "number", category: "Gameplay", min_value: 0, max_value: 32 }),
+      V("Fixed Physics", "PMOVE_FIXED", "Frame rate independent physics (pmove_fixed)", "0", { required: false, type: "boolean", category: "Gameplay" }),
+      V("Physics Step (ms)", "PMOVE_MSEC", "Emulated frame rate dependent physics, 8 = 125 FPS (pmove_msec)", "8", { required: false, type: "number", category: "Gameplay", min_value: 8, max_value: 33 }),
+      V("Map Script Directory", "G_MAPSCRIPTDIRECTORY", "Directory for per-map scripts (g_mapScriptDirectory)", "mapscripts", { required: false, category: "Gameplay" }),
+      V("Campaign File", "G_CAMPAIGNFILE", "Campaign definition file (g_campaignFile)", "", { required: false, category: "Gameplay" }),
+      V("Custom Config", "G_CUSTOMCONFIG", "Custom config file to exec (g_customConfig)", "", { required: false, category: "Gameplay" }),
+
+      // ── Match ──
+      V("Allow Late Join", "MATCH_LATEJOIN", "Players may join a match already begun (match_latejoin)", "1", { required: false, type: "boolean", category: "Match" }),
+      V("Match Min Players", "MATCH_MINPLAYERS", "Minimum players needed to start a match (match_minplayers)", "4", { required: false, type: "number", category: "Match", min_value: 0, max_value: 64 }),
+      V("Mute Spectators", "MATCH_MUTESPECS", "Spectators are muted (match_mutespecs)", "0", { required: false, type: "boolean", category: "Match" }),
+      V("Match Ready %", "MATCH_READYPERCENT", "% of players ready to start the match (match_readypercent)", "100", { required: false, type: "number", category: "Match", min_value: 1, max_value: 100 }),
+      V("Timeout Count", "MATCH_TIMEOUTCOUNT", "Number of timeouts allowed (match_timeoutcount)", "0", { required: false, type: "number", category: "Match", min_value: 0, max_value: 10 }),
+      V("Warmup Damage", "MATCH_WARMUPDAMAGE", "0 = off, 1 = enemy only, 2 = everybody (match_warmupDamage)", "1", {
+        required: false, type: "select", category: "Match",
+        enum_values: { "0": "0 — Off", "1": "1 — Enemy only", "2": "2 — Everybody" },
+      }),
+
+      // ── LMS ──
+      V("LMS Force Team Balance", "G_LMS_TEAMFORCEBALANCE", "Force team balance in LMS (g_lms_teamForceBalance)", "1", { required: false, type: "boolean", category: "LMS" }),
+      V("LMS Round Limit", "G_LMS_ROUNDLIMIT", "Rounds per match (g_lms_roundlimit)", "3", { required: false, type: "number", category: "LMS", min_value: 1, max_value: 99 }),
+      V("LMS Match Limit", "G_LMS_MATCHLIMIT", "Matches (g_lms_matchlimit)", "2", { required: false, type: "number", category: "LMS", min_value: 1, max_value: 99 }),
+      V("LMS Lock Teams", "G_LMS_LOCKTEAMS", "Lock teams during an LMS round (g_lms_lockTeams)", "0", { required: false, type: "boolean", category: "LMS" }),
+      V("LMS Follow Team Only", "G_LMS_FOLLOWTEAMONLY", "Players can only spectate teammates in LMS (g_lms_followTeamOnly)", "1", { required: false, type: "boolean", category: "LMS" }),
+
+      // ── Voting ──
+      V("Enable Voting", "G_ALLOWVOTE", "Enable the voting system (g_allowVote)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote Pass %", "VOTE_PERCENT", "% of Yes votes required to pass (vote_percent)", "50", { required: false, type: "number", category: "Voting", min_value: 1, max_value: 100 }),
+      V("Vote Limit", "VOTE_LIMIT", "Votes a player may call per map (vote_limit)", "5", { required: false, type: "number", category: "Voting", min_value: 0, max_value: 99 }),
+      V("Vote: Config Change", "VOTE_ALLOW_CONFIG", "Allow config changing by vote (vote_allow_config)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Game Type", "VOTE_ALLOW_GAMETYPE", "Allow gametype changing by vote (vote_allow_gametype)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Kick", "VOTE_ALLOW_KICK", "Allow kick votes (vote_allow_kick)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Change Map", "VOTE_ALLOW_MAP", "Allow map changing by vote (vote_allow_map)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Map Restart", "VOTE_ALLOW_MAPRESTART", "Allow match restart by vote (vote_allow_maprestart)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Match Reset", "VOTE_ALLOW_MATCHRESET", "Allow match reset by vote (vote_allow_matchreset)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Mute Specs", "VOTE_ALLOW_MUTESPECS", "Allow spectators mute by vote (vote_allow_mutespecs)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Next Map", "VOTE_ALLOW_NEXTMAP", "Allow changing to next map by vote (vote_allow_nextmap)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Referee", "VOTE_ALLOW_REFEREE", "Allow getting referee status by vote (vote_allow_referee)", "0", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Shuffle Teams", "VOTE_ALLOW_SHUFFLETEAMS", "Allow team shuffling by vote (vote_allow_shuffleteams)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Shuffle (No Restart)", "VOTE_ALLOW_SHUFFLETEAMS_NORESTART", "Allow team shuffling without restart by vote (vote_allow_shuffleteams_norestart)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Swap Teams", "VOTE_ALLOW_SWAPTEAMS", "Allow team swapping by vote (vote_allow_swapteams)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Friendly Fire", "VOTE_ALLOW_FRIENDLYFIRE", "Allow friendly fire toggling by vote (vote_allow_friendlyfire)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Time Limit", "VOTE_ALLOW_TIMELIMIT", "Allow map time limit changes by vote (vote_allow_timelimit)", "0", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Warmup Damage", "VOTE_ALLOW_WARMUPDAMAGE", "Allow warmup damage toggling by vote (vote_allow_warmupdamage)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Anti-Lag", "VOTE_ALLOW_ANTILAG", "Allow toggling anti-lag by vote (vote_allow_antilag)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Balanced Teams", "VOTE_ALLOW_BALANCEDTEAMS", "Allow toggling balanced teams by vote (vote_allow_balancedteams)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Muting", "VOTE_ALLOW_MUTING", "Allow player muting by vote (vote_allow_muting)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Surrender", "VOTE_ALLOW_SURRENDER", "Allow surrender by vote (vote_allow_surrender)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Restart Campaign", "VOTE_ALLOW_RESTARTCAMPAIGN", "Allow restart campaign by vote (vote_allow_restartcampaign)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Next Campaign", "VOTE_ALLOW_NEXTCAMPAIGN", "Allow next campaign by vote (vote_allow_nextcampaign)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Poll", "VOTE_ALLOW_POLL", "Allow free polls by vote (vote_allow_poll)", "1", { required: false, type: "boolean", category: "Voting" }),
+      V("Vote: Coin Toss", "VOTE_ALLOW_COINTOSS", "Allow coin toss by vote (vote_allow_cointoss)", "1", { required: false, type: "boolean", category: "Voting" }),
+
+      // ── Map Voting ──
+      V("Excluded Maps", "G_EXCLUDEDMAPS", "Space-separated map names excluded from map voting, e.g.: railgun (g_excludedMaps)", "", { required: false, category: "Map Voting" }),
+      V("Max Maps Voted", "G_MAXMAPSVOTEDFOR", "Maximum maps a player may vote for (g_maxMapsVotedFor)", "6", { required: false, type: "number", category: "Map Voting", min_value: 1, max_value: 64 }),
+      V("Map Vote Flags", "G_MAPVOTEFLAGS", "Bit flags for the map voting menu (g_mapVoteFlags)", "0", { required: false, type: "number", category: "Map Voting", min_value: 0, max_value: 31 }),
+      V("Minimum Map Age", "G_MINMAPAGE", "Maps played before a map can be voted again (g_minMapAge)", "3", { required: false, type: "number", category: "Map Voting", min_value: 0, max_value: 99 }),
+
+      // ── Lua ──
+      V("Lua Modules", "LUA_MODULES", "Space-separated lua modules to load in order (lua_modules)", "luascripts/wolfadmin/main.lua", { required: false, category: "Lua" }),
+      V("Lua Allowed Modules", "LUA_ALLOWEDMODULES", "If set, only modules with matching sha1 signatures may load (lua_allowedModules)", "", { required: false, category: "Lua" }),
+
+      // ── Omni-Bot ──
+      V("Enable Omni-Bot", "OMNIBOT_ENABLE", "Load Omni-bot for bot players, framework must exist in the mod folder (omnibot_enable)", "1", { required: false, type: "boolean", category: "Omni-Bot" }),
+      V("Omni-Bot Path", "OMNIBOT_PATH", "Path to the Omni-bot library, relative or absolute (omnibot_path)", "./legacy/omni-bot", { required: false, category: "Omni-Bot" }),
+      V("Omni-Bot Flags", "OMNIBOT_FLAGS", "Omni-bot behaviour flags (omnibot_flags)", "0", { required: false, type: "number", category: "Omni-Bot", min_value: 0, max_value: 2147483647 }),
+
+      // ── Watchdog ──
+      V("Watchdog Timer (s)", "COM_WATCHDOG", "Seconds without a live map before the watchdog action fires (com_watchdog)", "60", { required: false, type: "number", category: "Watchdog", min_value: 0, max_value: 3600 }),
+      V("Watchdog Command", "COM_WATCHDOG_CMD", "Command executed by the watchdog (com_watchdog_cmd)", "exec server.cfg", { required: false, category: "Watchdog" }),
     ],
     installScript: `#!/bin/bash
 # ── ET:Legacy Installer ──────────────────────────────────────
@@ -1629,72 +1846,237 @@ esac
 # The legacy mod uses fs_game "legacy", third-party mods use their own dir
 MOD_DIR="\${ET_MOD}"
 mkdir -p "$MOD_DIR"
+
+# Rotation directive follows the selected game type:
+#   1 = single map  2/3 = objective cycle  4 = campaign  5 = LMS  6 = map voting
+GAMETYPE_PICK="\${GAMETYPE:-2}"
+case "$GAMETYPE_PICK" in
+  1) ROTATION="map \${START_MAP:-oasis}" ;;
+  4) ROTATION="exec campaigncycle.cfg" ;;
+  5) ROTATION="exec lmscycle.cfg" ;;
+  6) ROTATION="exec mapvotecycle.cfg" ;;
+  *) ROTATION="exec objectivecycle.cfg" ;;
+esac
+
 if [ ! -f "$MOD_DIR/server.cfg" ]; then
   cat > "$MOD_DIR/server.cfg" << 'MODCFG'
-// ET:Legacy Server Config — generated by GSM
+///////////////////////////////////////////////////////////////////////////////
+// Wolfenstein: Enemy Territory — Server Config
+// Generated by GameServer Manager from the install wizard.
+// Every cvar below was set during installation — edit freely.
+///////////////////////////////////////////////////////////////////////////////
+
+// HOSTNAME & MOTD
 set sv_hostname "{{SERVER_NAME}}"
-set sv_maxclients "{{MAX_PLAYERS}}"
-set g_gametype "{{GAMETYPE}}"
-set rconpassword "{{RCON_PASSWORD}}"
-set sv_punkbuster "0"
-set g_allowvote "1"
-set sv_mapRotation "map oasis; map battery; map goldrush; map radar; map railgun; map fueldump"
-set server_motd0 " ^NET: Legacy ^7MOTD "        // message in right corner of join screen
-set server_motd1 ""
-set server_motd2 ""
-set server_motd3 ""
-set server_motd4 ""
-set server_motd5 ""
+set server_motd0 "{{MOTD0}}"
+set server_motd1 "{{MOTD1}}"
+set server_motd2 "{{MOTD2}}"
+set server_motd3 "{{MOTD3}}"
+set server_motd4 "{{MOTD4}}"
+set server_motd5 "{{MOTD5}}"
 
 // CLIENTS
-
-set sv_privateclients "4"                       // if set > 0, then this number of client slots will be reserved for connections
-set sv_privatepassword ""                       // that have "password" set to the value of "sv_privatePassword"
+set sv_maxclients "{{MAX_PLAYERS}}"
+set sv_privateclients "{{SV_PRIVATECLIENTS}}"
+set sv_privatepassword "{{SV_PRIVATEPASSWORD}}"
 
 // PASSWORDS
-
-set g_password ""                               // server protection password
-set refereePassword ""                          // referee status password
-set shoutcastPassword ""                        // shoutcast status password
+set g_password "{{G_PASSWORD}}"
+set rconpassword "{{RCON_PASSWORD}}"
+set refereePassword "{{REFEREE_PASSWORD}}"
+set shoutcastPassword "{{SHOUTCAST_PASSWORD}}"
 
 // NETWORK
+set sv_advert "{{SV_ADVERT}}"
+set sv_timeout "{{SV_TIMEOUT}}"
+set sv_dl_timeout "{{SV_DL_TIMEOUT}}"
+set sv_minping "{{SV_MINPING}}"
+set sv_maxping "{{SV_MAXPING}}"
+set net_port6 "{{NET_PORT6}}"
 
-set sv_advert "3"                               // 1: send heartbeats to master server 3: to also sent statistics to Trackbase
-set sv_timeout "40"                             // seconds without any message from connected clients
-set sv_dl_timeout "240"                         // seconds without any message from downloading or preparing clients
-set sv_minping "0"                              // minimum ping required on connect (0: no minimum)
-set sv_maxping "0"                              // maximum ping allowed on connect (0: no maximum)
+// MASTER SERVERS
+set sv_master1 "{{SV_MASTER1}}"
+set sv_master2 "{{SV_MASTER2}}"
+set sv_master3 "{{SV_MASTER3}}"
+set sv_master4 "{{SV_MASTER4}}"
+set sv_master5 "{{SV_MASTER5}}"
+set sv_master6 "{{SV_MASTER6}}"
 
 // DOWNLOAD
-
-set sv_maxRate "25000"                          // 10000 standard but poor for ET (0: unlimited)
-set sv_dlRate "100"                             // increase/decrease if you have plenty/little spare bandwidth
-set sv_allowDownload "1"                        // global toggle for both legacy download and web download
-set sv_wwwDownload "0"                          // toggle to enable web download
-set sv_wwwBaseURL ""                            // base URL for redirection
-set sv_wwwDlDisconnected "0"                    // tell clients to perform their downloads while disconnected from the server
-set sv_wwwFallbackURL ""                        // URL to send to if an http/ftp fails or is refused client side
+set sv_maxRate "{{SV_MAXRATE}}"
+set sv_dlRate "{{SV_DLRATE}}"
+set sv_allowDownload "{{SV_ALLOWDOWNLOAD}}"
+set sv_wwwDownload "{{SV_WWWDOWNLOAD}}"
+set sv_wwwBaseURL "{{SV_WWWBASEURL}}"
+set sv_wwwDlDisconnected "{{SV_WWWDLDISCONNECTED}}"
+set sv_wwwFallbackURL "{{SV_WWWFALLBACKURL}}"
 
 // LOGGING & PROTECTION
+set logfile "{{LOGFILE}}"
+set sv_pure "{{SV_PURE}}"
+set sv_protect "{{SV_PROTECT}}"
+set sv_protectLog "{{SV_PROTECT_LOG}}"
+set sv_floodProtect "{{SV_FLOODPROTECT}}"
+set sv_userInfofloodProtect "{{SV_USERINFOFLOODPROTECT}}"
+set sv_ipMaxClients "{{SV_IPMAXCLIENTS}}"
+set sv_punkbuster "{{SV_PUNKBUSTER}}"
 
-set logfile "2"                                 // enable console logging - 'etconsole.log' (1: enabled 2: enabled and synchronized)
-set sv_pure "1"                                 // enable hash check of client pk3 files
-set sv_protect "1"                              // 1: Use ioquake3 getstatus, getchallenge DDoS protection 2: Use OpenWolf getstatus, getinfo, getchallenge DRDoS protection
-set sv_protectLog "sv_protect.log"              // when set all sv_protect and server security related messages are written into this log file
-set sv_floodProtect "1"                         // prevent server flooding
-set sv_userInfofloodProtect "1"                 // prevent userinfo flooding
-set sv_ipMaxClients "0"                         // limits connections per IP to cvar value (0: no maximum)
+// GAME TYPE
+set g_gametype "{{GAMETYPE}}"
 
-// MOD CONFIG - put mod related vars in a separate config
-set sv_master1 "etmaster.idsoftware.com"
-set sv_master2 "master0.etmaster.net"
-set sv_master3 "master3.idsoftware.com"
-set sv_master4 "wolfmaster.idsoftware.com"
-set sv_master5 "master3.idsoftware.com:27900"
-set sv_master6 "master.etlegacy.com"
-exec legacy.cfg
-map oasis
+// MOD LOGGING & PROTECTION
+set g_log "{{G_LOG}}"
+set g_logSync "{{G_LOGSYNC}}"
+set g_guidCheck "{{G_GUIDCHECK}}"
+set g_protect "{{G_PROTECT}}"
+
+// OPTIMIZATIONS
+set g_antiwarp "{{G_ANTIWARP}}"
+set g_maxWarp "{{G_MAXWARP}}"
+
+// LEVEL UP CUSTOMIZATION (XP thresholds for L2 L3 L4)
+set skill_soldier "{{SKILL_SOLDIER}}"
+set skill_medic "{{SKILL_MEDIC}}"
+set skill_fieldops "{{SKILL_FIELDOPS}}"
+set skill_engineer "{{SKILL_ENGINEER}}"
+set skill_covertops "{{SKILL_COVERTOPS}}"
+set skill_battlesense "{{SKILL_BATTLESENSE}}"
+set skill_lightweapons "{{SKILL_LIGHTWEAPONS}}"
+
+// CLASS LIMITING (-1 = unlimited)
+set team_maxSoldiers "{{TEAM_MAXSOLDIERS}}"
+set team_maxMedics "{{TEAM_MAXMEDICS}}"
+set team_maxEngineers "{{TEAM_MAXENGINEERS}}"
+set team_maxFieldops "{{TEAM_MAXFIELDOPS}}"
+set team_maxCovertops "{{TEAM_MAXCOVERTOPS}}"
+
+// WEAPONS LIMITING (-1 = unlimited)
+set team_maxMortars "{{TEAM_MAXMORTARS}}"
+set team_maxFlamers "{{TEAM_MAXFLAMERS}}"
+set team_maxMachineguns "{{TEAM_MAXMACHINEGUNS}}"
+set team_maxRockets "{{TEAM_MAXROCKETS}}"
+set team_maxRiflegrenades "{{TEAM_MAXRIFLEGRENADES}}"
+set team_maxAirstrikes "{{TEAM_MAXAIRSTRIKES}}"
+set team_maxArtillery "{{TEAM_MAXARTILLERY}}"
+set team_maxLandmines "{{TEAM_MAXLANDMINES}}"
+set team_riflegrenades "{{TEAM_RIFLEGRENADES}}"
+
+// GAMEPLAY
+set g_dropAmmo "{{G_DROPAMMO}}"
+set g_dropHealth "{{G_DROPHEALTH}}"
+set g_shove "{{G_SHOVE}}"
+set g_misc "{{G_MISC}}"
+set g_countryflags "{{G_COUNTRYFLAGS}}"
+set g_skillRating "{{G_SKILLRATING}}"
+set g_heavyWeaponRestriction "{{G_HEAVYWEAPONRESTRICTION}}"
+set g_antilag "{{G_ANTILAG}}"
+set g_altStopwatchMode "{{G_ALTSTOPWATCHMODE}}"
+set g_autofireteams "{{G_AUTOFIRETEAMS}}"
+set g_complaintlimit "{{G_COMPLAINTLIMIT}}"
+set g_disableComplaints "{{G_DISABLECOMPLAINTS}}"
+set g_ipcomplaintlimit "{{G_IPCOMPLAINTLIMIT}}"
+set g_fastres "{{G_FASTRES}}"
+set g_friendlyFire "{{G_FRIENDLYFIRE}}"
+set g_minGameClients "{{G_MINGAMECLIENTS}}"
+set g_maxlives "{{G_MAXLIVES}}"
+set g_alliedmaxlives "{{G_ALLIEDMAXLIVES}}"
+set g_axismaxlives "{{G_AXISMAXLIVES}}"
+set g_teamforcebalance "{{G_TEAMFORCEBALANCE}}"
+set g_noTeamSwitching "{{G_NOTEAMSWITCHING}}"
+set g_voiceChatsAllowed "{{G_VOICECHATSALLOWED}}"
+set g_doWarmup "{{G_DOWARMUP}}"
+set g_warmup "{{G_WARMUP}}"
+set g_intermissionTime "{{G_INTERMISSIONTIME}}"
+set g_intermissionReadyPercent "{{G_INTERMISSIONREADYPERCENT}}"
+set g_spectatorInactivity "{{G_SPECTATORINACTIVITY}}"
+set match_latejoin "{{MATCH_LATEJOIN}}"
+set match_minplayers "{{MATCH_MINPLAYERS}}"
+set match_mutespecs "{{MATCH_MUTESPECS}}"
+set match_readypercent "{{MATCH_READYPERCENT}}"
+set match_timeoutcount "{{MATCH_TIMEOUTCOUNT}}"
+set match_warmupDamage "{{MATCH_WARMUPDAMAGE}}"
+set team_maxplayers "{{TEAM_MAXPLAYERS}}"
+set team_nocontrols "{{TEAM_NOCONTROLS}}"
+set pmove_fixed "{{PMOVE_FIXED}}"
+set pmove_msec "{{PMOVE_MSEC}}"
+set g_mapScriptDirectory "{{G_MAPSCRIPTDIRECTORY}}"
+set g_campaignFile "{{G_CAMPAIGNFILE}}"
+set g_customConfig "{{G_CUSTOMCONFIG}}"
+
+// LMS ONLY SETTINGS
+set g_lms_teamForceBalance "{{G_LMS_TEAMFORCEBALANCE}}"
+set g_lms_roundlimit "{{G_LMS_ROUNDLIMIT}}"
+set g_lms_matchlimit "{{G_LMS_MATCHLIMIT}}"
+set g_lms_lockTeams "{{G_LMS_LOCKTEAMS}}"
+set g_lms_followTeamOnly "{{G_LMS_FOLLOWTEAMONLY}}"
+
+// VOTING
+set g_allowVote "{{G_ALLOWVOTE}}"
+set vote_limit "{{VOTE_LIMIT}}"
+set vote_percent "{{VOTE_PERCENT}}"
+set vote_allow_config "{{VOTE_ALLOW_CONFIG}}"
+set vote_allow_gametype "{{VOTE_ALLOW_GAMETYPE}}"
+set vote_allow_kick "{{VOTE_ALLOW_KICK}}"
+set vote_allow_map "{{VOTE_ALLOW_MAP}}"
+set vote_allow_maprestart "{{VOTE_ALLOW_MAPRESTART}}"
+set vote_allow_matchreset "{{VOTE_ALLOW_MATCHRESET}}"
+set vote_allow_mutespecs "{{VOTE_ALLOW_MUTESPECS}}"
+set vote_allow_nextmap "{{VOTE_ALLOW_NEXTMAP}}"
+set vote_allow_referee "{{VOTE_ALLOW_REFEREE}}"
+set vote_allow_shuffleteams "{{VOTE_ALLOW_SHUFFLETEAMS}}"
+set vote_allow_shuffleteams_norestart "{{VOTE_ALLOW_SHUFFLETEAMS_NORESTART}}"
+set vote_allow_swapteams "{{VOTE_ALLOW_SWAPTEAMS}}"
+set vote_allow_friendlyfire "{{VOTE_ALLOW_FRIENDLYFIRE}}"
+set vote_allow_timelimit "{{VOTE_ALLOW_TIMELIMIT}}"
+set vote_allow_warmupdamage "{{VOTE_ALLOW_WARMUPDAMAGE}}"
+set vote_allow_antilag "{{VOTE_ALLOW_ANTILAG}}"
+set vote_allow_balancedteams "{{VOTE_ALLOW_BALANCEDTEAMS}}"
+set vote_allow_muting "{{VOTE_ALLOW_MUTING}}"
+set vote_allow_surrender "{{VOTE_ALLOW_SURRENDER}}"
+set vote_allow_restartcampaign "{{VOTE_ALLOW_RESTARTCAMPAIGN}}"
+set vote_allow_nextcampaign "{{VOTE_ALLOW_NEXTCAMPAIGN}}"
+set vote_allow_poll "{{VOTE_ALLOW_POLL}}"
+set vote_allow_cointoss "{{VOTE_ALLOW_COINTOSS}}"
+
+// MAP VOTING
+set g_excludedMaps "{{G_EXCLUDEDMAPS}}"
+set g_maxMapsVotedFor "{{G_MAXMAPSVOTEDFOR}}"
+set g_mapVoteFlags "{{G_MAPVOTEFLAGS}}"
+set g_minMapAge "{{G_MINMAPAGE}}"
+
+// LUA
+set lua_modules "{{LUA_MODULES}}"
+set lua_allowedModules "{{LUA_ALLOWEDMODULES}}"
+
+// OMNI-BOT
+set omnibot_enable "{{OMNIBOT_ENABLE}}"
+set omnibot_path "{{OMNIBOT_PATH}}"
+set omnibot_flags "{{OMNIBOT_FLAGS}}"
+
+// WATCHDOG — restart action if the server dies with no map running
+set com_watchdog "{{COM_WATCHDOG}}"
+set com_watchdog_cmd "{{COM_WATCHDOG_CMD}}"
 MODCFG
+
+  # Optional bind overrides — only written when set in the wizard
+  if [ -n "\${NET_IP:-}" ]; then
+    printf 'set net_ip "%s"\n' "\${NET_IP}" >> "$MOD_DIR/server.cfg"
+  fi
+  if [ -n "\${NET_IP6:-}" ]; then
+    printf 'set net_ip6 "%s"\n' "\${NET_IP6}" >> "$MOD_DIR/server.cfg"
+  fi
+
+  # Map rotation — cycle config matching the game type (or legacy 2.60 rotation)
+  {
+    echo ""
+    echo "// MAP ROTATION"
+    if [ -n "\${MAP_ROTATION:-}" ]; then
+      printf 'set sv_mapRotation "%s"\n' "\${MAP_ROTATION}"
+      echo "map \${START_MAP:-oasis}"
+    else
+      echo "\$ROTATION"
+    fi
+  } >> "$MOD_DIR/server.cfg"
 fi
 
 # ── Step 6: Select the correct binary for the architecture ───
@@ -1737,10 +2119,165 @@ else
   echo "   Binary: ./etlded (linked to 32-bit version)"
 fi
 echo "   Mod dir: $MOD_DIR"`,
-    startCommand: `cd {{INSTALL_PATH}} && ./etlded +set dedicated 2 +set net_port {{PORT}} +set fs_basepath "{{INSTALL_PATH}}" +set fs_homepath "{{INSTALL_PATH}}" +set fs_game {{ET_MOD}} +exec server.cfg`,
+    startCommand: `cd {{INSTALL_PATH}} && ./etlded +set dedicated 2 +set vm_game 0 +set net_port {{PORT}} +set fs_basepath "{{INSTALL_PATH}}" +set fs_homepath "{{INSTALL_PATH}}" +set fs_game {{ET_MOD}} +exec server.cfg`,
     stopCommand: null,
-    configFiles: { "legacy/server.cfg": "server.cfg" },
-    defaultConfig: {},
+    configFiles: { "{{ET_MOD}}/server.cfg": "server.cfg" },
+    // Complete server.cfg option set (mirrors the install wizard above).
+    // "__gsm_format": "quake3" tells the panel to render these as `set cvar "value"` lines.
+    defaultConfig: {
+      "__gsm_format": "quake3",
+      "sv_hostname": "{{SERVER_NAME}}",
+      "server_motd0": "{{MOTD0}}",
+      "server_motd1": "{{MOTD1}}",
+      "server_motd2": "{{MOTD2}}",
+      "server_motd3": "{{MOTD3}}",
+      "server_motd4": "{{MOTD4}}",
+      "server_motd5": "{{MOTD5}}",
+      "sv_maxclients": "{{MAX_PLAYERS}}",
+      "sv_privateclients": "{{SV_PRIVATECLIENTS}}",
+      "sv_privatepassword": "{{SV_PRIVATEPASSWORD}}",
+      "g_password": "{{G_PASSWORD}}",
+      "rconpassword": "{{RCON_PASSWORD}}",
+      "refereePassword": "{{REFEREE_PASSWORD}}",
+      "shoutcastPassword": "{{SHOUTCAST_PASSWORD}}",
+      "sv_advert": "{{SV_ADVERT}}",
+      "sv_timeout": "{{SV_TIMEOUT}}",
+      "sv_dl_timeout": "{{SV_DL_TIMEOUT}}",
+      "sv_minping": "{{SV_MINPING}}",
+      "sv_maxping": "{{SV_MAXPING}}",
+      "net_port6": "{{NET_PORT6}}",
+      "sv_master1": "{{SV_MASTER1}}",
+      "sv_master2": "{{SV_MASTER2}}",
+      "sv_master3": "{{SV_MASTER3}}",
+      "sv_master4": "{{SV_MASTER4}}",
+      "sv_master5": "{{SV_MASTER5}}",
+      "sv_master6": "{{SV_MASTER6}}",
+      "sv_maxRate": "{{SV_MAXRATE}}",
+      "sv_dlRate": "{{SV_DLRATE}}",
+      "sv_allowDownload": "{{SV_ALLOWDOWNLOAD}}",
+      "sv_wwwDownload": "{{SV_WWWDOWNLOAD}}",
+      "sv_wwwBaseURL": "{{SV_WWWBASEURL}}",
+      "sv_wwwDlDisconnected": "{{SV_WWWDLDISCONNECTED}}",
+      "sv_wwwFallbackURL": "{{SV_WWWFALLBACKURL}}",
+      "logfile": "{{LOGFILE}}",
+      "sv_pure": "{{SV_PURE}}",
+      "sv_protect": "{{SV_PROTECT}}",
+      "sv_protectLog": "{{SV_PROTECT_LOG}}",
+      "sv_floodProtect": "{{SV_FLOODPROTECT}}",
+      "sv_userInfofloodProtect": "{{SV_USERINFOFLOODPROTECT}}",
+      "sv_ipMaxClients": "{{SV_IPMAXCLIENTS}}",
+      "sv_punkbuster": "{{SV_PUNKBUSTER}}",
+      "g_gametype": "{{GAMETYPE}}",
+      "g_log": "{{G_LOG}}",
+      "g_logSync": "{{G_LOGSYNC}}",
+      "g_guidCheck": "{{G_GUIDCHECK}}",
+      "g_protect": "{{G_PROTECT}}",
+      "g_antiwarp": "{{G_ANTIWARP}}",
+      "g_maxWarp": "{{G_MAXWARP}}",
+      "skill_soldier": "{{SKILL_SOLDIER}}",
+      "skill_medic": "{{SKILL_MEDIC}}",
+      "skill_fieldops": "{{SKILL_FIELDOPS}}",
+      "skill_engineer": "{{SKILL_ENGINEER}}",
+      "skill_covertops": "{{SKILL_COVERTOPS}}",
+      "skill_battlesense": "{{SKILL_BATTLESENSE}}",
+      "skill_lightweapons": "{{SKILL_LIGHTWEAPONS}}",
+      "team_maxSoldiers": "{{TEAM_MAXSOLDIERS}}",
+      "team_maxMedics": "{{TEAM_MAXMEDICS}}",
+      "team_maxEngineers": "{{TEAM_MAXENGINEERS}}",
+      "team_maxFieldops": "{{TEAM_MAXFIELDOPS}}",
+      "team_maxCovertops": "{{TEAM_MAXCOVERTOPS}}",
+      "team_maxMortars": "{{TEAM_MAXMORTARS}}",
+      "team_maxFlamers": "{{TEAM_MAXFLAMERS}}",
+      "team_maxMachineguns": "{{TEAM_MAXMACHINEGUNS}}",
+      "team_maxRockets": "{{TEAM_MAXROCKETS}}",
+      "team_maxRiflegrenades": "{{TEAM_MAXRIFLEGRENADES}}",
+      "team_maxAirstrikes": "{{TEAM_MAXAIRSTRIKES}}",
+      "team_maxArtillery": "{{TEAM_MAXARTILLERY}}",
+      "team_maxLandmines": "{{TEAM_MAXLANDMINES}}",
+      "team_riflegrenades": "{{TEAM_RIFLEGRENADES}}",
+      "g_dropAmmo": "{{G_DROPAMMO}}",
+      "g_dropHealth": "{{G_DROPHEALTH}}",
+      "g_shove": "{{G_SHOVE}}",
+      "g_misc": "{{G_MISC}}",
+      "g_countryflags": "{{G_COUNTRYFLAGS}}",
+      "g_skillRating": "{{G_SKILLRATING}}",
+      "g_heavyWeaponRestriction": "{{G_HEAVYWEAPONRESTRICTION}}",
+      "g_antilag": "{{G_ANTILAG}}",
+      "g_altStopwatchMode": "{{G_ALTSTOPWATCHMODE}}",
+      "g_autofireteams": "{{G_AUTOFIRETEAMS}}",
+      "g_complaintlimit": "{{G_COMPLAINTLIMIT}}",
+      "g_disableComplaints": "{{G_DISABLECOMPLAINTS}}",
+      "g_ipcomplaintlimit": "{{G_IPCOMPLAINTLIMIT}}",
+      "g_fastres": "{{G_FASTRES}}",
+      "g_friendlyFire": "{{G_FRIENDLYFIRE}}",
+      "g_minGameClients": "{{G_MINGAMECLIENTS}}",
+      "g_maxlives": "{{G_MAXLIVES}}",
+      "g_alliedmaxlives": "{{G_ALLIEDMAXLIVES}}",
+      "g_axismaxlives": "{{G_AXISMAXLIVES}}",
+      "g_teamforcebalance": "{{G_TEAMFORCEBALANCE}}",
+      "g_noTeamSwitching": "{{G_NOTEAMSWITCHING}}",
+      "g_voiceChatsAllowed": "{{G_VOICECHATSALLOWED}}",
+      "g_doWarmup": "{{G_DOWARMUP}}",
+      "g_warmup": "{{G_WARMUP}}",
+      "g_intermissionTime": "{{G_INTERMISSIONTIME}}",
+      "g_intermissionReadyPercent": "{{G_INTERMISSIONREADYPERCENT}}",
+      "g_spectatorInactivity": "{{G_SPECTATORINACTIVITY}}",
+      "match_latejoin": "{{MATCH_LATEJOIN}}",
+      "match_minplayers": "{{MATCH_MINPLAYERS}}",
+      "match_mutespecs": "{{MATCH_MUTESPECS}}",
+      "match_readypercent": "{{MATCH_READYPERCENT}}",
+      "match_timeoutcount": "{{MATCH_TIMEOUTCOUNT}}",
+      "match_warmupDamage": "{{MATCH_WARMUPDAMAGE}}",
+      "team_maxplayers": "{{TEAM_MAXPLAYERS}}",
+      "team_nocontrols": "{{TEAM_NOCONTROLS}}",
+      "pmove_fixed": "{{PMOVE_FIXED}}",
+      "pmove_msec": "{{PMOVE_MSEC}}",
+      "g_mapScriptDirectory": "{{G_MAPSCRIPTDIRECTORY}}",
+      "g_campaignFile": "{{G_CAMPAIGNFILE}}",
+      "g_customConfig": "{{G_CUSTOMCONFIG}}",
+      "g_lms_teamForceBalance": "{{G_LMS_TEAMFORCEBALANCE}}",
+      "g_lms_roundlimit": "{{G_LMS_ROUNDLIMIT}}",
+      "g_lms_matchlimit": "{{G_LMS_MATCHLIMIT}}",
+      "g_lms_lockTeams": "{{G_LMS_LOCKTEAMS}}",
+      "g_lms_followTeamOnly": "{{G_LMS_FOLLOWTEAMONLY}}",
+      "g_allowVote": "{{G_ALLOWVOTE}}",
+      "vote_limit": "{{VOTE_LIMIT}}",
+      "vote_percent": "{{VOTE_PERCENT}}",
+      "vote_allow_config": "{{VOTE_ALLOW_CONFIG}}",
+      "vote_allow_gametype": "{{VOTE_ALLOW_GAMETYPE}}",
+      "vote_allow_kick": "{{VOTE_ALLOW_KICK}}",
+      "vote_allow_map": "{{VOTE_ALLOW_MAP}}",
+      "vote_allow_maprestart": "{{VOTE_ALLOW_MAPRESTART}}",
+      "vote_allow_matchreset": "{{VOTE_ALLOW_MATCHRESET}}",
+      "vote_allow_mutespecs": "{{VOTE_ALLOW_MUTESPECS}}",
+      "vote_allow_nextmap": "{{VOTE_ALLOW_NEXTMAP}}",
+      "vote_allow_referee": "{{VOTE_ALLOW_REFEREE}}",
+      "vote_allow_shuffleteams": "{{VOTE_ALLOW_SHUFFLETEAMS}}",
+      "vote_allow_shuffleteams_norestart": "{{VOTE_ALLOW_SHUFFLETEAMS_NORESTART}}",
+      "vote_allow_swapteams": "{{VOTE_ALLOW_SWAPTEAMS}}",
+      "vote_allow_friendlyfire": "{{VOTE_ALLOW_FRIENDLYFIRE}}",
+      "vote_allow_timelimit": "{{VOTE_ALLOW_TIMELIMIT}}",
+      "vote_allow_warmupdamage": "{{VOTE_ALLOW_WARMUPDAMAGE}}",
+      "vote_allow_antilag": "{{VOTE_ALLOW_ANTILAG}}",
+      "vote_allow_balancedteams": "{{VOTE_ALLOW_BALANCEDTEAMS}}",
+      "vote_allow_muting": "{{VOTE_ALLOW_MUTING}}",
+      "vote_allow_surrender": "{{VOTE_ALLOW_SURRENDER}}",
+      "vote_allow_restartcampaign": "{{VOTE_ALLOW_RESTARTCAMPAIGN}}",
+      "vote_allow_nextcampaign": "{{VOTE_ALLOW_NEXTCAMPAIGN}}",
+      "vote_allow_poll": "{{VOTE_ALLOW_POLL}}",
+      "vote_allow_cointoss": "{{VOTE_ALLOW_COINTOSS}}",
+      "g_excludedMaps": "{{G_EXCLUDEDMAPS}}",
+      "g_maxMapsVotedFor": "{{G_MAXMAPSVOTEDFOR}}",
+      "g_mapVoteFlags": "{{G_MAPVOTEFLAGS}}",
+      "g_minMapAge": "{{G_MINMAPAGE}}",
+      "lua_modules": "{{LUA_MODULES}}",
+      "lua_allowedModules": "{{LUA_ALLOWEDMODULES}}",
+      "omnibot_enable": "{{OMNIBOT_ENABLE}}",
+      "omnibot_path": "{{OMNIBOT_PATH}}",
+      "omnibot_flags": "{{OMNIBOT_FLAGS}}",
+      "com_watchdog": "{{COM_WATCHDOG}}",
+      "com_watchdog_cmd": "{{COM_WATCHDOG_CMD}}",
+    },
   },
   {
     slug: "openra",

@@ -8,7 +8,7 @@ import { mkdtemp, writeFile, chmod, rm, mkdir, access, constants, stat, readdir 
 import { tmpdir, homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { getTemplateBySlug, getExpectedArtifactsBySlug } from "@/db/seeds";
+import { getTemplateBySlug, getExpectedArtifactsBySlug, type TemplateVariable } from "@/db/seeds";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -227,23 +227,49 @@ function coerceJsonTree(input: unknown): unknown {
 
 function renderConfigFile(filePath: string, config: Record<string, unknown>) {
   const lower = filePath.toLowerCase();
+  // Entries prefixed with "__" are panel directives (e.g. __gsm_format), not cvars.
+  const entries = Object.entries(config).filter(([k]) => !k.startsWith("__"));
+  const cvarEntries = entries.length > 0 ? entries : Object.entries(config);
   if (lower.endsWith(".json")) {
     return `${JSON.stringify(coerceJsonTree(config), null, 2)}\n`;
   }
   if (lower.endsWith(".xml")) {
     // ServerSettings/property format used by 7 Days to Die et al.
-    const items = Object.entries(config)
+    const items = cvarEntries
       .map(([k, v]) => `  <property name="${k}" value="${String(v).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;")}"/>`)
       .join("\n");
     return `<ServerSettings>\n${items}\n</ServerSettings>\n`;
   }
   if (lower.endsWith(".yml") || lower.endsWith(".yaml")) {
-    return `${Object.entries(config).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join("\n")}\n`;
+    return `${cvarEntries.map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join("\n")}\n`;
   }
   if (lower.endsWith(".cfg") || lower.endsWith(".conf") || lower.endsWith(".ini") || lower.endsWith(".properties") || lower.endsWith(".dat")) {
-    return `${Object.entries(config).map(([k, v]) => `${k}=${String(v)}`).join("\n")}\n`;
+    // id Tech 3 (Quake 3 / Wolfenstein: ET / ET:Legacy) expects `set cvar "value"` lines.
+    if (String(config.__gsm_format || "") === "quake3") {
+      const esc = (v: unknown) => String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      return `${cvarEntries.map(([k, v]) => `set ${k} "${esc(v)}"`).join("\n")}\n`;
+    }
+    return `${cvarEntries.map(([k, v]) => `${k}=${String(v)}`).join("\n")}\n`;
   }
-  return `${Object.entries(config).map(([k, v]) => `${k}=${String(v)}`).join("\n")}\n`;
+  return `${cvarEntries.map(([k, v]) => `${k}=${String(v)}`).join("\n")}\n`;
+}
+
+// Wizard checkboxes round-trip as "true"/"false", but engines like id Tech 3
+// (Wolfenstein: ET) treat any non-numeric string as 0. For checkbox variables
+// whose template default is numeric ("0"/"1"), normalize to "0"/"1".
+function normalizeTemplateBooleans(variables: Record<string, unknown>, defs?: TemplateVariable[]) {
+  if (!defs || defs.length === 0) return;
+  for (const def of defs) {
+    if (def.field_type !== "checkbox") continue;
+    if (def.default_value !== "0" && def.default_value !== "1") continue;
+    const raw = variables[def.env_variable];
+    if (raw === undefined || raw === null || raw === "") {
+      variables[def.env_variable] = def.default_value;
+      continue;
+    }
+    const s = String(raw).trim().toLowerCase();
+    variables[def.env_variable] = s === "true" || s === "yes" || s === "on" || s === "1" ? "1" : "0";
+  }
 }
 
 async function materializeServerFiles(options: {
@@ -291,7 +317,8 @@ async function materializeServerFiles(options: {
   const defaultConfig = substituteConfigValues(options.defaultConfig || {}, options.variables) as Record<string, unknown>;
   for (const rawPath of Object.keys(configFiles)) {
     const configPath = replaceTemplateVariables(rawPath, options.variables);
-    if (!configPath || configPath.includes("{{")) continue; // unresolved token — skip writing
+    // Skip unresolved tokens and paths whose tokenized folder vanished (e.g. {{ET_MOD}} unset).
+    if (!configPath || configPath.includes("{{") || configPath.startsWith("/")) continue;
     const absolute = join(options.installPath, configPath);
     await mkdir(dirname(absolute), { recursive: true });
     if (!(await exists(absolute))) {
@@ -499,6 +526,7 @@ export async function POST(
 
     // Build variables and script
     const variables = buildVariables({ ...server, installPath: effectiveInstallPath });
+    normalizeTemplateBooleans(variables, latestTemplate?.variables);
     const script = replaceTemplateVariables(installScriptSource, variables);
 
     const fullScript = `#!/usr/bin/env bash

@@ -11,7 +11,7 @@ interface NodeInfo { id: number; name: string; hostname: string; status: string;
 interface TemplateVar {
   name: string; description: string; env_variable: string; default_value: string;
   user_viewable: boolean; user_editable: boolean; rules: string; field_type: string;
-  enum_values?: Record<string, string>;
+  enum_values?: Record<string, string>; category?: string;
 }
 interface Server {
   id: number; name: string; ipv4: string | null; ipv6: string | null; port: number;
@@ -368,6 +368,24 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   const groupedServers = groupServersByNode(filteredServers);
   const serverSummary = summarizeServerStatus(servers);
   const visibleVars = gameVars.filter((v) => !["SERVER_NAME","PORT","INSTALL_PATH","QUERY_PORT"].includes(v.env_variable));
+  // Group template variables by category (e.g. Wolfenstein: ET ships 140+ options
+  // across Server Identity / Network / Voting / ...) so big option sets stay navigable.
+  const varGroups = visibleVars.reduce<{ name: string; vars: TemplateVar[] }[]>((acc, v) => {
+    const name = (v.category || "").trim() || "General";
+    const last = acc[acc.length - 1];
+    if (last && last.name === name) { last.vars.push(v); }
+    else {
+      const existing = acc.find((g) => g.name === name);
+      if (existing) existing.vars.push(v);
+      else acc.push({ name, vars: [v] });
+    }
+    return acc;
+  }, []);
+  const hasVarCategories = varGroups.some((g) => g.name !== "General") && varGroups.length > 1;
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  function toggleGroup(name: string, open: boolean) {
+    setOpenGroups((p) => ({ ...p, [name]: open }));
+  }
   const inputCls = "w-full px-3 py-2.5 gaming-chip rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/50 transition-colors";
   const hasActiveFilters = Boolean(searchQuery.trim()) || statusFilter !== "all";
   const installPathPreview = selectedNode && selectedGame && form.name
@@ -479,7 +497,31 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
             {wizardStep === 1 && (
               <div className="space-y-5">
                 <p className="text-text-secondary text-sm">Configure {selectedGame?.name || "game"} settings. Defaults are already filled in.</p>
-                {visibleVars.length > 0 ? (<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">{visibleVars.map((v) => <VarField key={v.env_variable} v={v} />)}</div>) : (<div className="bg-bg-secondary rounded-lg p-6 text-center text-text-muted text-sm">No additional settings for this game.</div>)}
+                {visibleVars.length > 0 ? (
+                  hasVarCategories ? (
+                    <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+                      {varGroups.map((g, gi) => {
+                        const isOpen = openGroups[g.name] ?? gi === 0;
+                        return (
+                          <details key={g.name} open={isOpen} onToggle={(e) => toggleGroup(g.name, (e.target as HTMLDetailsElement).open)} className="group rounded-xl border border-border bg-bg-secondary/40 overflow-hidden">
+                            <summary className="flex cursor-pointer select-none items-center justify-between px-4 py-3 text-sm font-semibold text-text-primary hover:bg-bg-hover/40 transition-colors list-none">
+                              <span className="flex items-center gap-2">
+                                <span className={`text-text-muted transition-transform duration-150 ${isOpen ? "rotate-90" : ""}`}>▸</span>
+                                {g.name}
+                              </span>
+                              <span className="text-[11px] font-normal text-text-muted">{g.vars.length} option{g.vars.length !== 1 ? "s" : ""}</span>
+                            </summary>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 p-4 border-t border-border">
+                              {g.vars.map((v) => <VarField key={v.env_variable} v={v} />)}
+                            </div>
+                          </details>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">{visibleVars.map((v) => <VarField key={v.env_variable} v={v} />)}</div>
+                  )
+                ) : (<div className="bg-bg-secondary rounded-lg p-6 text-center text-text-muted text-sm">No additional settings for this game.</div>)}
                 <div className="flex justify-between pt-2"><button type="button" onClick={() => setWizardStep(0)} className="px-5 py-2.5 gaming-chip rounded-lg text-sm font-medium">← Back</button><button type="button" onClick={() => setWizardStep(2)} className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium">Next →</button></div>
               </div>
             )}
@@ -495,7 +537,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                     <div><p className="text-text-muted text-xs">Path</p><p className="font-mono text-xs truncate">{installPathPreview || "(auto-generated)"}</p></div>
                   </div>
                   {Object.keys(varValues).length > 0 && (
-                    <div className="pt-3 border-t border-border"><p className="text-text-muted text-xs mb-2">Game Settings</p><div className="grid grid-cols-2 md:grid-cols-3 gap-2">{Object.entries(varValues).filter(([,v]) => v).map(([k,v]) => { const def = gameVars.find((gv) => gv.env_variable === k); let display = v; if (def?.enum_values?.[v]) display = def.enum_values[v]; if (def?.field_type === "password" && v) display = "••••••"; return <div key={k} className="text-xs"><span className="text-text-muted">{def?.name || k}:</span> <span className="font-medium">{display}</span></div>; })}</div></div>
+                    <div className="pt-3 border-t border-border"><p className="text-text-muted text-xs mb-2">Game Settings ({Object.values(varValues).filter(Boolean).length})</p><div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-56 overflow-y-auto pr-1">{Object.entries(varValues).filter(([,v]) => v).map(([k,v]) => { const def = gameVars.find((gv) => gv.env_variable === k); let display = v; if (def?.enum_values?.[v]) display = def.enum_values[v]; if (def?.field_type === "password" && v) display = "••••••"; return <div key={k} className="text-xs"><span className="text-text-muted">{def?.name || k}:</span> <span className="font-medium">{display}</span></div>; })}</div></div>
                   )}
                 </div>
                 {error && <p className="text-danger text-sm">❌ {error}</p>}
