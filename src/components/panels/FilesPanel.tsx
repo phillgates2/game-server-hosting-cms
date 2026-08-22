@@ -35,6 +35,92 @@ function fileIcon(ext: string | null, isDir: boolean): string {
 
 const EDITABLE_EXTS = new Set(["cfg", "ini", "conf", "config", "properties", "yml", "yaml", "toml", "json", "xml", "csv", "txt", "md", "log", "sh", "bash", "bat", "cmd", "lua", "py", "js", "ts", "html", "css", "sql", "env", "service", "timer", ""]);
 
+/** A file picked up from a drop, together with the folder path it came from. */
+interface DroppedFile {
+  file: File;
+  /** Path relative to the drop target, e.g. "plugins/config.yml". "" = top level. */
+  relativePath: string;
+}
+
+/**
+ * Read every file out of a dropped directory tree.
+ *
+ * `DataTransfer.files` flattens a drop: dropping a folder yields either nothing
+ * or a bare list with the directory structure discarded. The entry API
+ * (webkitGetAsEntry) is the only way to walk into directories, so folders keep
+ * their layout instead of collapsing into the target directory.
+ *
+ * Directory reads are paginated by the browser - readEntries returns at most
+ * ~100 entries per call and must be called until it yields an empty batch.
+ */
+async function readDirectoryEntry(
+  entry: FileSystemDirectoryEntry,
+  prefix: string
+): Promise<DroppedFile[]> {
+  const reader = entry.createReader();
+  const out: DroppedFile[] = [];
+
+  const readBatch = () =>
+    new Promise<FileSystemEntry[]>((resolve, reject) =>
+      reader.readEntries(resolve, reject)
+    );
+
+  for (;;) {
+    const batch = await readBatch();
+    if (batch.length === 0) break;
+    for (const child of batch) {
+      out.push(...(await readEntry(child, prefix)));
+    }
+  }
+
+  return out;
+}
+
+/** Resolve a single dropped entry (file or directory) into a flat file list. */
+async function readEntry(entry: FileSystemEntry, prefix: string): Promise<DroppedFile[]> {
+  if (entry.isFile) {
+    const fileEntry = entry as FileSystemFileEntry;
+    const file = await new Promise<File | null>((resolve) =>
+      fileEntry.file(resolve, () => resolve(null))
+    );
+    // A file the browser refuses to read (permissions, or it vanished mid-drop)
+    // is skipped rather than aborting the whole upload.
+    return file ? [{ file, relativePath: prefix }] : [];
+  }
+
+  if (entry.isDirectory) {
+    const dirEntry = entry as FileSystemDirectoryEntry;
+    return readDirectoryEntry(dirEntry, prefix ? `${prefix}/${entry.name}` : entry.name);
+  }
+
+  return [];
+}
+
+/**
+ * Turn a drop into a list of files, preserving folder structure where the
+ * browser exposes it.
+ *
+ * Falls back to the flat `dataTransfer.files` list when the entry API is
+ * unavailable, so dropping loose files keeps working everywhere.
+ */
+async function collectDroppedFiles(dataTransfer: DataTransfer): Promise<DroppedFile[]> {
+  const items = Array.from(dataTransfer.items || []);
+  const entries = items
+    .filter((item) => item.kind === "file")
+    .map((item) => (typeof item.webkitGetAsEntry === "function" ? item.webkitGetAsEntry() : null));
+
+  if (entries.some((entry) => entry !== null)) {
+    const collected = await Promise.all(
+      entries.filter((e): e is FileSystemEntry => e !== null).map((entry) => readEntry(entry, ""))
+    );
+    return collected.flat();
+  }
+
+  // No entry API: only loose files are available, with no structure to keep.
+  return Array.from(dataTransfer.files).map((file) => ({ file, relativePath: "" }));
+}
+
+
 export default function FilesPanel({ user }: { user: AuthUser }) {
   const [servers, setServers] = useState<Server[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -59,6 +145,7 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const checkboxShiftRef = useRef(false);
   const dragCounterRef = useRef(0);
 
@@ -340,19 +427,51 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
     finally { setUploading(false); if (fileInputRef.current) fileInputRef.current.value = ""; }
   }
 
-  async function uploadFiles(files: FileList | File[], targetPath: string) {
+  /**
+   * Folder picker (<input webkitdirectory>). The browser sets
+   * webkitRelativePath to "chosenFolder/sub/file.txt", which is exactly the
+   * structure to recreate under the current directory.
+   */
+  async function uploadFolder(e: React.ChangeEvent<HTMLInputElement>) {
+    const picked = e.target.files;
+    if (!selectedId || !picked || picked.length === 0) return;
+
+    const dropped: DroppedFile[] = Array.from(picked).map((file) => {
+      const rel = file.webkitRelativePath || file.name;
+      const dir = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
+      return { file, relativePath: dir };
+    });
+
+    await uploadFiles(dropped, currentPath);
+    if (folderInputRef.current) folderInputRef.current.value = "";
+  }
+
+  async function uploadFiles(files: FileList | File[] | DroppedFile[], targetPath: string) {
     if (!selectedId || files.length === 0) return;
+
+    // Normalise the three shapes a caller can pass: the file picker gives a
+    // FileList, a drop gives DroppedFile[] carrying folder structure.
+    const items: DroppedFile[] = Array.from(files as ArrayLike<File | DroppedFile>).map((f) =>
+      f instanceof File ? { file: f, relativePath: "" } : f
+    );
+
     setUploading(true);
     setMessage(null);
-    setUploadProgress({ current: 0, total: files.length });
+    setUploadProgress({ current: 0, total: items.length });
     let successCount = 0;
     let failCount = 0;
-    const fileArray = Array.from(files);
-    for (let i = 0; i < fileArray.length; i++) {
-      setUploadProgress({ current: i + 1, total: fileArray.length });
+    const createdDirs = new Set(items.map((i) => i.relativePath).filter(Boolean));
+
+    for (let i = 0; i < items.length; i++) {
+      setUploadProgress({ current: i + 1, total: items.length });
+      const { file, relativePath } = items[i];
+      // Nest the upload under the folder it came from. The server joins this
+      // with the file name, creates parents recursively and rejects anything
+      // that escapes the server directory.
+      const dest = relativePath ? `${targetPath}/${relativePath}`.replace(/\/+/g, "/") : targetPath;
       const formData = new FormData();
-      formData.append("file", fileArray[i]);
-      formData.append("path", targetPath);
+      formData.append("file", file);
+      formData.append("path", dest);
       try {
         const res = await fetch(`/api/servers/${selectedId}/files/upload`, { method: "POST", body: formData });
         if (res.ok) successCount++;
@@ -361,12 +480,15 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
         failCount++;
       }
     }
+
     setUploadProgress(null);
     setUploading(false);
+
+    const folderNote = createdDirs.size > 0 ? ` across ${createdDirs.size} folder(s)` : "";
     if (failCount > 0) {
-      setMessage({ type: "error", text: `Uploaded ${successCount} file(s), ${failCount} failed` });
+      setMessage({ type: "error", text: `Uploaded ${successCount} file(s)${folderNote}, ${failCount} failed` });
     } else {
-      setMessage({ type: "success", text: `Uploaded ${successCount} file(s)` });
+      setMessage({ type: "success", text: `Uploaded ${successCount} file(s)${folderNote}` });
     }
     loadDir(selectedId, currentPath);
   }
@@ -403,10 +525,12 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
     setDragging(false);
     setDropTarget(null);
     if (!selectedId) return;
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      uploadFiles(files, currentPath);
-    }
+    // The DataTransfer is neutered once this handler returns, so the entries
+    // must be captured synchronously before awaiting anything.
+    const dt = e.dataTransfer;
+    void collectDroppedFiles(dt).then((dropped) => {
+      if (dropped.length > 0) void uploadFiles(dropped, currentPath);
+    });
   }
 
   function handleRowDragOver(e: React.DragEvent, entry: FileEntry) {
@@ -430,10 +554,10 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
     setDragging(false);
     setDropTarget(null);
     if (!selectedId || !entry.isDir) return;
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      uploadFiles(files, entry.path);
-    }
+    const dt = e.dataTransfer;
+    void collectDroppedFiles(dt).then((dropped) => {
+      if (dropped.length > 0) void uploadFiles(dropped, entry.path);
+    });
   }
 
   const breadcrumbs = currentPath === "." ? ["root"] : ["root", ...currentPath.split("/")];
@@ -473,8 +597,8 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
             <div className="absolute inset-0 z-50 bg-accent/10 border-2 border-dashed border-accent rounded-xl flex items-center justify-center pointer-events-none backdrop-blur-[2px]">
               <div className="text-center">
                 <span className="text-5xl block mb-3">📥</span>
-                <p className="text-accent font-semibold text-lg">Drop files to upload</p>
-                <p className="text-accent/70 text-sm mt-1">Files will be uploaded to the current directory</p>
+                <p className="text-accent font-semibold text-lg">Drop files or folders to upload</p>
+                <p className="text-accent/70 text-sm mt-1">Folder structure is preserved</p>
               </div>
             </div>
           )}
@@ -503,7 +627,20 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
             <button onClick={() => { setShowNewDialog("dir"); setNewName(""); }} className="px-3 py-1.5 bg-accent/15 text-accent rounded-lg text-xs">📁 New Folder</button>
             <label className={`px-3 py-1.5 bg-success/15 text-success rounded-lg text-xs cursor-pointer ${uploading ? "opacity-50" : ""}`}>
               ⬆️ Upload
-              <input ref={fileInputRef} type="file" className="hidden" onChange={uploadFile} disabled={uploading} />
+              <input ref={fileInputRef} type="file" className="hidden" onChange={uploadFile} disabled={uploading} multiple={false} />
+            </label>
+            <label className={`px-3 py-1.5 bg-success/15 text-success rounded-lg text-xs cursor-pointer ${uploading ? "opacity-50" : ""}`}>
+              📂 Upload Folder
+              <input
+                ref={folderInputRef}
+                type="file"
+                className="hidden"
+                onChange={uploadFolder}
+                disabled={uploading}
+                // Not in React's HTMLInputElement typings, but supported by
+                // every browser this panel targets.
+                {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+              />
             </label>
             <button
               onClick={openMoveDialog}
