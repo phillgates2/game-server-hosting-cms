@@ -8,7 +8,7 @@ import { hashPassword } from "@/lib/auth";
 import { getCurrentUser } from "@/lib/auth";
 import { gameTemplates } from "@/db/seeds";
 import { DEFAULT_ROLES, hasPermission } from "@/lib/permissions";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
 
 function buildDatabaseUrlWithPassword(databaseUrl: string, password: string) {
@@ -377,7 +377,96 @@ export async function POST(req: NextRequest) {
         created_at TIMESTAMP DEFAULT NOW() NOT NULL,
         updated_at TIMESTAMP DEFAULT NOW() NOT NULL
       );
+
+      -- API keys. Declared in schema.ts and queried by /api/api-keys, but the
+      -- installer never created the table, so key management raised a
+      -- "relation does not exist" error on every fresh install.
+      CREATE TABLE IF NOT EXISTS api_keys (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) NOT NULL,
+        name VARCHAR(128) NOT NULL,
+        key_hash TEXT NOT NULL,
+        key_prefix VARCHAR(12) NOT NULL,
+        permissions JSONB,
+        last_used_at TIMESTAMP,
+        expires_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS api_keys_user_id_idx ON api_keys(user_id);
+
+      -- Forum chat. Same omission: /api/forum/chat queries this table.
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) NOT NULL,
+        body TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS chat_messages_created_at_idx ON chat_messages(created_at);
+      CREATE INDEX IF NOT EXISTS chat_messages_user_id_idx ON chat_messages(user_id);
     `);
+    // ── Enforce one server per port, per node ──────────────────────────────
+    // Two simultaneous creates could both claim a port: each read the taken
+    // list, each saw it free, and each inserted. The second server then failed
+    // to bind at launch and reported itself "crashed" with no explanation.
+    //
+    // A unique index is the only thing that actually closes that window, but
+    // it cannot be created while duplicates already exist, so older
+    // deployments are repaired first. The oldest server keeps its port; the
+    // rest move to the nearest free pair above it, so the new port stays in
+    // the range an admin has already forwarded.
+    const duplicatePorts = await db.execute(sql`
+      SELECT id, node_id, port, name FROM game_servers g
+      WHERE EXISTS (
+        SELECT 1 FROM game_servers o
+        WHERE o.node_id = g.node_id AND o.port = g.port AND o.id < g.id
+      )
+      ORDER BY node_id, port, id
+    `);
+
+    for (const row of duplicatePorts.rows as Array<{
+      id: number; node_id: number; port: number; name: string;
+    }>) {
+      const taken = await db.execute(sql`
+        SELECT port FROM game_servers WHERE node_id = ${row.node_id}
+        UNION
+        SELECT query_port FROM game_servers
+        WHERE node_id = ${row.node_id} AND query_port IS NOT NULL
+      `);
+      const used = new Set(
+        (taken.rows as Array<{ port: number }>).map((r) => Number(r.port))
+      );
+      let candidate = Math.max(Number(row.port) + 1, 1024);
+      while (candidate + 1 <= 65535 && (used.has(candidate) || used.has(candidate + 1))) {
+        candidate++;
+      }
+      if (candidate + 1 > 65535) {
+        console.warn(`[install] no free port for duplicate server "${row.name}" (id ${row.id})`);
+        continue;
+      }
+      await db.execute(sql`
+        UPDATE game_servers
+        SET port = ${candidate}, query_port = ${candidate + 1}, updated_at = NOW()
+        WHERE id = ${row.id}
+      `);
+      console.warn(
+        `[install] "${row.name}" shared port ${row.port} with another server on the same node; moved to ${candidate}. Update any port forwarding.`
+      );
+    }
+
+    // CREATE UNIQUE INDEX has no IF NOT EXISTS guarantee against a partial
+    // failure, so tolerate an error rather than blocking the whole install.
+    try {
+      await db.execute(sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS game_servers_node_port_uniq
+        ON game_servers(node_id, port)
+      `);
+    } catch (e: unknown) {
+      console.warn(
+        "[install] could not add the unique port index:",
+        e instanceof Error ? e.message : e
+      );
+    }
+
     await logStep("schema", "done", "Database tables created with role-based permissions");
 
     // Step 2: Seed default roles

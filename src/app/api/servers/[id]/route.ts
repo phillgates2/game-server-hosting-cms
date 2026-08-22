@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { gameServers, gameDefinitions, nodes } from "@/db/schema";
+import { gameServers, gameDefinitions, nodes, scheduledTasks, serverMetrics } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { sendDiscordWebhook, resolveWebhookUrl } from "@/lib/discord";
@@ -322,6 +322,14 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       filesDeleteSkippedReason = "Remote node file deletion requires a node-agent API URL";
     }
 
+    // Remove dependent rows first. Both scheduled_tasks and server_metrics
+    // carry a plain REFERENCES with no ON DELETE, so Postgres defaults to
+    // NO ACTION and refuses the delete (23503) the moment either exists.
+    // Scheduling a restart therefore made a server permanently undeletable --
+    // and because the files are removed above, the user lost their data and
+    // still had the server listed.
+    await db.delete(scheduledTasks).where(eq(scheduledTasks.serverId, Number(id)));
+    await db.delete(serverMetrics).where(eq(serverMetrics.serverId, Number(id)));
     await db.delete(gameServers).where(eq(gameServers.id, Number(id)));
 
     // Remove firewall rules for the deleted server (best-effort)

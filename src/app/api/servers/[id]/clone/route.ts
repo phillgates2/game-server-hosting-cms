@@ -90,6 +90,24 @@ export async function POST(
     }
     const newPort = portCheck.ports.port;
 
+    // Atomic re-check, for the same reason as the create path: the count
+    // above races against concurrent requests.
+    if (auth.role !== "admin") {
+      const guard = await db.execute(sql`
+        SELECT 1 WHERE (
+          (SELECT COALESCE(max_servers, 0) FROM users WHERE id = ${auth.userId}) <= 0
+          OR (SELECT count(*) FROM game_servers WHERE user_id = ${auth.userId})
+             < (SELECT COALESCE(max_servers, 0) FROM users WHERE id = ${auth.userId})
+        )
+      `);
+      if (guard.rows.length === 0) {
+        return NextResponse.json(
+          { error: "Server limit reached. Contact an administrator to raise it." },
+          { status: 403 }
+        );
+      }
+    }
+
     const [clone] = await db.insert(gameServers).values({
       userId: auth.userId,
       nodeId: source.nodeId,

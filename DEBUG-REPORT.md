@@ -669,3 +669,171 @@ the linter, and any test that only asserts status codes.
 The check worth repeating: for every value a user can set, find the line that
 *reads* it back and makes a decision. If there isn't one, the feature does not
 exist regardless of how it looks.
+
+---
+
+# Fifth sweep — full workspace debug
+
+Previous sweeps covered vulnerabilities, dead features, response shapes, and
+authorization/validation. This one asked about **data lifecycle and
+concurrency**: what happens when things are deleted, and what happens when two
+requests arrive at once.
+
+The decisive change was tooling. Earlier sweeps noted "no Postgres in the
+sandbox" as a hard limit; PGlite — a real Postgres compiled to WebAssembly —
+installs without root. Every finding below was **confirmed by executing it**
+against a real database rather than by reading the SQL, and two of them are
+things I would not have believed without the demonstration.
+
+**Result: 5 found, 5 fixed.** 2 high (data loss, broken features), 3 medium.
+
+| Gate | Before | After |
+| --- | --- | --- |
+| `npm test` | 202 | 223 |
+| `verify:security` | 82/82 | 88/88 |
+| `next build` | succeeds | succeeds |
+| Postgres integration tests | none possible | 21 |
+
+---
+
+## High
+
+### H1 — Deleting a server destroyed the files, then failed ✅ FIXED
+`src/app/api/servers/[id]/route.ts`
+
+All 17 foreign keys in the schema are declared as a plain `REFERENCES` with no
+`ON DELETE` clause. Postgres defaults that to `NO ACTION`, which **refuses**
+the delete once a dependent row exists:
+
+```
+update or delete on table "game_servers" violates foreign key constraint
+"scheduled_tasks_server_id_fkey" on table "scheduled_tasks"   [23503]
+```
+
+`scheduled_tasks` references `game_servers`, so the moment a user scheduled a
+nightly restart, their server became permanently undeletable.
+
+What makes this data loss rather than an annoyance is the ordering inside the
+route: it stops the process, **deletes the game files from disk**, and only
+then deletes the row. So the user pressed Delete, lost their world data, got a
+500, and still had the server listed in the panel.
+
+Dependent rows are now removed first. Testing this was worth it precisely
+because the happy path — deleting a server with no schedule — works fine, which
+is presumably why it shipped.
+
+### H2 — Two tables were never created ✅ FIXED
+`src/app/api/install/route.ts`
+
+The schema declares 18 tables. The installer creates 16. Missing:
+
+- **`api_keys`** — queried by `/api/api-keys`
+- **`chat_messages`** — queried by `/api/forum/chat`
+
+Both features therefore failed with `relation does not exist` on any fresh
+install. There is no `drizzle/` migrations directory committed and no other
+code path that creates them, so this was not recoverable without manual SQL.
+
+A parity check between `pgTable(...)` in the schema and
+`CREATE TABLE IF NOT EXISTS` in the installer now runs as a test.
+
+---
+
+## Medium
+
+### M1 — The server quota raced ✅ FIXED
+
+This is a defect in the fix from the *previous* sweep, found by testing my own
+work rather than assuming it was correct. The check read the count and then
+inserted in a separate statement:
+
+```
+limit: 2
+outcomes: created, created, created, created, created
+servers actually created: 5   -> QUOTA BYPASSED
+```
+
+Five concurrent requests each saw room and each inserted. Now the count is
+evaluated inside the writing statement, which closes the window. The friendly
+pre-check is kept for its error message; the atomic guard is what holds.
+
+### M2 — Two servers could claim the same port ✅ FIXED
+
+Same read-then-write shape as the quota, and the same result: three concurrent
+creates all landed on 27015. The losing servers fail to bind at launch and
+report themselves **"crashed"** with nothing indicating the real cause.
+
+Only a database constraint closes this, so `game_servers` now carries
+`UNIQUE(node_id, port)`.
+
+### M3 — …and adding that index would have broken every upgrade ✅ HANDLED
+
+Verified before writing the fix: `CREATE UNIQUE INDEX` fails outright if
+duplicates already exist, and the installer runs on **every** deploy. Shipping
+the index alone would have bricked the upgrade for anyone whose panel had
+already allowed a collision.
+
+**I asked how to handle this** rather than picking for you, since the options
+ranged from "leave it as an app-level check" to "silently change a running
+server's port". You chose auto-repair, so:
+
+- the oldest server on a node/port keeps it;
+- later ones move to the nearest free pair **above** their current port, so the
+  new port stays inside whatever range the admin already forwarded — an early
+  version reassigned to 1024, which was technically valid and practically
+  useless;
+- a server on a *different* node using the same port is left alone, because
+  that is not a conflict;
+- every move is logged with old port, new port, and a note to update port
+  forwarding;
+- the whole thing is idempotent, asserted by running it three times.
+
+---
+
+## Deletion behaviour, measured
+
+Every user-triggerable delete, tested against real Postgres with dependents
+present:
+
+| Delete | Before | After |
+| --- | --- | --- |
+| server with a scheduled task | **blocked, after wiping files** | works |
+| server with metrics | **blocked** | works |
+| user owning a server | **blocked (opaque 500)** | clear 400 |
+| user with forum posts | **blocked (opaque 500)** | clear 400 |
+| node hosting servers | already guarded | unchanged |
+| forum thread with posts | already handled | unchanged |
+
+For users, cascading silently would have been the wrong fix — it would destroy
+their game servers and rewrite forum history. The route now refuses and names
+what has to be cleared, mirroring how the nodes route already handled exactly
+this situation.
+
+## On the tooling
+
+`tests/db-integrity.test.ts` extracts the installer's own DDL directly from the
+route source, so the tests cannot drift from what actually ships. Removing the
+two new tables turns 12 of them red.
+
+One practical note: each PGlite instance is a full Postgres and costs tens of
+megabytes, so creating one per test got the runner SIGKILLed. The suite shares
+one instance and `TRUNCATE ... RESTART IDENTITY CASCADE`s between tests.
+
+PGlite is a devDependency, imported only by tests, and `npm audit --omit=dev`
+still reports 0 vulnerabilities.
+
+## Theme
+
+The previous sweep's theme was the gap between *stored* and *enforced*. This
+one is the gap between **the happy path and the real one**.
+
+Every finding here works perfectly until a second thing exists: a second
+scheduled task, a second concurrent request, a second server on the same port,
+a second deploy over existing data. None is reachable by clicking through the
+UI once, none is visible to the type checker, and none would be caught by a
+test that mocks the database — which is exactly why the schema drifted 16
+tables against 18 without anyone noticing.
+
+The check worth repeating: for anything that deletes, create a dependent row
+first and then try it. For anything that counts before it writes, issue the
+request five times at once.

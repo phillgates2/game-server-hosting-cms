@@ -152,6 +152,27 @@ export async function POST(req: NextRequest) {
     const serverQueryPort = portCheck.ports.queryPort ?? serverPort + 1;
     const serverRconPort = portCheck.ports.rconPort;
 
+    // Re-check the quota atomically. The check above produces a good error
+    // message but races: several concurrent requests each read the same count,
+    // each decide there is room, and each insert. Five parallel requests
+    // reproducibly exceeded a limit of 2. Counting inside the writing
+    // statement closes the window.
+    if (auth.role !== "admin") {
+      const guard = await db.execute(sql`
+        SELECT 1 WHERE (
+          (SELECT COALESCE(max_servers, 0) FROM users WHERE id = ${auth.userId}) <= 0
+          OR (SELECT count(*) FROM game_servers WHERE user_id = ${auth.userId})
+             < (SELECT COALESCE(max_servers, 0) FROM users WHERE id = ${auth.userId})
+        )
+      `);
+      if (guard.rows.length === 0) {
+        return NextResponse.json(
+          { error: "Server limit reached. Contact an administrator to raise it." },
+          { status: 403 }
+        );
+      }
+    }
+
     const [server] = await db
       .insert(gameServers)
       .values({

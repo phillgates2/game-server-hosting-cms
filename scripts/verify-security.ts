@@ -341,6 +341,47 @@ console.log("\nH2/H3 auth enforcement wiring");
     /validateKeyScope\(/.test(read("../src/app/api/api-keys/route.ts"))
   );
 
+  // Every FK is declared without ON DELETE, so Postgres refuses a delete once
+  // a dependent row exists. Deleting a server removes its files first, so a
+  // blocked delete destroyed data and left the row behind.
+  const serverIdRoute2 = read("../src/app/api/servers/[id]/route.ts");
+  check(
+    "server delete removes dependent rows first",
+    /delete\(scheduledTasks\)/.test(serverIdRoute2) && /delete\(serverMetrics\)/.test(serverIdRoute2)
+  );
+  check(
+    "user delete refuses rather than failing on a foreign key",
+    /owns \$\{ownedServers\} server|owns \${ownedServers}/.test(read("../src/app/api/users/[id]/route.ts")) ||
+      /ownedServers > 0/.test(read("../src/app/api/users/[id]/route.ts"))
+  );
+  // Tables the app queries must exist after a fresh install.
+  const installRoute = read("../src/app/api/install/route.ts");
+  check(
+    "installer creates every table the app queries",
+    /CREATE TABLE IF NOT EXISTS api_keys/.test(installRoute) &&
+      /CREATE TABLE IF NOT EXISTS chat_messages/.test(installRoute)
+  );
+  // The quota must be evaluated by the database, not read then written.
+  check(
+    "the server quota is enforced atomically",
+    /COALESCE\(max_servers, 0\)/.test(read("../src/app/api/servers/route.ts")) &&
+      /COALESCE\(max_servers, 0\)/.test(read("../src/app/api/servers/[id]/clone/route.ts"))
+  );
+
+  // Two simultaneous creates could claim the same port; only a unique index
+  // closes that window, and it must repair existing duplicates first or the
+  // upgrade fails on any deployment that already has one.
+  const installRoute2 = read("../src/app/api/install/route.ts");
+  check(
+    "one server per port per node is enforced by the database",
+    /game_servers_node_port_uniq/.test(installRoute2)
+  );
+  check(
+    "existing duplicate ports are repaired before the index is added",
+    /o\.port = g\.port AND o\.id < g\.id/.test(installRoute2) &&
+      installRoute2.indexOf("o.id < g.id") < installRoute2.indexOf("game_servers_node_port_uniq")
+  );
+
   const siteSettings = read("../src/app/api/site-settings/route.ts");
   check(
     "bot token is not in the public settings allowlist",

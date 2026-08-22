@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { users, gameServers, forumPosts } from "@/db/schema";
+import { users, gameServers, forumPosts, apiKeys } from "@/db/schema";
 import { getCurrentUser, hashPassword } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq, sql } from "drizzle-orm";
@@ -132,6 +132,44 @@ export async function DELETE(
   }
 
   try {
+    // Every table referencing users carries a plain REFERENCES with no
+    // ON DELETE, so Postgres refuses the delete (23503) whenever the account
+    // owns anything -- which previously surfaced as an opaque 500.
+    //
+    // Cascading silently is not the right answer either: it would destroy the
+    // user's game servers and rewrite forum history. Refuse with a reason and
+    // let an admin reassign or delete the servers first, mirroring how the
+    // nodes route already handles the same situation.
+    const [{ count: ownedServers } = { count: 0 }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(gameServers)
+      .where(eq(gameServers.userId, Number(id)));
+    if (ownedServers > 0) {
+      return NextResponse.json(
+        {
+          error: `This user owns ${ownedServers} server(s). Delete or reassign them first.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    // Content that is safe to remove with the account: API keys are useless
+    // without their owner, and forum posts are handled by the forum routes.
+    await db.delete(apiKeys).where(eq(apiKeys.userId, Number(id)));
+
+    const [{ count: authored } = { count: 0 }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(forumPosts)
+      .where(eq(forumPosts.userId, Number(id)));
+    if (authored > 0) {
+      return NextResponse.json(
+        {
+          error: `This user has ${authored} forum post(s). Delete them first, or suspend the account instead of deleting it.`,
+        },
+        { status: 400 }
+      );
+    }
+
     await db.delete(users).where(eq(users.id, Number(id)));
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {

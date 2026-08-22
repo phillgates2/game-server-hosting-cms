@@ -4,6 +4,29 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.16.0] — 2026-08-22
+
+### 🛠 Deleting Things Actually Works
+
+- **Deleting a server could destroy its files and then fail.** Every foreign key in the database was declared without an `ON DELETE` rule, so PostgreSQL refuses to delete a row that anything else points at. Scheduling a nightly restart was enough to make a server **permanently undeletable** — and because the delete removes the game files from disk *before* the database row, pressing Delete wiped the world data, threw an error, and left the server still listed. Dependent records are now cleared first.
+- **Deleting a user who owned anything always failed** with an unexplained error. It now refuses politely and tells you what to remove first, instead of silently cascading and destroying that user's servers and forum history.
+
+### 🗄 Two Missing Tables
+
+- **API keys and forum chat were broken on every fresh install.** Both tables are defined in the schema and queried by the panel, but the installer created 16 of the 18 tables and skipped these two, so both features failed outright with a database error. A test now compares the schema against the installer so they cannot drift apart again.
+
+### ⚡ Races Under Load
+
+- **The server limit could be exceeded.** Creating several servers at the same moment let all of them through — each request checked the count before any of them had finished. Five simultaneous requests against a limit of two created five servers. The limit is now evaluated by the database as part of the write.
+- **Two servers could take the same port.** Same cause. The loser would fail to start and show as *crashed* with no explanation. The database now enforces one server per port, per node.
+- **Existing duplicate ports are repaired automatically on upgrade.** Panels that already had two servers sharing a port would otherwise have failed to start after this change. The oldest server keeps its port; the others move to the nearest free port *above* it — staying in the range you have already forwarded — and each change is logged so you can update port forwarding. Servers on different machines using the same port are left alone.
+
+### 🧪 Quality
+
+- **223 tests** (21 new) and **88 security checks** (6 new). The new tests run the installer's own SQL against a real PostgreSQL engine, so schema problems are caught before a release rather than on someone's server.
+
+---
+
 ## [1.15.0] — 2026-08-22
 
 ### 🔑 API Key Scopes Now Work

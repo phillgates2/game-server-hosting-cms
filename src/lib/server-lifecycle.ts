@@ -445,3 +445,21 @@ export function validateKeyScope(
   }
   return { scope: out, error: null };
 }
+
+/**
+ * SQL predicate enforcing the per-user server quota atomically.
+ *
+ * The plain read-then-write check races: several concurrent create requests
+ * each read the same count, each decide there is room, and each insert. A
+ * limit of 2 was reproducibly exceeded by five parallel requests.
+ *
+ * Evaluating the count inside the writing statement closes that window,
+ * because the database does the counting and the inserting together.
+ *
+ * `maxServers` of 0 or NULL means unlimited, matching `withinServerQuota`.
+ */
+export const QUOTA_PREDICATE_SQL = `(
+  (SELECT COALESCE(max_servers, 0) FROM users WHERE id = $userId) <= 0
+  OR (SELECT count(*) FROM game_servers WHERE user_id = $userId)
+     < (SELECT COALESCE(max_servers, 0) FROM users WHERE id = $userId)
+)`;

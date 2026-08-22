@@ -571,12 +571,12 @@ One command chains all four checks, exiting non-zero on the first failure — dr
 
 | Script | Checks |
 |:--|:--|
-| `npm test` | 202 unit tests over the config renderer, path guard, auth, pagination and API keys |
+| `npm test` | 223 unit and integration tests over the config renderer, path guard, auth, pagination and API keys |
 | `npm run typecheck` | `tsc --noEmit` across the project |
 | `npm run lint` | ESLint, including React hooks rules |
 | `npm run verify:templates` | All 1,551 template options — types, enums, defaults, and that every declared variable is actually consumed |
 | `npm run verify:installers` | Renders every game's install script, runs `bash -n` + shellcheck, then **executes** it in a sandbox with SteamCMD/curl/apt mocked, and asserts the artifacts the panel needs were produced |
-| `npm run verify:security` | 82 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, and a sweep for leaked exception messages |
+| `npm run verify:security` | 88 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, and a sweep for leaked exception messages |
 
 All of these run automatically in CI on every push and pull request, along
 with a production build and a high-severity dependency audit.
