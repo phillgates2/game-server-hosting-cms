@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { gameServers, gameDefinitions, nodes } from "@/db/schema";
+import { gameServers, gameDefinitions, nodes, users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { allowServerPorts } from "@/lib/firewall";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { apiError } from "@/lib/api-error";
+import { validatePorts, parsePort, withinServerQuota } from "@/lib/server-lifecycle";
 
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
@@ -28,6 +29,7 @@ export async function GET(req: NextRequest) {
         queryPort: gameServers.queryPort,
         status: gameServers.status,
         autoRestart: gameServers.autoRestart,
+        autoStart: gameServers.autoStart,
         discordWebhook: gameServers.discordWebhook,
         nodeId: gameServers.nodeId,
         pid: gameServers.pid,
@@ -71,6 +73,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
+    // Enforce the per-user server quota. It is stored on the user, editable by
+    // an admin with users.limits and displayed in the UI as "3/5", but nothing
+    // ever checked it, so it was advisory only. Admins are exempt.
+    if (auth.role !== "admin") {
+      const [owner] = await db
+        .select({ maxServers: users.maxServers })
+        .from(users)
+        .where(eq(users.id, auth.userId))
+        .limit(1);
+      const [{ count: ownedCount } = { count: 0 }] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(gameServers)
+        .where(eq(gameServers.userId, auth.userId));
+      if (!withinServerQuota(ownedCount, owner?.maxServers)) {
+        return NextResponse.json(
+          { error: `Server limit reached (${ownedCount}/${owner?.maxServers}). Contact an administrator to raise it.` },
+          { status: 403 }
+        );
+      }
+    }
+
     const [game] = await db
       .select({ slug: gameDefinitions.slug, name: gameDefinitions.name, iconEmoji: gameDefinitions.iconEmoji })
       .from(gameDefinitions)
@@ -107,9 +130,27 @@ export async function POST(req: NextRequest) {
       await mkdir(finalInstallPath, { recursive: true }).catch(() => {});
     }
 
-    const serverPort = Number(port);
-    const serverQueryPort = body.queryPort ? Number(body.queryPort) : serverPort + 1;
-    const serverRconPort = body.rconPort ? Number(body.rconPort) : null;
+    // Validate ports before they reach the database and the ufw command line.
+    // Number() alone let NaN, negatives, decimals and >65535 straight through.
+    const nodeServers = await db
+      .select({ port: gameServers.port, queryPort: gameServers.queryPort, rconPort: gameServers.rconPort })
+      .from(gameServers)
+      .where(eq(gameServers.nodeId, Number(nodeId)));
+    const takenPorts = nodeServers.flatMap((s) =>
+      [s.port, s.queryPort, s.rconPort].filter((n): n is number => typeof n === "number")
+    );
+
+    const derivedQueryPort = body.queryPort ?? (parsePort(port) !== null ? Number(port) + 1 : undefined);
+    const portCheck = validatePorts(
+      { port, queryPort: derivedQueryPort, rconPort: body.rconPort },
+      takenPorts
+    );
+    if (portCheck.error !== null || portCheck.ports === null) {
+      return NextResponse.json({ error: portCheck.error }, { status: 400 });
+    }
+    const serverPort = portCheck.ports.port;
+    const serverQueryPort = portCheck.ports.queryPort ?? serverPort + 1;
+    const serverRconPort = portCheck.ports.rconPort;
 
     const [server] = await db
       .insert(gameServers)

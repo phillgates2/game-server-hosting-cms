@@ -493,7 +493,7 @@ su - "$GSM_USER" -c "pm2 save" 2>/dev/null || true
 log "Waiting for panel to start..."
 sleep 3
 PANEL_OK="false"
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
   if curl -sf --max-time 3 "http://localhost:$PANEL_PORT/api/health" > /dev/null 2>&1 \
      || curl -sf --max-time 3 "http://127.0.0.1:$PANEL_PORT/api/health" > /dev/null 2>&1; then
     PANEL_OK="true"

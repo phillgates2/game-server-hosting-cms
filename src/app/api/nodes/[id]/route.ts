@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq, sql } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
+import { publicNode, pickNodePatch } from "@/lib/server-lifecycle";
 
 // GET /api/nodes/[id] - Get single node details
 export async function GET(
@@ -20,9 +21,12 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const [node] = await db.select().from(nodes).where(eq(nodes.id, Number(id))).limit(1);
+    const [row] = await db.select().from(nodes).where(eq(nodes.id, Number(id))).limit(1);
+    // Never ship SSH credentials or the node API key to a browser: nodes.view
+    // is held by the built-in moderator role.
+    const node = row ? publicNode(row) : undefined;
 
-    if (!node) {
+    if (!row || !node) {
       return NextResponse.json({ error: "Node not found" }, { status: 404 });
     }
 
@@ -62,13 +66,24 @@ export async function PATCH(
       await db.update(nodes).set({ isDefault: false });
     }
 
+    const { updates, rejected } = pickNodePatch(body);
+    if (rejected.length) {
+      return NextResponse.json(
+        { error: `Unknown or read-only field(s): ${rejected.join(", ")}` },
+        { status: 400 }
+      );
+    }
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: "No updatable fields provided" }, { status: 400 });
+    }
+
     const [updated] = await db
       .update(nodes)
-      .set({ ...body, updatedAt: new Date() })
+      .set({ ...updates, updatedAt: new Date() })
       .where(eq(nodes.id, Number(id)))
       .returning();
 
-    return NextResponse.json({ node: updated });
+    return NextResponse.json({ node: updated ? publicNode(updated) : updated });
   } catch (e: unknown) {
     return apiError(e, "Unknown error", 500);
   }

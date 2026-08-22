@@ -10,6 +10,7 @@ import { promisify } from "util";
 import { hostname, homedir } from "os";
 import { join } from "path";
 import { apiError } from "@/lib/api-error";
+import { publicNode } from "@/lib/server-lifecycle";
 
 const execAsync = promisify(exec);
 
@@ -113,7 +114,8 @@ export async function POST(req: NextRequest) {
       })
       .returning();
 
-    return NextResponse.json({ node }, { status: 201 });
+    // Echoing the row back would return the SSH credentials just submitted.
+    return NextResponse.json({ node: publicNode(node) }, { status: 201 });
   } catch (e: unknown) {
     return apiError(e, "Unknown error", 500);
   }

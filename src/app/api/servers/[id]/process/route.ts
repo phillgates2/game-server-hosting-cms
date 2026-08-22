@@ -6,11 +6,24 @@ import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
 import { join } from "node:path";
 import { apiError } from "@/lib/api-error";
+import { hasCrashed, shouldAutoRestart } from "@/lib/server-lifecycle";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // POST /api/servers/[id]/process — Start or stop the actual game server process
+/**
+ * Servers currently being auto-restarted.
+ *
+ * Two browser tabs both polling status would each observe the crash and each
+ * spawn a replacement process, leaving an orphan holding the port. This guard
+ * keeps one recovery in flight per server.
+ *
+ * Per-process, like the login throttle: correct for the single-node default,
+ * and a multi-node deployment would need this in the database.
+ */
+const autoRestarting = new Set<number>();
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -37,6 +50,7 @@ export async function POST(
         discordNotifyStop: gameServers.discordNotifyStop,
         discordNotifyRestart: gameServers.discordNotifyRestart,
         discordNotifyCrash: gameServers.discordNotifyCrash,
+        autoRestart: gameServers.autoRestart,
         gameName: gameDefinitions.name,
         gameSlug: gameDefinitions.slug,
         nodeIsLocal: nodes.isLocal,
@@ -82,7 +96,7 @@ export async function POST(
       // not stop cleanly - nobody asked it to. That is a crash, and it is the
       // event an operator most wants to hear about. It previously recorded a
       // plain "stopped" and sent no notification at all.
-      const crashed = !alive && server.status === "running";
+      const crashed = hasCrashed({ status: server.status, alive });
 
       if (alive !== (server.status === "running")) {
         await db.update(gameServers).set({
@@ -109,10 +123,55 @@ export async function POST(
         }
       }
 
+      // Auto-restart. The panel has always shown an "Auto-restart on" badge and
+      // the column was copied when cloning, but nothing ever acted on it, so a
+      // crashed server stayed down regardless of the setting.
+      let restarted = false;
+      if (shouldAutoRestart({ status: server.status, alive, autoRestart: server.autoRestart }, autoRestarting.has(server.id))) {
+        autoRestarting.add(server.id);
+        try {
+          const { startDetachedScript } = await import("@/lib/process-control");
+          const startScript = join(/* turbopackIgnore: true */ String(server.installPath), "gsm-start.sh");
+          const { pid, alive: back } = await startDetachedScript(startScript);
+
+          await db.update(gameServers).set({
+            status: back ? "running" : "crashed",
+            pid: back ? pid : null,
+            lastStarted: back ? new Date() : undefined,
+            updatedAt: new Date(),
+          }).where(eq(gameServers.id, server.id));
+
+          restarted = back;
+          console.log(`[auto-restart] "${server.name}" ${back ? `recovered (pid ${pid})` : "failed to restart"}`);
+
+          if (back && server.discordNotifyRestart !== false) {
+            const { resolveWebhookUrl, sendDiscordWebhook } = await import("@/lib/discord");
+            const hook = resolveWebhookUrl(server.discordWebhook);
+            if (hook) {
+              await sendDiscordWebhook(hook, {
+                serverName: server.name,
+                gameName: server.gameName || "Unknown",
+                ipv4: server.ipv4,
+                ipv6: server.ipv6,
+                port: server.port,
+                event: "server_restarted",
+                message: `🔁 **${server.name}** crashed and was restarted automatically.`,
+              }).catch(() => {});
+            }
+          }
+        } catch (e: unknown) {
+          // A failed recovery must not break the status poll.
+          console.error(`[auto-restart] "${server.name}" threw:`, e instanceof Error ? e.message : e);
+        } finally {
+          autoRestarting.delete(server.id);
+        }
+      }
+
       return NextResponse.json({
-        alive,
+        alive: alive || restarted,
         pid: server.pid,
-        status: crashed ? "crashed" : alive ? "running" : "stopped",
+        status: restarted ? "running" : crashed ? "crashed" : alive ? "running" : "stopped",
+        autoRestarted: restarted || undefined,
       });
     }
 

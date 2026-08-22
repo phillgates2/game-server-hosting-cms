@@ -16,7 +16,7 @@ interface TemplateVar {
 interface Server {
   id: number; name: string; ipv4: string | null; ipv6: string | null; port: number;
   status: string; gameName: string | null; gameSlug: string | null; gameIcon: string | null;
-  nodeName: string | null; nodeId: number | null; autoRestart: boolean | null;
+  nodeName: string | null; nodeId: number | null; autoRestart: boolean | null; autoStart: boolean | null;
   discordWebhook: string | null; pid: number | null; lastStarted: string | null; createdAt: string;
 }
 
@@ -256,6 +256,22 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
 
     setSelected((prev) => { const n = new Set(prev); n.delete(id); return n; });
     loadData();
+  }
+
+  /** Flip autoRestart / autoStart. Optimistic, reverted if the PATCH fails. */
+  async function toggleServerFlag(id: number, field: "autoRestart" | "autoStart", next: boolean) {
+    setServers((prev) => prev.map((s) => (s.id === id ? { ...s, [field]: next } : s)));
+    try {
+      const res = await fetch(`/api/servers/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: next }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Update failed");
+    } catch (e: unknown) {
+      setServers((prev) => prev.map((s) => (s.id === id ? { ...s, [field]: !next } : s)));
+      toast.error("Could not save", e instanceof Error ? e.message : "Please try again.");
+    }
   }
 
   async function cloneServer(id: number) {
@@ -723,9 +739,22 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                             <div className="mt-3 flex flex-wrap gap-2 rounded-lg border border-border bg-bg-secondary/70 p-3 text-[11px] text-text-secondary">
                               <span className="rounded-full bg-bg-card px-2.5 py-1 font-medium text-text-primary">{formatLastSeen(server)}</span>
                               <span className="rounded-full bg-bg-card px-2.5 py-1">{server.pid && server.status === "running" ? `PID ${server.pid}` : "No PID"}</span>
-                              <span className={`rounded-full px-2.5 py-1 font-medium ${server.autoRestart ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}>
+                              <button
+                                type="button"
+                                onClick={() => toggleServerFlag(server.id, "autoRestart", !server.autoRestart)}
+                                title="Restart this server automatically if it crashes"
+                                className={`rounded-full px-2.5 py-1 font-medium transition-opacity hover:opacity-80 ${server.autoRestart ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}
+                              >
                                 Auto-restart {server.autoRestart ? "on" : "off"}
-                              </span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => toggleServerFlag(server.id, "autoStart", !server.autoStart)}
+                                title="Start this server automatically when the node boots"
+                                className={`rounded-full px-2.5 py-1 font-medium transition-opacity hover:opacity-80 ${server.autoStart ? "bg-success/10 text-success" : "bg-bg-card text-text-secondary"}`}
+                              >
+                                Start on boot {server.autoStart ? "on" : "off"}
+                              </button>
                               <span className="rounded-full bg-bg-card px-2.5 py-1">Port {server.ipv4 && server.ipv4 !== "0.0.0.0" ? `${server.ipv4}:${server.port}` : server.port}</span>
                               <span className="rounded-full bg-bg-card px-2.5 py-1">{server.lastStarted ? `Started ${new Date(server.lastStarted).toLocaleDateString()}` : "Never started"}</span>
                             </div>

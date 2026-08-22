@@ -62,7 +62,9 @@ export const nodes = pgTable("nodes", {
   sshPort: integer("ssh_port").default(22),
   sshUser: varchar("ssh_user", { length: 64 }),
   sshKeyPath: text("ssh_key_path"),
-  sshPassword: text("ssh_password"), // encrypted
+  // NOTE: stored as plaintext. The panel has no encryption layer, so this
+  // is only as protected as the database itself. Prefer sshKeyPath.
+  sshPassword: text("ssh_password"),
   // API connection (alternative to SSH)
   apiUrl: text("api_url"),
   apiKey: text("api_key"),

@@ -229,6 +229,118 @@ console.log("\nH2/H3 auth enforcement wiring");
   const discordRoute = read("../src/app/api/settings/discord/route.ts");
   check("discord settings endpoint is admin only", /panel\.settings/.test(discordRoute));
   check("bot token is never returned to the client", !/botToken:\s*s\.botToken/.test(discordRoute) && /hasBotToken/.test(discordRoute));
+  // A clone must not inherit a webhook pointing at a channel the panel
+  // provisioned for the source: deleting the source deletes that channel and
+  // the clone is left posting into a webhook that 404s.
+  const cloneRoute = read("../src/app/api/servers/[id]/clone/route.ts");
+  check(
+    "a clone does not inherit a panel-provisioned Discord channel",
+    /inheritedWebhook\(/.test(cloneRoute) && !/discordWebhook:\s*source\.discordWebhook/.test(cloneRoute)
+  );
+  // autoRestart is presented to users as a working toggle; it must be acted on.
+  check(
+    "the autoRestart toggle actually restarts a crashed server",
+    /shouldAutoRestart\(/.test(processRoute) && /startDetachedScript/.test(processRoute)
+  );
+
+  // Mass assignment: PATCH used to spread the raw body into the UPDATE, so
+  // servers.edit could rewrite installPath (executed by the process route) or
+  // userId (reassigning ownership).
+  const serverRoute = read("../src/app/api/servers/[id]/route.ts");
+  check(
+    "server PATCH filters the body through an allowlist",
+    /pickServerPatch\(/.test(serverRoute) && !/\.set\(\{\s*\.\.\.body/.test(serverRoute)
+  );
+  const lifecycle = read("../src/lib/server-lifecycle.ts");
+  check(
+    "installPath and userId are not client-writable",
+    !/"installPath"/.test(lifecycle) && !/"userId"/.test(lifecycle)
+  );
+
+  // The nodes table holds SSH credentials and a node API key. A bare
+  // db.select() returns all of them, and nodes.view is held by the built-in
+  // moderator role, so every node route must redact before responding.
+  const nodeIdRoute = read("../src/app/api/nodes/[id]/route.ts");
+  check(
+    "node detail redacts SSH credentials",
+    /publicNode\(/.test(nodeIdRoute) && !/\.select\(\)\.from\(nodes\)[\s\S]{0,200}?NextResponse\.json\(\{ node[,}]/.test(nodeIdRoute)
+  );
+  check(
+    "node PATCH filters the body through an allowlist",
+    /pickNodePatch\(/.test(nodeIdRoute) && !/\.set\(\{\s*\.\.\.body/.test(nodeIdRoute)
+  );
+  check(
+    "node create does not echo back submitted credentials",
+    /publicNode\(/.test(read("../src/app/api/nodes/route.ts")) &&
+      /publicNode\(/.test(read("../src/app/api/nodes/local/route.ts"))
+  );
+  const lifecycleNode = read("../src/lib/server-lifecycle.ts");
+  check(
+    "node secrets are absent from the public field list",
+    !/"sshPassword",[\s\S]*?NODE_PATCH_FIELDS/.test(
+      lifecycleNode.slice(lifecycleNode.indexOf("NODE_PUBLIC_FIELDS"), lifecycleNode.indexOf("NODE_PATCH_FIELDS"))
+        + "NODE_PATCH_FIELDS"
+    )
+  );
+  check(
+    "isLocal cannot be changed by a client",
+    !/^\s*"isLocal",$/m.test(
+      lifecycleNode.slice(lifecycleNode.indexOf("NODE_PATCH_FIELDS"), lifecycleNode.indexOf("publicNode"))
+    )
+  );
+
+  // .returning() yields every column: the admin user PATCH was echoing the
+  // bcrypt hash and the TOTP seed back to the browser.
+  const userIdRoute = read("../src/app/api/users/[id]/route.ts");
+  check(
+    "user update does not return the password hash or 2FA secret",
+    /publicUser\(/.test(userIdRoute) && !/NextResponse\.json\(\{ user: updated \}\)/.test(userIdRoute)
+  );
+
+  // Ports supplied by a client reach both the database and the ufw command
+  // line; Number() alone accepted NaN, negatives, decimals and >65535.
+  const serversRoute = read("../src/app/api/servers/route.ts");
+  const cloneRouteP = read("../src/app/api/servers/[id]/clone/route.ts");
+  const serverIdRoute = read("../src/app/api/servers/[id]/route.ts");
+  check(
+    "server create validates ports",
+    /validatePorts\(/.test(serversRoute) && !/const serverPort = Number\(port\)/.test(serversRoute)
+  );
+  check("server update validates ports", /validatePorts\(/.test(serverIdRoute));
+  check("server clone validates ports", /validatePorts\(/.test(cloneRouteP));
+  check(
+    "privileged ports are refused",
+    /MIN_SERVER_PORT = 1024/.test(read("../src/lib/server-lifecycle.ts"))
+  );
+  // maxServers is shown to users as a quota; it has to actually hold.
+  check(
+    "the per-user server quota is enforced on create and clone",
+    /withinServerQuota\(/.test(serversRoute) && /withinServerQuota\(/.test(cloneRouteP)
+  );
+  // installPath is executed by the process route, so it is server-owned.
+  check(
+    "clone does not take installPath from the request body",
+    !/body\.installPath/.test(cloneRouteP)
+  );
+
+  // API keys can carry a permission scope. It was stored and advertised but
+  // never read, so a "read-only" key had its owner's full rights.
+  const permsLib = read("../src/lib/permissions.ts");
+  const authLib = read("../src/lib/auth.ts");
+  check(
+    "hasPermission intersects the API key scope",
+    /allowedByKeyScope\(/.test(permsLib)
+  );
+  check(
+    "the key scope is bound to the request on every auth path",
+    /setAuthContext\(/.test(authLib) &&
+      (authLib.match(/setAuthContext\(/g) || []).length >= 3
+  );
+  check(
+    "API key scopes are validated before storage",
+    /validateKeyScope\(/.test(read("../src/app/api/api-keys/route.ts"))
+  );
+
   const siteSettings = read("../src/app/api/site-settings/route.ts");
   check(
     "bot token is not in the public settings allowlist",

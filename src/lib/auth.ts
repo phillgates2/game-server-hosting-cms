@@ -75,17 +75,30 @@ export function getTokenFromHeaders(headers: Headers): string | null {
 export async function getCurrentUser(
   headers: Headers
 ): Promise<{ userId: number; role: string } | null> {
+  const { setAuthContext } = await import("./request-context");
+
   const token = getTokenFromHeaders(headers);
   if (token) {
     const session = verifyToken(token);
-    if (session) return session;
+    if (session) {
+      // A cookie session carries no key scope. Setting it explicitly (rather
+      // than leaving the store untouched) prevents a scope from a previous
+      // request ever bleeding into this one.
+      setAuthContext({ keyPermissions: null, keyId: null });
+      return session;
+    }
   }
 
   // Imported lazily: the API-key path touches the database, and pulling that
   // in at module load would drag the db client into every consumer of auth.ts.
   const { authenticateApiKey } = await import("./api-key-auth");
   const viaKey = await authenticateApiKey(headers);
-  return viaKey ? { userId: viaKey.userId, role: viaKey.role } : null;
+  if (!viaKey) {
+    setAuthContext({ keyPermissions: null, keyId: null });
+    return null;
+  }
+  setAuthContext({ keyPermissions: viaKey.permissions, keyId: viaKey.keyId });
+  return { userId: viaKey.userId, role: viaKey.role };
 }
 
 // Cookie options — secure only when behind HTTPS (detected via x-forwarded-proto)

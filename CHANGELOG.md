@@ -4,6 +4,78 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.15.0] — 2026-08-22
+
+### 🔑 API Key Scopes Now Work
+
+- **A "read-only" API key had full access.** Keys can carry a permission scope, the create endpoint accepted one, and the panel displayed it — but nothing ever read it back, so every key silently acted with its owner's complete rights including delete. Anyone who scoped a key for a monitoring script and pasted it into a third-party service had effectively handed over their whole account. Scopes are now enforced on every permission check.
+- Keys created before this change are unaffected: a key with no scope stays unrestricted.
+- **Scopes are validated when the key is created.** A typo such as `servers.veiw` used to be stored happily and produce a key that denied everything — indistinguishable from a broken panel. It is now rejected with the unknown name.
+
+### 🔢 Ports Are Validated
+
+- **Any value was accepted as a port.** `"abc"`, `-1`, `99999`, `1.5` and an empty string all reached the database and the firewall command line unchecked. Ports are now required to be whole numbers in range.
+- **Privileged ports are refused.** Ports below 1024 need root, so the panel was happily assigning users ports their servers could never bind — and letting someone reserve port 22 or 80.
+- **Two servers could take the same port.** Nothing checked for collisions, so the second server would simply fail to start and report itself *crashed* with no explanation. Creating, editing and cloning now detect the clash and name the port.
+- **Cloning picked a colliding port by default.** A clone took the source's port plus one, which for most games is the source's own query port. Cloning now finds the next genuinely free block.
+
+### 📊 The Server Limit Is Real
+
+- **`maxServers` was never enforced.** It is set per user, editable by admins, and shown in the profile and admin panels as "3/5" — but no code read it, so any user could create servers without limit on a machine with finite RAM and disk. Enforced now on both create and clone (a user at their limit could previously clone straight past it). Admins are exempt; `0` means unlimited.
+
+### 🔒 Security
+
+- Cloning no longer accepts an install path from the request body. That path is handed to a shell script when the server starts, which is why it was already blocked on the edit endpoint.
+- **202 tests** (37 new) and **82 security checks** (9 new). Cross-request isolation of the new permission context is tested explicitly with concurrent interleaved requests, and verified against a running server.
+
+---
+
+## [1.14.0] — 2026-08-22
+
+### 🔒 Security — Credential Disclosure
+
+A workspace-wide debug sweep focused on what actually leaves the server. Two endpoints were returning secrets.
+
+- **Node SSH credentials were readable by moderators.** `GET /api/nodes/[id]` fetched the row without a column list and returned it whole — including `sshPassword`, `sshKeyPath` and the node's API key, in plaintext. The permission guarding it is `nodes.view`, which the **built-in moderator role has by default**, so any moderator could read the SSH login for every machine and connect directly, bypassing the panel entirely. The node *list* endpoint was never affected; it already used an explicit column list. Creating a node also echoed the credentials straight back in the response.
+- **User password hashes and 2FA secrets were returned on update.** `PATCH /api/users/[id]` checks permissions carefully on every individual field, then ended with `.returning()`, which hands back every column — so editing a user returned their bcrypt hash **and** their `twoFactorSecret`. The TOTP seed is the damaging one: it generates the same codes as the user's authenticator app, so leaking it defeats their 2FA completely.
+- **`PATCH /api/nodes/[id]` accepted any field.** Same shape as the servers endpoint fixed in 1.13.0. Beyond the credentials, `isLocal` decides whether the panel runs game processes on that machine, so being able to set it redirected process control. Now restricted to an explicit list.
+
+### 📝 Corrections
+
+- The database schema described the node SSH password column as `// encrypted`. **It is not** — the panel has no encryption layer of any kind. The comment is corrected rather than left implying a protection that was never there. Key-based authentication avoids the issue and is the better option.
+
+### 🧪 Quality
+
+- **165 tests** (11 new) and **73 security checks** (6 new). Each new check was confirmed to fail when the bug is reintroduced.
+- Swept clean, and recorded as such: no `dangerouslySetInnerHTML`, no `exec`/`shell: true` anywhere, every `spawn` using an argument array, all five shell scripts shellcheck-clean, and 0 dependency vulnerabilities.
+
+---
+
+## [1.13.0] — 2026-08-22
+
+### 🔁 Dead Settings That Now Actually Work
+
+A debug sweep of the whole panel turned up three settings the interface already advertised but nothing ever acted on.
+
+- **"Auto-restart" now restarts things.** The badge on every server card had been purely decorative: the column was stored, displayed, and copied when cloning, but no code path ever read it, so a crashed server stayed down regardless of the setting. A crash detected by the status poll now relaunches the server, updates its PID and start time, and posts a `server_restarted` notification (honouring the per-server toggle). If two browser tabs spot the same crash, only one restart happens — previously this would have been two processes fighting over one port.
+- **"Start on node boot" now starts things on boot.** `autoStart` was written when cloning a server and read by nothing at all. Servers marked for it are now relaunched when the panel process starts, which after a machine reboot means exactly what the label promises. Anything still running is left alone rather than started twice.
+- **Both toggles are editable.** They were previously read-only badges with no control anywhere in the UI — the only way to change `autoRestart` was to clone a server or edit the database. They are now clickable, and save immediately.
+
+### 🧹 Cloning No Longer Steals a Channel
+
+- A clone used to inherit the original's Discord webhook even when the panel had created that channel *for the original*. The clone posted into a channel it did not own, and deleting the **original** deleted the channel — leaving the clone quietly posting into a webhook that returned 404. Clones now get their own channel; a webhook you entered by hand is still shared, because nobody owns it.
+
+### 🔒 Security
+
+- **`PATCH /api/servers/[id]` was mass-assignable.** The handler merged the entire request body into the database row, so any account with `servers.edit` could rewrite `installPath` — the path the panel hands to a shell script when starting a server — or reassign `userId` to take ownership of someone else's server. The endpoint now accepts an explicit list of editable fields and rejects anything else with a `400`.
+
+### 🧪 Quality
+
+- **154 tests** (21 new) and **67 security checks** (4 new). The new tests cover the rules directly: reverting either the clone fix or the auto-restart fix turns the suite red.
+- Every remaining **shellcheck** warning in the shipped scripts is fixed. Notably `install.sh` captured an npm exit code that — because of a preceding `|| true` — was always `0`, so the error handling written around it could never have fired.
+
+---
+
 ## [1.12.0] — 2026-08-22
 
 ### 🔔 Discord Settings Section
@@ -68,6 +140,14 @@ All notable changes to GameServer Manager are documented here.
 
 ### 🔒 Verification
 - Security suite grows to **57 checks**, pinning the API key verification path.
+
+---
+
+## [1.8.1] — 2026-08-22
+
+### 🐛 Fixes
+- **Uploading a folder kept its structure.** Drag-and-drop upload flattened every nested directory into a single level, so dropping a modpack scattered its contents. Folder trees are now walked and recreated on the server, and picking a folder is supported alongside dropping one.
+- **Typing in game settings no longer loses the cursor.** Each keystroke in a server's configuration fields rebuilt the form and pushed focus back to the start of the input, making the fields effectively unusable for anything longer than a word.
 
 ---
 

@@ -908,7 +908,6 @@ log "Installing npm packages (this may take a minute)..."
 # NOTE: "|| true" prevents set -e from killing the script so our error
 # handling below actually runs.
 su - "$GSM_USER" -c "cd $INSTALL_DIR && npm ci" > /tmp/gsm-npm-install.log 2>&1 || true
-NPM_EXIT=${PIPESTATUS[0]:-$?}
 
 # Check if it actually worked by looking for node_modules
 if ! su - "$GSM_USER" -c "test -d $INSTALL_DIR/node_modules/next" 2>/dev/null; then
@@ -990,7 +989,7 @@ TEMP_PID=$(cat /tmp/gsm-temp-pid 2>/dev/null || echo "")
 # Wait for server to be ready (up to 60 seconds)
 SERVER_READY="false"
 sleep 3  # give Next.js a moment to fully start
-for i in $(seq 1 60); do
+for _ in $(seq 1 60); do
   if curl -sf "http://127.0.0.1:$PANEL_PORT/api/health" > /dev/null 2>&1; then
     SERVER_READY="true"
     break
@@ -1480,13 +1479,6 @@ PANEL_LOCAL_OK="false"
 if curl -sf --max-time 5 "http://localhost:$PANEL_PORT/api/health" > /dev/null 2>&1 \
    || curl -sf --max-time 5 "http://127.0.0.1:$PANEL_PORT/api/health" > /dev/null 2>&1; then
   PANEL_LOCAL_OK="true"
-fi
-
-# Detect the container/server's LAN IP for the summary
-if [[ -n "${LAN_IP:-}" ]]; then
-  SERVER_LAN_IP="$LAN_IP"
-else
-  SERVER_LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "unknown")
 fi
 
 echo ""

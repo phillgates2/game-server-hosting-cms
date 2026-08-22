@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq, desc, sql } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
+import { publicNode } from "@/lib/server-lifecycle";
 
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
@@ -120,7 +121,8 @@ export async function POST(req: NextRequest) {
       })
       .returning();
 
-    return NextResponse.json({ node }, { status: 201 });
+    // Echoing the row back would return the SSH credentials just submitted.
+    return NextResponse.json({ node: publicNode(node) }, { status: 201 });
   } catch (e: unknown) {
     return apiError(e, "Unknown error", 500);
   }

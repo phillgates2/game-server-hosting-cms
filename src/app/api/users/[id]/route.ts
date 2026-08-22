@@ -5,6 +5,7 @@ import { getCurrentUser, hashPassword } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq, sql } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
+import { publicUser } from "@/lib/server-lifecycle";
 
 // GET /api/users/[id] — Admin: get user detail
 export async function GET(
@@ -107,7 +108,9 @@ export async function PATCH(
     }
 
     const [updated] = await db.update(users).set(updateData).where(eq(users.id, Number(id))).returning();
-    return NextResponse.json({ user: updated });
+    // .returning() yields every column, including passwordHash and
+    // twoFactorSecret; never hand those to a browser.
+    return NextResponse.json({ user: updated ? publicUser(updated) : updated });
   } catch (e: unknown) {
     return apiError(e, "Unknown", 500);
   }

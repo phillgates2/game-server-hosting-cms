@@ -5,10 +5,11 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { sendDiscordWebhook, resolveWebhookUrl } from "@/lib/discord";
 import { allowServerPorts, denyServerPorts, updateServerPorts } from "@/lib/firewall";
-import { eq } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import { rm } from "node:fs/promises";
 import { resolve, relative } from "node:path";
 import { apiError } from "@/lib/api-error";
+import { pickServerPatch, validatePorts } from "@/lib/server-lifecycle";
 
 function isProcessAlive(pid: number): boolean {
   try {
@@ -126,17 +127,76 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .where(eq(gameServers.id, Number(id)))
       .limit(1);
 
+    // Only client-writable columns. Spreading the raw body here let a caller
+    // with servers.edit rewrite installPath (which the process route hands to
+    // a shell script) or userId (which reassigns ownership).
+    const { updates, rejected } = pickServerPatch(body);
+    if (rejected.length) {
+      return NextResponse.json(
+        { error: `Unknown or read-only field(s): ${rejected.join(", ")}` },
+        { status: 400 }
+      );
+    }
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: "No updatable fields provided" }, { status: 400 });
+    }
+
+    // The allowlist controls which fields may be written, not what they may
+    // contain: a port still has to be a real port. Only validate when one of
+    // them is actually being changed.
+    if (updates.port !== undefined || updates.queryPort !== undefined || updates.rconPort !== undefined) {
+      const [existing] = await db
+        .select({
+          nodeId: gameServers.nodeId,
+          port: gameServers.port,
+          queryPort: gameServers.queryPort,
+          rconPort: gameServers.rconPort,
+        })
+        .from(gameServers)
+        .where(eq(gameServers.id, Number(id)))
+        .limit(1);
+      if (!existing) {
+        return NextResponse.json({ error: "Server not found" }, { status: 404 });
+      }
+
+      // Other servers on the same node, excluding this one.
+      const siblings = existing.nodeId
+        ? await db
+            .select({ port: gameServers.port, queryPort: gameServers.queryPort, rconPort: gameServers.rconPort })
+            .from(gameServers)
+            .where(and(eq(gameServers.nodeId, existing.nodeId), ne(gameServers.id, Number(id))))
+        : [];
+      const takenPorts = siblings.flatMap((s) =>
+        [s.port, s.queryPort, s.rconPort].filter((n): n is number => typeof n === "number")
+      );
+
+      const portCheck = validatePorts(
+        {
+          port: updates.port ?? existing.port,
+          queryPort: updates.queryPort ?? existing.queryPort,
+          rconPort: updates.rconPort ?? existing.rconPort,
+        },
+        takenPorts
+      );
+      if (portCheck.error !== null || portCheck.ports === null) {
+        return NextResponse.json({ error: portCheck.error }, { status: 400 });
+      }
+      updates.port = portCheck.ports.port;
+      updates.queryPort = portCheck.ports.queryPort;
+      updates.rconPort = portCheck.ports.rconPort;
+    }
+
     const [updated] = await db
       .update(gameServers)
-      .set({ ...body, updatedAt: new Date() })
+      .set({ ...updates, updatedAt: new Date() })
       .where(eq(gameServers.id, Number(id)))
       .returning();
 
     // Update firewall rules if any port changed
     if (current) {
-      const portChanged = (body.port !== undefined && Number(body.port) !== current.port)
-        || (body.queryPort !== undefined && Number(body.queryPort) !== current.queryPort)
-        || (body.rconPort !== undefined && Number(body.rconPort) !== current.rconPort);
+      const portChanged = (updates.port !== undefined && Number(updates.port) !== current.port)
+        || (updates.queryPort !== undefined && Number(updates.queryPort) !== current.queryPort)
+        || (updates.rconPort !== undefined && Number(updates.rconPort) !== current.rconPort);
 
       if (portChanged) {
         updateServerPorts(
@@ -149,11 +209,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
 
     const updateHook = resolveWebhookUrl(current?.discordWebhook);
-    if (updateHook && body.status && body.status !== current.status) {
+    if (updateHook && updates.status && updates.status !== current.status) {
       let event: "server_started" | "server_stopped" | "server_restarted" | null = null;
-      if (body.status === "running") event = "server_started";
-      else if (body.status === "stopped") event = "server_stopped";
-      else if (body.status === "restarting") event = "server_restarted";
+      if (updates.status === "running") event = "server_started";
+      else if (updates.status === "stopped") event = "server_stopped";
+      else if (updates.status === "restarting") event = "server_restarted";
 
       if (event) {
         await sendDiscordWebhook(updateHook, {
@@ -163,7 +223,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           ipv6: current.ipv6,
           port: current.port,
           event,
-          message: `**${current.name}** status changed to ${body.status}`,
+          message: `**${current.name}** status changed to ${updates.status}`,
         }).catch(() => {});
       }
     }

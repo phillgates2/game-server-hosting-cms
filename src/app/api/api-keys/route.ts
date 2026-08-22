@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { apiKeys } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, ALL_PERMISSIONS } from "@/lib/permissions";
 import { and, eq } from "drizzle-orm";
 import { randomBytes, createHash } from "crypto";
 import { apiError } from "@/lib/api-error";
 import { hashApiKey } from "@/lib/api-key-auth";
+import { validateKeyScope } from "@/lib/server-lifecycle";
 
 // Re-exported from the shared module so the generator and the verifier can
 // never drift apart.
@@ -52,6 +53,13 @@ export async function POST(req: NextRequest) {
     const { name, permissions, expiresInDays } = await req.json();
     if (!name) return NextResponse.json({ error: "Name required" }, { status: 400 });
 
+    // A malformed scope would be stored and then deny every request, which
+    // presents as a mysteriously broken key rather than a rejected one.
+    const scopeCheck = validateKeyScope(permissions, ALL_PERMISSIONS);
+    if (scopeCheck.error !== null) {
+      return NextResponse.json({ error: scopeCheck.error }, { status: 400 });
+    }
+
     // Generate a secure random key
     const rawKey = `gsm_${randomBytes(32).toString("hex")}`;
     const prefix = rawKey.slice(0, 11);
@@ -63,7 +71,7 @@ export async function POST(req: NextRequest) {
       name,
       keyHash: keyH,
       keyPrefix: prefix,
-      permissions: permissions || null,
+      permissions: scopeCheck.scope,
       expiresAt,
     }).returning();
 
