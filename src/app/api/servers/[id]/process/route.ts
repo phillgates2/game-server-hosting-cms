@@ -33,6 +33,10 @@ export async function POST(
         status: gameServers.status,
         pid: gameServers.pid,
         discordWebhook: gameServers.discordWebhook,
+        discordNotifyStart: gameServers.discordNotifyStart,
+        discordNotifyStop: gameServers.discordNotifyStop,
+        discordNotifyRestart: gameServers.discordNotifyRestart,
+        discordNotifyCrash: gameServers.discordNotifyCrash,
         gameName: gameDefinitions.name,
         gameSlug: gameDefinitions.slug,
         nodeIsLocal: nodes.isLocal,
@@ -73,14 +77,43 @@ export async function POST(
     if (action === "status") {
       const { isProcessAlive } = await import("@/lib/process-control");
       const alive = server.pid ? isProcessAlive(server.pid) : false;
+
+      // A server the panel believed was running but whose process is gone did
+      // not stop cleanly - nobody asked it to. That is a crash, and it is the
+      // event an operator most wants to hear about. It previously recorded a
+      // plain "stopped" and sent no notification at all.
+      const crashed = !alive && server.status === "running";
+
       if (alive !== (server.status === "running")) {
         await db.update(gameServers).set({
-          status: alive ? "running" : "stopped",
+          status: crashed ? "crashed" : alive ? "running" : "stopped",
           pid: alive ? server.pid : null,
+          lastStopped: alive ? undefined : new Date(),
           updatedAt: new Date(),
         }).where(eq(gameServers.id, server.id));
       }
-      return NextResponse.json({ alive, pid: server.pid, status: alive ? "running" : "stopped" });
+
+      // The per-event toggles were stored and cloned but never consulted, so
+      // switching one off had no effect at all.
+      if (crashed && server.discordNotifyCrash !== false) {
+        const { resolveWebhookUrl, notifyServerCrashed } = await import("@/lib/discord");
+        const hook = resolveWebhookUrl(server.discordWebhook);
+        if (hook) {
+          // Never let a webhook failure change the response the poller sees.
+          await notifyServerCrashed(
+            hook,
+            server.name,
+            server.gameName || "Unknown",
+            server.port
+          ).catch(() => {});
+        }
+      }
+
+      return NextResponse.json({
+        alive,
+        pid: server.pid,
+        status: crashed ? "crashed" : alive ? "running" : "stopped",
+      });
     }
 
     // ─── STOP ───
@@ -99,9 +132,12 @@ export async function POST(
         updatedAt: new Date(),
       }).where(eq(gameServers.id, server.id));
 
-      if (server.discordWebhook) {
+      const stopHook = server.discordNotifyStop === false
+        ? null
+        : await import("@/lib/discord").then((m) => m.resolveWebhookUrl(server.discordWebhook));
+      if (stopHook) {
         const { sendDiscordWebhook } = await import("@/lib/discord");
-        await sendDiscordWebhook(server.discordWebhook, {
+        await sendDiscordWebhook(stopHook, {
           serverName: server.name, gameName: server.gameName || "Unknown",
           ipv4: server.ipv4, ipv6: server.ipv6, port: server.port,
           event: "server_stopped", message: `**${server.name}** has been stopped.`,
@@ -132,9 +168,15 @@ export async function POST(
         updatedAt: new Date(),
       }).where(eq(gameServers.id, server.id));
 
-      if (server.discordWebhook && alive) {
+      const wantsNotify = action === "restart"
+        ? server.discordNotifyRestart !== false
+        : server.discordNotifyStart !== false;
+      const startHook = alive && wantsNotify
+        ? await import("@/lib/discord").then((m) => m.resolveWebhookUrl(server.discordWebhook))
+        : null;
+      if (startHook) {
         const { sendDiscordWebhook } = await import("@/lib/discord");
-        await sendDiscordWebhook(server.discordWebhook, {
+        await sendDiscordWebhook(startHook, {
           serverName: server.name, gameName: server.gameName || "Unknown",
           ipv4: server.ipv4, ipv6: server.ipv6, port: server.port,
           event: action === "restart" ? "server_restarted" : "server_started",

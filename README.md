@@ -281,7 +281,11 @@ Only running non-Steam games? Skip it entirely with `--no-steamcmd`.
 | `SMTP_USER` | optional | SMTP username |
 | `SMTP_PASS` | optional | SMTP password |
 | `SMTP_FROM` | optional | From address |
-| `DISCORD_WEBHOOK_URL` | optional | Default webhook for server notifications |
+| `DISCORD_WEBHOOK_URL` | optional | Panel-wide fallback webhook, used for any server without its own. Notifies on start, stop, restart, **crash**, update and delete |
+| `DISCORD_BOT_TOKEN` | optional | Bot token, required only for automatic per-server channels *(webhooks cannot create channels)* |
+| `DISCORD_GUILD_ID` | optional | Discord server ID the bot creates channels in |
+
+All three are also configurable from **Site Editor → Discord**, which takes precedence over the environment.
 | `METRICS_RETENTION_DAYS` | optional | Days of node/server metric samples to keep *(default `30`, `0` disables pruning)* |
 | `AUDIT_RETENTION_DAYS` | optional | Days of audit history to keep *(default `365`, `0` disables pruning)* |
 
@@ -566,12 +570,12 @@ One command chains all four checks, exiting non-zero on the first failure — dr
 
 | Script | Checks |
 |:--|:--|
-| `npm test` | 81 unit tests over the config renderer, path guard, auth, pagination and API keys |
+| `npm test` | 133 unit tests over the config renderer, path guard, auth, pagination and API keys |
 | `npm run typecheck` | `tsc --noEmit` across the project |
 | `npm run lint` | ESLint, including React hooks rules |
 | `npm run verify:templates` | All 1,551 template options — types, enums, defaults, and that every declared variable is actually consumed |
 | `npm run verify:installers` | Renders every game's install script, runs `bash -n` + shellcheck, then **executes** it in a sandbox with SteamCMD/curl/apt mocked, and asserts the artifacts the panel needs were produced |
-| `npm run verify:security` | 57 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, and a sweep for leaked exception messages |
+| `npm run verify:security` | 63 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, and a sweep for leaked exception messages |
 
 All of these run automatically in CI on every push and pull request, along
 with a production build and a high-severity dependency audit.

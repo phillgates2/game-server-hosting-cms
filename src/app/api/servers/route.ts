@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
     }
 
     const [game] = await db
-      .select({ slug: gameDefinitions.slug })
+      .select({ slug: gameDefinitions.slug, name: gameDefinitions.name, iconEmoji: gameDefinitions.iconEmoji })
       .from(gameDefinitions)
       .where(eq(gameDefinitions.id, Number(gameId)))
       .limit(1);
@@ -142,7 +142,58 @@ export async function POST(req: NextRequest) {
       rconPort: serverRconPort,
     }).catch((e) => console.warn("[firewall] Failed to open ports:", e));
 
-    return NextResponse.json({ server }, { status: 201 });
+    // ── Provision a Discord channel for this server ──────────────────────────
+    // Only when a bot is configured and auto-channel is on, and only when the
+    // server does not already carry its own webhook. Failure is reported to the
+    // caller but never fails the creation: the server exists and is usable.
+    let discord: { channel?: string; error?: string } | undefined;
+    if (!discordWebhook) {
+      try {
+        const { getDiscordSettings } = await import("@/lib/discord-settings");
+        const cfg = await getDiscordSettings();
+
+        if (cfg.autoChannel && cfg.botToken && cfg.guildId) {
+          const { provisionServerChannel } = await import("@/lib/discord");
+          const result = await provisionServerChannel(
+            { token: cfg.botToken, guildId: cfg.guildId, categoryId: cfg.categoryId || null },
+            name,
+            { prefix: cfg.channelPrefix }
+          );
+
+          if (result.ok && result.webhookUrl) {
+            // Store the generated webhook so every later notification uses the
+            // ordinary webhook path and costs no further bot API calls.
+            await db
+              .update(gameServers)
+              .set({ discordWebhook: result.webhookUrl, discordChannelId: result.channelId })
+              .where(eq(gameServers.id, server.id));
+            server.discordWebhook = result.webhookUrl;
+            server.discordChannelId = result.channelId ?? null;
+            discord = { channel: result.channelName };
+
+            const { notifyServerCreated } = await import("@/lib/discord");
+            await notifyServerCreated(
+              result.webhookUrl,
+              name,
+              game?.name || "Unknown",
+              game?.iconEmoji || "🎮",
+              ipv4 || null,
+              ipv6 || null,
+              serverPort
+            ).catch(() => {});
+          } else {
+            discord = { error: result.error };
+            console.warn(`[discord] channel provisioning failed for "${name}": ${result.error}`);
+          }
+        }
+      } catch (e: unknown) {
+        // Never let Discord break server creation.
+        discord = { error: e instanceof Error ? e.message : "Discord provisioning failed" };
+        console.warn("[discord] provisioning threw:", discord.error);
+      }
+    }
+
+    return NextResponse.json({ server, discord }, { status: 201 });
   } catch (e: unknown) {
     return apiError(e, "Unknown error", 500);
   }

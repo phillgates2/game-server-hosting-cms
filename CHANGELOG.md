@@ -4,6 +4,42 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.12.0] — 2026-08-22
+
+### 🔔 Discord Settings Section
+- **New Discord section in the Site Editor** covering the panel-wide webhook and automatic per-server channels, with a *Send Test Message* button and live URL validation.
+- The panel webhook is now editable from the UI instead of only via `DISCORD_WEBHOOK_URL`, and the database value takes precedence over the environment.
+
+### 📺 A Channel Per Server
+- **Creating a game server can now create its own Discord channel.** The panel makes the channel, adds a webhook inside it, and stores that webhook on the server — so every later notification uses the ordinary webhook path and costs no further bot API calls. Deleting the server removes the channel.
+- **This needs a bot, not just a webhook.** A webhook URL can only post into one channel that already exists; creating a channel is `POST /guilds/{id}/channels`, which requires a Bot token with *Manage Channels*. The settings UI states this plainly and walks through the Developer Portal steps, rather than letting someone paste a webhook and wonder why no channels appear.
+- Channels are optionally nested under a **category**, and named with an optional **prefix** — `"My Server"` with prefix `gs-` becomes `#gs-my-server`. Names are normalised the way Discord would anyway: accents folded, punctuation stripped, truncated to 100 characters.
+- **Only channels the panel created are deleted**, tracked by a new `discord_channel_id` column — a channel made by hand is never touched.
+- Provisioning **can never fail server creation**: errors are logged and returned alongside the created server, which remains fully usable.
+
+### 🔕 Per-Event Toggles Now Work
+- **`discordNotifyStart` / `Stop` / `Restart` / `Crash` were dead columns.** They were stored on the server row and copied when cloning, but no code ever read them — switching a notification off had no effect whatsoever. Each is now checked before its notification is sent.
+
+### 🔒 Security
+- A bot token grants control of a Discord guild, so it is handled as a credential: admin-only endpoint, **never returned to the browser** (the client only learns whether one is set), and deliberately excluded from the public `/api/site-settings` allowlist. Three regression checks pin this.
+- **133 tests** (13 new) and **63 security checks**.
+
+---
+
+## [1.11.0] — 2026-08-22
+
+### 🔔 Discord Notifications
+- **Crashes were never announced.** When a server died on its own, the status poller noticed the process was gone, quietly recorded it as `stopped` and sent nothing — even though `notifyServerCrashed()` was written and exported for exactly this. A crash is the one event worth pushing to an operator. The panel now distinguishes a process that vanished while it was supposed to be running (a **crash**) from a clean stop, records the right status, and fires the notification.
+- **`DISCORD_WEBHOOK_URL` did nothing.** Both `.env.example` and the README documented it as the panel-wide default webhook, but no code ever read it — anyone relying on it got silence. Added `resolveWebhookUrl()`, which prefers the per-server hook and falls back to the global one, including when the per-server value is malformed. Every call site now uses it.
+- **Webhook URL validation was wrong in both directions** — a bare `startsWith()` check rejected the legacy `discordapp.com` hostname that Discord still hands out, while happily accepting a URL with no id or token. Now an anchored pattern covering `discord.com`, `discordapp.com` and the ptb/canary subdomains. Since the URL is operator-supplied and the server POSTs to it, this is a small SSRF surface too; the tests cover the `discord.com.evil.com` suffix attack.
+- **Every message carried two broken images** — the footer icon referenced an invented emoji id and the avatar a third-party imgur upload. Both removed.
+- **Added a 10-second timeout** so a stalled Discord cannot hold a panel request open, and **failures are now logged** with the `retry-after` value on a 429. They were previously swallowed by `.catch(() => {})` and impossible to diagnose.
+
+### 🧪 Verification
+- 23 new tests (**120 total**) and 3 new security checks (**60 total**), verified against a local HTTP stub standing in for Discord: embed structure, rate-limit reporting, and the timeout.
+
+---
+
 ## [1.10.0] — 2026-08-22
 
 ### 🌐 Port 80 Serves the Panel, Not the Distro Placeholder

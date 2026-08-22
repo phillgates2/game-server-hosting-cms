@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import DiscordSettings from "@/components/DiscordSettings";
 import PublicChatWidget from "@/components/PublicChatWidget";
 
 /* ── Types ──────────────────────────────────────────────────────────────────── */
@@ -387,6 +388,17 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                 {editorMsg && <span className="text-sm">{editorMsg}</span>}
               </div>
             </form>
+
+            {/* Discord lives outside the settings form: the bot token is a
+                credential and goes through its own admin-only endpoint rather
+                than /api/site-settings, whose GET is public. */}
+            <div className="pt-2">
+              <h3 className="text-lg font-semibold mb-1">🔔 Discord</h3>
+              <p className="text-xs text-text-muted mb-4">
+                Notifications for server start, stop, restart, crash and delete.
+              </p>
+              <DiscordSettings />
+            </div>
           </div>
         )}
 

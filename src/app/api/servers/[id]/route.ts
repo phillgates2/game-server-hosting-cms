@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { gameServers, gameDefinitions, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
-import { sendDiscordWebhook } from "@/lib/discord";
+import { sendDiscordWebhook, resolveWebhookUrl } from "@/lib/discord";
 import { allowServerPorts, denyServerPorts, updateServerPorts } from "@/lib/firewall";
 import { eq } from "drizzle-orm";
 import { rm } from "node:fs/promises";
@@ -148,14 +148,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
-    if (current?.discordWebhook && body.status && body.status !== current.status) {
+    const updateHook = resolveWebhookUrl(current?.discordWebhook);
+    if (updateHook && body.status && body.status !== current.status) {
       let event: "server_started" | "server_stopped" | "server_restarted" | null = null;
       if (body.status === "running") event = "server_started";
       else if (body.status === "stopped") event = "server_stopped";
       else if (body.status === "restarting") event = "server_restarted";
 
       if (event) {
-        await sendDiscordWebhook(current.discordWebhook, {
+        await sendDiscordWebhook(updateHook, {
           serverName: current.name,
           gameName: current.gameName || "Unknown",
           ipv4: current.ipv4,
@@ -194,6 +195,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         pid: gameServers.pid,
         installPath: gameServers.installPath,
         discordWebhook: gameServers.discordWebhook,
+        discordChannelId: gameServers.discordChannelId,
         port: gameServers.port,
         queryPort: gameServers.queryPort,
         rconPort: gameServers.rconPort,
@@ -269,14 +271,31 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       rconPort: server.rconPort,
     }).catch((e) => console.warn("[firewall] Failed to remove ports:", e));
 
-    if (server.discordWebhook) {
-      await sendDiscordWebhook(server.discordWebhook, {
+    const deleteHook = resolveWebhookUrl(server.discordWebhook);
+    if (deleteHook) {
+      await sendDiscordWebhook(deleteHook, {
         serverName: server.name,
         gameName: server.gameName || "Unknown",
         port: server.port,
         event: "server_deleted",
         message: `**${server.name}** has been deleted.${filesDeleted ? " Server files were removed." : ""}`,
       }).catch(() => {});
+    }
+
+    // Tidy up the Discord channel the panel created for this server. Only ones
+    // we provisioned are removed - a channel the operator made by hand has no
+    // stored id and is left alone.
+    if (server.discordChannelId) {
+      try {
+        const { getBotConfig } = await import("@/lib/discord-settings");
+        const cfg = await getBotConfig();
+        if (cfg) {
+          const { deleteChannel } = await import("@/lib/discord");
+          await deleteChannel(cfg, server.discordChannelId);
+        }
+      } catch (e: unknown) {
+        console.warn("[discord] channel cleanup failed:", e instanceof Error ? e.message : e);
+      }
     }
 
     return NextResponse.json({ ok: true, filesDeleted, filesDeleteSkippedReason });

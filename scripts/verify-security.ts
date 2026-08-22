@@ -216,6 +216,25 @@ console.log("\nH2/H3 auth enforcement wiring");
   const authSrc = read("../src/lib/auth.ts");
   check("getCurrentUser accepts API keys", /authenticateApiKey/.test(authSrc));
 
+  // The webhook URL is operator-supplied and the server POSTs to it, so a lax
+  // check is a small SSRF surface as well as a correctness problem.
+  const discord = read("../src/lib/discord.ts");
+  check("webhook URLs are validated against a Discord host allowlist", /WEBHOOK_URL_RE/.test(discord));
+  check("webhook requests have a timeout", /AbortSignal\.timeout/.test(discord));
+  const processRoute = read("../src/app/api/servers/[id]/process/route.ts");
+  check("a crashed server triggers a Discord notification", /notifyServerCrashed/.test(processRoute));
+
+  // A Discord bot token grants control of the guild, so it must never be
+  // echoed back to a browser or exposed through the public settings endpoint.
+  const discordRoute = read("../src/app/api/settings/discord/route.ts");
+  check("discord settings endpoint is admin only", /panel\.settings/.test(discordRoute));
+  check("bot token is never returned to the client", !/botToken:\s*s\.botToken/.test(discordRoute) && /hasBotToken/.test(discordRoute));
+  const siteSettings = read("../src/app/api/site-settings/route.ts");
+  check(
+    "bot token is not in the public settings allowlist",
+    !/discord_bot_token/.test(siteSettings)
+  );
+
   const backup = read("../src/app/api/servers/[id]/backup/route.ts");
   check("backup no longer spawns a shell", !/spawn\("sh"/.test(backup));
   check("backup passes tar an argument array", /spawn\(file, args/.test(backup));

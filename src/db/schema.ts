@@ -158,6 +158,8 @@ export const gameServers = pgTable("game_servers", {
   discordNotifyStop: boolean("discord_notify_stop").default(true),
   discordNotifyRestart: boolean("discord_notify_restart").default(true),
   discordNotifyCrash: boolean("discord_notify_crash").default(true),
+  /** Channel the panel provisioned for this server, so it can be cleaned up. */
+  discordChannelId: text("discord_channel_id"),
   // Timestamps
   lastStarted: timestamp("last_started"),
   lastStopped: timestamp("last_stopped"),
