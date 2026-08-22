@@ -4,6 +4,17 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.10.0] — 2026-08-22
+
+### 🌐 Port 80 Serves the Panel, Not the Distro Placeholder
+- **On a box that already had Apache or nginx, the panel was invisible.** Port 80 kept serving the stock *"It works!"* / *"Welcome to nginx!"* page from `/var/www/html`, so browsing to the server looked like a failed install even though the panel was running fine on `:3000`.
+- **New `public/setup-webroot.sh`**, offered by the installer and available afterwards as `sudo gsm webroot`. It **reverse-proxies** port 80 to the panel rather than issuing an HTTP redirect: a redirect to `:3000` only works if that port is reachable from the visitor, whereas a proxy keeps everything on port 80 and works through routers, firewalls and networks that only permit 80/443.
+- **Handles Apache, nginx and lighttpd**, including the WebSocket upgrade needed for live logs, RCON and metrics, a 256 MB upload limit for the file manager, and the `X-Forwarded-Proto` header the panel reads to decide whether the session cookie gets the `secure` flag.
+- **Detects Caddy** already proxying to the panel and does nothing, rather than fighting it for port 80.
+- **Safe by default** — everything it touches is backed up to `/var/backups/gsm-webroot/<timestamp>`, `--revert` restores it, and if the web server's own config test fails the change is rolled back instead of leaving a broken server. `--redirect-only` writes a hostname-preserving redirect page into the web root for anyone who would rather not have their web server config edited.
+
+---
+
 ## [1.9.0] — 2026-08-22
 
 ### 🔑 API Keys Were Completely Inert

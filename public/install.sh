@@ -1142,6 +1142,9 @@ case "${1:-}" in
     su - "$GSM_USER" -c "pm2 reload gsm-panel" ;;
   monit|monitor)
     su - "$GSM_USER" -c "pm2 monit" ;;
+  webroot)
+    # Point port 80 (the default /var/www/html site) at the panel.
+    bash /opt/gsm-panel/public/setup-webroot.sh "${@:2}" ;;
   *)
     echo "GameServer Manager — Panel Management"
     echo ""
@@ -1156,6 +1159,7 @@ case "${1:-}" in
     echo "  reload    Graceful reload"
     echo "  update    Update panel to latest version"
     echo "  monit     Live monitoring dashboard"
+    echo "  webroot   Point port 80 / the default web root at the panel"
     echo ""
     echo "Direct PM2 access:  su - gsm -c 'pm2 <command>'"
     ;;
@@ -1280,6 +1284,44 @@ elif [[ -n "$DOMAIN" ]]; then
 else
   log "No domain specified — panel accessible at http://<server-ip>:$PANEL_PORT"
   ok "Web server step complete"
+fi
+
+# ── Default web root takeover ────────────────────────────────────────────────
+# A box that already has Apache or nginx serves the stock "It works!" page from
+# /var/www/html on port 80. After installing, browsing to the server still
+# lands on that placeholder rather than the panel, which reads as a broken
+# install. Offer to point port 80 at the panel instead.
+if [[ "$SETUP_CADDY" != "true" ]]; then
+  WEBSERVER_FOUND=""
+  [[ -d /etc/apache2 ]] && WEBSERVER_FOUND="Apache"
+  command -v nginx &>/dev/null && WEBSERVER_FOUND="${WEBSERVER_FOUND:+$WEBSERVER_FOUND and }nginx"
+
+  if [[ -n "$WEBSERVER_FOUND" ]]; then
+    echo ""
+    log "$WEBSERVER_FOUND is installed and is probably serving the default page on port 80."
+    TAKEOVER="false"
+    if [[ "$NONINTERACTIVE" == "true" ]]; then
+      # Unattended installs take the useful default: the operator asked for a
+      # panel, not the distro placeholder.
+      TAKEOVER="true"
+      log "Non-interactive — pointing port 80 at the panel"
+    else
+      read -rp "  Point port 80 at the panel instead of the default page? [Y/n]: " WR_ANSWER
+      [[ "${WR_ANSWER,,}" != "n" ]] && TAKEOVER="true"
+    fi
+
+    if [[ "$TAKEOVER" == "true" ]]; then
+      if bash "$INSTALL_DIR/public/setup-webroot.sh" --port "$PANEL_PORT" --install-dir "$INSTALL_DIR" -y; then
+        ok "Port 80 now serves the panel"
+      else
+        warn "Could not reconfigure port 80 — the panel is still on :$PANEL_PORT"
+        warn "Retry later:  sudo bash $INSTALL_DIR/public/setup-webroot.sh"
+      fi
+    else
+      log "Left the existing web server alone. To change it later:"
+      log "  sudo bash $INSTALL_DIR/public/setup-webroot.sh"
+    fi
+  fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════

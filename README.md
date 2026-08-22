@@ -401,6 +401,46 @@ POST /api/firewall     # { "action": "allow", "port": 27015, "comment": "My serv
 </details>
 
 <details>
+<summary><b>🌐 Serving the panel on port 80 (default web root)</b></summary>
+
+<br>
+
+If the server already had **Apache** or **nginx** installed, port 80 keeps
+serving the stock *"It works!"* / *"Welcome to nginx!"* page from
+`/var/www/html`, so browsing to the box lands on a placeholder instead of the
+panel.
+
+The installer offers to fix this automatically. To do it later:
+
+```bash
+sudo gsm webroot
+# or
+sudo bash /opt/gsm-panel/public/setup-webroot.sh
+```
+
+It reverse-proxies port 80 to the panel rather than issuing an HTTP redirect —
+a redirect to `:3000` only works if that port is reachable from the visitor,
+whereas a proxy keeps everything on port 80 and works through routers and
+networks that only allow 80/443. WebSocket upgrades (live logs, RCON, metrics)
+and 256 MB uploads are configured too.
+
+| Flag | Description |
+|:--|:--|
+| `--port` | Panel port *(default: read from `.env`, else `3000`)* |
+| `--redirect-only` | Leave the web server config alone; just drop a redirect page into the web root |
+| `--webroot` | Document root to write into *(default `/var/www/html`)* |
+| `--install-dir` | Panel directory *(default `/opt/gsm-panel`)* |
+| `--revert` | Undo — restore the most recent backup |
+| `-y`, `--yes` | Skip the confirmation prompt |
+
+Everything it touches is backed up to `/var/backups/gsm-webroot/<timestamp>`
+first, and if the web server's own config test fails it rolls back rather than
+leaving you with a broken server. If Caddy is already proxying to the panel the
+script detects that and does nothing.
+
+</details>
+
+<details>
 <summary><b>🌐 Caddy reverse proxy</b></summary>
 
 <br>
