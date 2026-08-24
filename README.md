@@ -8,7 +8,7 @@ Deploy, configure, and monitor game servers across multiple machines from one da
 
 <br>
 
-![Next.js](https://img.shields.io/badge/Next.js-16.2-000000?style=for-the-badge&logo=next.js&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-16.3-000000?style=for-the-badge&logo=next.js&logoColor=white)
 ![React](https://img.shields.io/badge/React-19.2-61DAFB?style=for-the-badge&logo=react&logoColor=black)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14+-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind-4.1-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)
@@ -16,11 +16,11 @@ Deploy, configure, and monitor game servers across multiple machines from one da
 
 <br>
 
-<samp>**27** games · **1,551** config options · **65** API routes · **33** security checks</samp>
+<samp>**27** games · **1,551** config options · **67** API routes · **244** tests · **95** security checks</samp>
 
 <br>
 
-[Quick Start](#-quick-start) · [Features](#-features) · [Games](#-supported-games) · [Configuration](#-configuration) · [Operations](#-operations) · [Development](#-development)
+[Quick Start](#-quick-start) · [Features](#-features) · [Games](#-supported-games) · [Configuration](#-configuration) · [Settings](#-panel-settings) · [Operations](#-operations) · [Development](#-development)
 
 </div>
 
@@ -158,6 +158,8 @@ Then visit `http://your-server:3000` to finish setup in the install wizard.
 #### 🎮 Server Control
 - **27 game templates**, 1,551 options
 - **RCON console** in the browser
+- **Auto-restart** crashed servers
+- **Start on boot** after a reboot
 - **File manager** — browse, edit, upload
 - **Scheduler** — cron restarts & backups
 - **Backups** with one-click restore
@@ -167,6 +169,7 @@ Then visit `http://your-server:3000` to finish setup in the install wizard.
 <td width="33%" valign="top">
 
 #### 👥 Community & Admin
+- **Settings panel** — retention, quotas
 - **Forum** with categories and threads
 - **Sandbox chat** — live shoutbox
 - **CMS** — posts, changelogs, pages
@@ -178,9 +181,9 @@ Then visit `http://your-server:3000` to finish setup in the install wizard.
 </tr>
 </table>
 
-**Security & access** — TOTP two-factor auth · granular role-based permissions · API keys for external integrations · login throttling · full audit trail
+**Security & access** — TOTP two-factor auth · granular role-based permissions · **scoped API keys** *(a read-only key really is read-only)* · per-user server quotas · login throttling · full audit trail
 
-**Notifications** — Discord webhooks on start/stop/crash · SMTP email via Nodemailer
+**Notifications** — Discord on start, stop, restart, crash, auto-restart, update and delete · **a channel per server**, created automatically · SMTP email via Nodemailer
 
 **Appearance** — 4 built-in themes plus a custom theme editor · 3 layout densities *(compact, cozy, spacious)*
 
@@ -281,14 +284,14 @@ Only running non-Steam games? Skip it entirely with `--no-steamcmd`.
 | `SMTP_USER` | optional | SMTP username |
 | `SMTP_PASS` | optional | SMTP password |
 | `SMTP_FROM` | optional | From address |
-| `DISCORD_WEBHOOK_URL` | optional | Panel-wide fallback webhook, used for any server without its own. Notifies on start, stop, restart, **crash**, update and delete |
+| `DISCORD_WEBHOOK_URL` | optional | Panel-wide fallback webhook, used for any server without its own. Notifies on start, stop, restart, **crash**, auto-restart, update and delete |
 | `DISCORD_BOT_TOKEN` | optional | Bot token, required only for automatic per-server channels *(webhooks cannot create channels)* |
-| `GSM_DISABLE_AUTOSTART` | optional | Set `true` to stop servers marked *Start on node boot* from launching when the panel starts |
 | `DISCORD_GUILD_ID` | optional | Discord server ID the bot creates channels in |
-
-All three are also configurable from **Site Editor → Discord**, which takes precedence over the environment.
+| `GSM_DISABLE_AUTOSTART` | optional | Set `true` to stop servers marked *Start on node boot* from launching when the panel starts |
 | `METRICS_RETENTION_DAYS` | optional | Days of node/server metric samples to keep *(default `30`, `0` disables pruning)* |
 | `AUDIT_RETENTION_DAYS` | optional | Days of audit history to keep *(default `365`, `0` disables pruning)* |
+
+The three `DISCORD_*` variables and the two retention windows are all configurable from **Settings** in the dashboard, and the database value takes precedence over the environment — so you can change them without editing `.env` or restarting.
 
 Start from `.env.example`, which documents all of the above.
 
@@ -470,6 +473,52 @@ Config lives at `/etc/caddy/Caddyfile`.
 
 ---
 
+## 🎛️ Panel Settings
+
+Two places to configure things, split by who they are for:
+
+| Where | What |
+|:--|:--|
+| **Settings** *(Administration)* | Data retention, default server quota, self-registration, login attempt limit, session length, and everything Discord — webhook, bot, and channel backfill |
+| **Site Editor** *(✏️ on the public site)* | Panel name, hero text, footer, announcements, navigation links, chat widget |
+
+Everything in **Settings** overrides the matching environment variable, so you
+can change it without editing `.env` or restarting the panel.
+
+<details>
+<summary><b>🔔 Giving existing servers a Discord channel</b></summary>
+
+<br>
+
+New servers get a channel automatically once the bot is configured. Servers
+that already existed do not — and a channel someone deletes by hand in Discord
+leaves the panel posting into a webhook that silently returns 404, because
+webhook delivery never throws.
+
+**Settings → Discord Channels** fixes both:
+
+| Button | Does |
+|:--|:--|
+| **Preview changes** | Reports exactly what would happen. Changes nothing. |
+| **Create missing channels** | Creates a channel for every server without one, and re-creates any that were deleted in Discord. |
+
+Three things it deliberately will not do:
+
+- **It never replaces a webhook you entered by hand.** The panel does not own
+  that channel, so overwriting it would silently redirect your notifications.
+- **It never creates a duplicate.** If the check against Discord fails for any
+  reason other than a definite "channel not found" — a bad token, a rate
+  limit, a network blip — that server is skipped rather than given a second
+  channel.
+- **It never runs on its own.** It is a button, not a background job.
+
+Requires a bot token and server ID, configured just above it in the same
+Settings page; a webhook alone cannot create channels.
+
+</details>
+
+---
+
 ## 🛠️ Operations
 
 ### Day-to-day
@@ -493,6 +542,25 @@ sudo bash /opt/gsm-panel/public/update.sh
 ```
 
 The updater runs seven steps: **backup** *(`.env`, configs, database dump, current commit)* → **pull** → **`npm ci`** → **`drizzle-kit push`** → **build** → **prune dev deps** → **restart + health check**. It also backfills a `JWT_SECRET` into `.env` if your install predates that requirement.
+
+> [!IMPORTANT]
+> **One-off migration: duplicate ports.** Older releases allowed two servers on
+> the same node to share a port — the second would fail to bind and show as
+> *crashed* with no explanation. The database now enforces one server per port,
+> per node.
+>
+> If your panel already has a clash, the upgrade repairs it rather than
+> failing: the **oldest** server keeps the port, and the others move to the
+> nearest free port above it. Each change is logged like this, so check the
+> install log and update any port forwarding:
+>
+> ```
+> [install] "Survival SMP" shared port 27015 with another server on the same
+>           node; moved to 27017. Update any port forwarding.
+> ```
+>
+> Servers on *different* nodes using the same port are untouched — that was
+> never a conflict.
 
 | Flag | Description |
 |:--|:--|
@@ -567,19 +635,27 @@ npm run dev
 npm run verify
 ```
 
-One command chains all four checks, exiting non-zero on the first failure — drop it straight into CI:
+One command chains every check, exiting non-zero on the first failure — drop it straight into CI:
 
 | Script | Checks |
 |:--|:--|
-| `npm test` | 223 unit and integration tests over the config renderer, path guard, auth, pagination and API keys |
+| `npm test` | 244 tests over the config renderer, path guard, auth, pagination, API key scopes, server lifecycle rules, and **database integrity against a real PostgreSQL** *(see below)* |
 | `npm run typecheck` | `tsc --noEmit` across the project |
 | `npm run lint` | ESLint, including React hooks rules |
 | `npm run verify:templates` | All 1,551 template options — types, enums, defaults, and that every declared variable is actually consumed |
 | `npm run verify:installers` | Renders every game's install script, runs `bash -n` + shellcheck, then **executes** it in a sandbox with SteamCMD/curl/apt mocked, and asserts the artifacts the panel needs were produced |
-| `npm run verify:security` | 88 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, and a sweep for leaked exception messages |
+| `npm run verify:security` | 95 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, and a sweep for leaked exception messages |
 
 All of these run automatically in CI on every push and pull request, along
 with a production build and a high-severity dependency audit.
+
+**Database tests need no database.** `tests/db-integrity.test.ts` runs the
+installer's own `CREATE TABLE` statements — extracted from the route source, so
+they cannot drift from what ships — inside [PGlite](https://pglite.dev), a real
+PostgreSQL compiled to WebAssembly. That catches things no mock can: a foreign
+key that blocks a delete, a table the schema declares but the installer never
+creates, or a quota that two simultaneous requests can both slip past. It is a
+dev dependency and never reaches production.
 
 One extra check is **not** part of `npm run verify`, because it needs the
 public internet and upstream outages are not repo regressions:
@@ -603,15 +679,17 @@ npx next build
 
 ```
 src/
-├── app/api/          65 API routes
-├── components/       panels, forms, and the public site
+├── app/api/              67 API routes
+├── components/           panels, forms, and the public site
 ├── db/
-│   ├── games/        27 game templates — one module each
-│   ├── schema.ts     Drizzle schema
-│   └── seeds.ts      re-export shim
-└── lib/              auth, permissions, config rendering, file ops
-scripts/              verify-templates.ts · verify-security.ts
-public/               install.sh · update.sh · uninstall.sh
+│   ├── games/            27 game templates — one module each
+│   ├── schema.ts         Drizzle schema
+│   └── seeds.ts          re-export shim
+├── lib/                  auth, permissions, config rendering, file ops
+└── instrumentation.ts    boot hook — starts servers marked "start on boot"
+tests/                    unit tests + PostgreSQL integrity tests
+scripts/                  verify-templates · verify-installers · verify-security
+public/                   install.sh · update.sh · uninstall.sh · setup-webroot.sh
 ```
 
 Adding a game? Drop a module into `src/db/games/`, export it from `index.ts`, and run `npm run verify:templates` — it will tell you about unused or undeclared variables. See `src/db/games/README.md`.

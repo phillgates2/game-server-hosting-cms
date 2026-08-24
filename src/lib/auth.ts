@@ -46,7 +46,7 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 }
 
 export function createToken(payload: { userId: number; role: string }): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: `${sessionDays}d` });
 }
 
 export function verifyToken(token: string): { userId: number; role: string } | null {
@@ -112,7 +112,7 @@ export function getCookieOptions(headers?: Headers) {
     secure: isHttps,
     sameSite: "lax" as const,
     path: "/",
-    maxAge: 60 * 60 * 24 * 7, // 7 days
+    maxAge: 60 * 60 * 24 * sessionDays,
   };
 }
 
@@ -123,7 +123,40 @@ export function getCookieOptions(headers?: Headers) {
 // panel targets; a multi-instance setup should move it to the database.
 
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
-const MAX_LOGIN_ATTEMPTS = 10;
+const DEFAULT_MAX_LOGIN_ATTEMPTS = 10;
+
+/**
+ * Attempt limit, overridable from the Settings panel.
+ *
+ * Kept as a module-level number rather than a settings lookup because the
+ * throttle is consulted on every login, including the failing ones an attacker
+ * generates. `applyAuthSettings` refreshes it when an admin saves.
+ */
+let maxLoginAttempts = DEFAULT_MAX_LOGIN_ATTEMPTS;
+
+/** Session lifetime. Kept in days so the JWT and the cookie cannot diverge. */
+const DEFAULT_SESSION_DAYS = 7;
+let sessionDays = DEFAULT_SESSION_DAYS;
+
+/**
+ * Push operator-configured auth settings into this module.
+ *
+ * Called after a save, and lazily on first use, so a change takes effect
+ * without restarting the process.
+ */
+export function applyAuthSettings(next: { loginThrottleAttempts?: number; sessionDays?: number }) {
+  if (Number.isInteger(next.loginThrottleAttempts) && next.loginThrottleAttempts! > 0) {
+    maxLoginAttempts = next.loginThrottleAttempts!;
+  }
+  if (Number.isInteger(next.sessionDays) && next.sessionDays! > 0) {
+    sessionDays = next.sessionDays!;
+  }
+}
+
+/** Current session length in days, for the cookie and the token. */
+export function getSessionDays(): number {
+  return sessionDays;
+}
 
 const loginAttempts = new Map<string, { count: number; firstAttempt: number }>();
 
@@ -139,7 +172,7 @@ export function loginRetryAfter(key: string): number {
   pruneLoginAttempts(now);
 
   const entry = loginAttempts.get(key);
-  if (!entry || entry.count < MAX_LOGIN_ATTEMPTS) return 0;
+  if (!entry || entry.count < maxLoginAttempts) return 0;
 
   const elapsed = now - entry.firstAttempt;
   if (elapsed > LOGIN_WINDOW_MS) {

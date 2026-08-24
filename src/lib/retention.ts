@@ -1,6 +1,6 @@
 import { db } from "@/db";
-import { auditLog, nodeMetrics, serverMetrics } from "@/db/schema";
-import { lt, sql } from "drizzle-orm";
+import { auditLog, nodeMetrics, serverMetrics, settings } from "@/db/schema";
+import { lt, sql, inArray } from "drizzle-orm";
 
 /**
  * Retention for the append-only tables.
@@ -41,6 +41,52 @@ export const METRICS_RETENTION_DAYS = envDays("METRICS_RETENTION_DAYS", 30);
 export const AUDIT_RETENTION_DAYS = envDays("AUDIT_RETENTION_DAYS", 365);
 
 /**
+ * Effective windows, with the database taking precedence over the environment.
+ *
+ * The exported constants above are the base layer, read once at module load.
+ * The Settings panel writes overrides into the `settings` table so an operator
+ * can change retention without editing .env and restarting, matching how the
+ * Discord configuration already behaves.
+ *
+ * Cached briefly because pruning runs on the heartbeat path and must not add a
+ * settings query to every write.
+ */
+let windowCache: { metrics: number; audit: number; at: number } | null = null;
+const WINDOW_TTL_MS = 30_000;
+
+export async function retentionWindows(): Promise<{ metrics: number; audit: number }> {
+  const now = Date.now();
+  if (windowCache && now - windowCache.at < WINDOW_TTL_MS) {
+    return { metrics: windowCache.metrics, audit: windowCache.audit };
+  }
+
+  let metrics = METRICS_RETENTION_DAYS;
+  let audit = AUDIT_RETENTION_DAYS;
+  try {
+    const rows = await db
+      .select({ key: settings.key, value: settings.value })
+      .from(settings)
+      .where(inArray(settings.key, ["metrics_retention_days", "audit_retention_days"]));
+    for (const row of rows) {
+      const n = Number.parseInt(String(row.value ?? ""), 10);
+      if (!Number.isFinite(n) || n < 0) continue;
+      if (row.key === "metrics_retention_days") metrics = n;
+      if (row.key === "audit_retention_days") audit = n;
+    }
+  } catch {
+    // No settings table yet (fresh install) — fall back to the environment.
+  }
+
+  windowCache = { metrics, audit, at: now };
+  return { metrics, audit };
+}
+
+/** Drop the cache so a save in the Settings panel takes effect immediately. */
+export function invalidateRetentionCache() {
+  windowCache = null;
+}
+
+/**
  * Fraction of eligible writes that trigger a prune. Running it on every
  * heartbeat would add a DELETE to the hot path for no benefit; at 2% a
  * five-node panel still prunes many times an hour.
@@ -60,8 +106,9 @@ function cutoff(days: number): Date {
  * Returns the number of rows removed (0 when pruning is disabled).
  */
 export async function pruneMetrics(): Promise<number> {
-  if (METRICS_RETENTION_DAYS <= 0) return 0;
-  const before = cutoff(METRICS_RETENTION_DAYS);
+  const { metrics: windowDays } = await retentionWindows();
+  if (windowDays <= 0) return 0;
+  const before = cutoff(windowDays);
 
   const [nodeRes, serverRes] = await Promise.all([
     db.delete(nodeMetrics).where(lt(nodeMetrics.recordedAt, before)),
@@ -76,8 +123,9 @@ export async function pruneMetrics(): Promise<number> {
 
 /** Delete audit entries older than the retention window. */
 export async function pruneAuditLog(): Promise<number> {
-  if (AUDIT_RETENTION_DAYS <= 0) return 0;
-  const res = await db.delete(auditLog).where(lt(auditLog.createdAt, cutoff(AUDIT_RETENTION_DAYS)));
+  const { audit: windowDays } = await retentionWindows();
+  if (windowDays <= 0) return 0;
+  const res = await db.delete(auditLog).where(lt(auditLog.createdAt, cutoff(windowDays)));
   return (res as unknown as { rowCount?: number }).rowCount ?? 0;
 }
 
@@ -88,7 +136,9 @@ export async function pruneAuditLog(): Promise<number> {
  * not a reason to fail a heartbeat.
  */
 export function maybePruneInBackground(): void {
-  if (METRICS_RETENTION_DAYS <= 0) return;
+  // The window is read inside pruneMetrics(), which returns 0 when pruning is
+  // disabled -- so the cheap dice roll happens first and the settings lookup
+  // only runs on the ~2% of heartbeats that would actually prune.
   if (Math.random() > PRUNE_PROBABILITY) return;
 
   const now = Date.now();
@@ -97,7 +147,7 @@ export function maybePruneInBackground(): void {
 
   void pruneMetrics()
     .then((n) => {
-      if (n > 0) console.log(`[retention] pruned ${n} metric row(s) older than ${METRICS_RETENTION_DAYS}d`);
+      if (n > 0) console.log(`[retention] pruned ${n} metric row(s)`);
     })
     .catch((e) => {
       console.error("[retention] metric prune failed:", e instanceof Error ? e.message : e);
@@ -115,11 +165,14 @@ export async function retentionStats(): Promise<{
   const [nm] = await db.select({ n: sql<number>`count(*)::int` }).from(nodeMetrics);
   const [sm] = await db.select({ n: sql<number>`count(*)::int` }).from(serverMetrics);
   const [al] = await db.select({ n: sql<number>`count(*)::int` }).from(auditLog);
+  // Report the *effective* windows, so the UI shows what is actually in force
+  // rather than whatever the environment said at boot.
+  const { metrics, audit } = await retentionWindows();
   return {
     nodeMetrics: nm?.n ?? 0,
     serverMetrics: sm?.n ?? 0,
     auditLog: al?.n ?? 0,
-    metricsRetentionDays: METRICS_RETENTION_DAYS,
-    auditRetentionDays: AUDIT_RETENTION_DAYS,
+    metricsRetentionDays: metrics,
+    auditRetentionDays: audit,
   };
 }

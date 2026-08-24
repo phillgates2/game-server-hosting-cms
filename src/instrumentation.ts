@@ -18,7 +18,9 @@ export async function register() {
   if (process.env.GSM_DISABLE_AUTOSTART === "true") return;
 
   // Deferred so a slow or unreachable database does not delay readiness.
-  const { startBootServers } = await import("./instrumentation-node");
+  const { startBootServers, loadAuthPolicy } = await import("./instrumentation-node");
+  // Auth settings are cheap and needed by the first request.
+  void loadAuthPolicy();
   setTimeout(() => {
     void startBootServers();
   }, 5_000);

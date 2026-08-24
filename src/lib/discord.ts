@@ -448,3 +448,26 @@ export async function deleteChannel(cfg: BotConfig, channelId: string): Promise<
   const res = await discordApi(cfg, `/channels/${encodeURIComponent(channelId)}`, { method: "DELETE" });
   return res.ok ? { ok: true } : { ok: false, error: res.error };
 }
+
+/**
+ * Whether a channel the panel recorded still exists in Discord.
+ *
+ * Someone deleting a channel by hand leaves the panel holding a stale id and
+ * a webhook that silently 404s on every send — webhook delivery deliberately
+ * never throws, so nothing surfaces the breakage. The backfill uses this to
+ * detect and repair that case.
+ *
+ * A 404 is a definite "gone". Any other failure (bad token, rate limit,
+ * network) is reported as `unknown` so the caller can skip the server rather
+ * than destroy a channel that is probably fine.
+ */
+export async function channelExists(
+  cfg: BotConfig,
+  channelId: string
+): Promise<{ exists: boolean; unknown?: boolean; error?: string }> {
+  const res = await discordApi(cfg, `/channels/${encodeURIComponent(channelId)}`);
+  if (res.ok) return { exists: true };
+  // discordApi maps 404 to this message for both guilds and channels.
+  if (/not found/i.test(res.error)) return { exists: false };
+  return { exists: false, unknown: true, error: res.error };
+}

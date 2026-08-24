@@ -382,6 +382,46 @@ console.log("\nH2/H3 auth enforcement wiring");
       installRoute2.indexOf("o.id < g.id") < installRoute2.indexOf("game_servers_node_port_uniq")
   );
 
+  // The Discord form lives in the admin dashboard, not on the public site.
+  // Rendering it from PublicSite would put a bot-token field on a page served
+  // to anonymous visitors, even if the endpoint behind it stayed protected.
+  const publicSite = read("../src/components/PublicSite.tsx");
+  check(
+    "the bot token form is not rendered by the public site",
+    !/<DiscordSettings\s*\/>/.test(publicSite)
+  );
+  check(
+    "the discord form saves through its own admin-only endpoint",
+    /\/api\/settings\/discord/.test(read("../src/components/panels/DiscordSettings.tsx"))
+  );
+
+  // Operational settings must not be readable by an anonymous visitor, and
+  // must not leak into the public site-settings endpoint.
+  const panelSettings = read("../src/app/api/settings/panel/route.ts");
+  check(
+    "panel settings endpoint is admin only",
+    /panel\.settings/.test(panelSettings) && /Unauthorized/.test(panelSettings)
+  );
+  check(
+    "panel settings are filtered through an allowlist",
+    /PANEL_SETTING_KEYS/.test(panelSettings) && /Unknown setting/.test(panelSettings)
+  );
+  // The backfill creates channels and rewrites webhooks on every server.
+  const backfill = read("../src/app/api/settings/discord/backfill/route.ts");
+  check(
+    "discord backfill is admin only",
+    /panel\.settings/.test(backfill)
+  );
+  check(
+    "discord backfill never replaces a hand-entered webhook",
+    /planForServer\(/.test(backfill) &&
+      /did not create/.test(read("../src/lib/discord-backfill.ts"))
+  );
+  check(
+    "discord backfill supports a dry run",
+    /dryRun/.test(backfill)
+  );
+
   const siteSettings = read("../src/app/api/site-settings/route.ts");
   check(
     "bot token is not in the public settings allowlist",

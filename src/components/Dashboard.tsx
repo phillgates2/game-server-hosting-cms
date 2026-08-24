@@ -19,6 +19,7 @@ import AuditPanel from "./panels/AuditPanel";
 import ActivityPanel from "./panels/ActivityPanel";
 import SchedulerPanel from "./panels/SchedulerPanel";
 import ApiKeysPanel from "./panels/ApiKeysPanel";
+import SettingsPanel from "./panels/SettingsPanel";
 import LadderPanel from "./panels/LadderPanel";
 import { ThemeToggleButton } from "./ThemeToggle";
 import { NotificationBell } from "./NotificationCenter";
@@ -32,7 +33,7 @@ interface AuthUser {
 }
 interface Props { user: AuthUser; onLogout: () => void; onGoHome?: () => void }
 
-type Tab = "overview" | "servers" | "files" | "rcon" | "nodes" | "games" | "audit" | "monitor" | "forum" | "cms" | "ladder" | "users" | "roles" | "profile" | "database" | "activity" | "scheduler" | "apikeys";
+type Tab = "overview" | "servers" | "files" | "rcon" | "nodes" | "games" | "audit" | "monitor" | "forum" | "cms" | "ladder" | "users" | "roles" | "profile" | "database" | "activity" | "scheduler" | "apikeys" | "settings";
 
 interface NavItem { key: Tab; label: string; permission?: string; section: string; shortcut?: string }
 
@@ -52,6 +53,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: "roles", label: "Roles", permission: "roles.view", section: "admin" },
   { key: "database", label: "Database", permission: "database.view", section: "admin", shortcut: "D" },
   { key: "activity", label: "Activity Log", permission: "security.audit", section: "admin" },
+  { key: "settings", label: "Settings", permission: "panel.settings", section: "admin" },
   { key: "scheduler", label: "Scheduler", permission: "scheduler.view", section: "main" },
   { key: "apikeys", label: "API Keys", permission: "apikeys.view", section: "account" },
   { key: "profile", label: "My Profile", section: "account", shortcut: "P" },
@@ -78,6 +80,7 @@ const TAB_META: Record<Tab, { title: string; subtitle: string }> = {
     activity: { title: "Activity Log", subtitle: "Full audit trail — who did what and when." },
     scheduler: { title: "Scheduler", subtitle: "Automate server restarts, backups, and updates on a schedule." },
     apikeys: { title: "API Keys", subtitle: "Generate personal keys for external tools and scripts." },
+  settings: { title: "Settings", subtitle: "Retention, account defaults, and Discord channel management." },
   };
 
 export default function Dashboard({ user, onLogout, onGoHome }: Props) {
@@ -201,6 +204,7 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
       case "activity": return <ActivityPanel />;
       case "scheduler": return <SchedulerPanel />;
       case "apikeys": return <ApiKeysPanel />;
+      case "settings": return <SettingsPanel />;
       default: return <OverviewPanel user={user} onNavigate={navTo} />;
     }
   }

@@ -4,6 +4,36 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.17.1] — 2026-08-22
+
+### 🔧 Discord Settings Moved
+
+- **Discord configuration now lives in Settings**, next to the channel backfill that uses it, instead of on the public site's Site Editor. It was an operational setting sitting among appearance options — and it put a bot-token field on a page otherwise served to anonymous visitors. The endpoint behind it was always admin-only, so nothing was exposed, but a credential form does not belong in the public bundle.
+- The Site Editor points at the new location rather than silently dropping the feature.
+
+---
+
+## [1.17.0] — 2026-08-22
+
+### 🎛️ New Settings Panel
+
+- **A dedicated Settings tab** under Administration, for the things that previously required editing `.env` and restarting: data retention, the default server limit for new accounts, self-registration, the login attempt limit, and session length. Changes take effect immediately, and the database value overrides the environment.
+- Retention now shows **how many rows you actually have**, so "30 days" means something when you can see it is holding two million samples.
+- Site appearance stays under **Site Editor** — the split is operational settings here, presentation there.
+
+### 🔔 Discord Channels For Existing Servers
+
+- **Servers created before you set up the bot can now get a channel.** Auto-provisioning only ever ran at creation time, so older servers were stuck without one and there was no way to fix that short of recreating them.
+- **Channels deleted in Discord are re-created.** This was previously invisible: deleting a channel by hand left the panel posting into a webhook that returned 404 forever, and because notification failures are deliberately silent, nothing ever told you.
+- **Preview first.** A dry run reports exactly what would happen before anything is created.
+- A webhook you entered by hand is never touched, and if the panel cannot confirm whether a channel still exists it skips that server rather than risk creating a duplicate.
+
+### 🧪 Quality
+
+- **244 tests** (21 new) and **95 security checks** (7 new). Verified on a running server that none of the new settings appear in the public site-settings response.
+
+---
+
 ## [1.16.0] — 2026-08-22
 
 ### 🛠 Deleting Things Actually Works

@@ -45,6 +45,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Self-registration can be turned off from the Settings panel, so a panel
+    // can be locked down to admin-created accounts only.
+    const { getAuthPolicy } = await import("@/lib/auth-policy");
+    const policy = await getAuthPolicy();
+    if (!policy.registrationEnabled) {
+      return NextResponse.json(
+        { error: "Registration is disabled. Contact an administrator for an account." },
+        { status: 403 }
+      );
+    }
+
     let body: unknown;
     try {
       body = await req.json();
@@ -109,7 +120,15 @@ export async function POST(req: NextRequest) {
     try {
       [created] = await db
         .insert(users)
-        .values({ username: uname, email: mail, passwordHash, role })
+        .values({
+          username: uname,
+          email: mail,
+          passwordHash,
+          role,
+          // 0 in the settings panel means unlimited, which the column
+          // represents as NULL.
+          maxServers: policy.defaultMaxServers > 0 ? policy.defaultMaxServers : null,
+        })
         .returning({ id: users.id, role: users.role, username: users.username });
     } catch (e: unknown) {
       // Unique violation: another request registered the same name between the

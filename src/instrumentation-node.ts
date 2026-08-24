@@ -7,6 +7,16 @@
  * under Node.
  */
 
+/** Load operator settings so auth.ts has them before the first request. */
+export async function loadAuthPolicy() {
+  try {
+    const { getAuthPolicy } = await import("@/lib/auth-policy");
+    await getAuthPolicy();
+  } catch (e: unknown) {
+    console.error("[settings] could not load auth policy:", e instanceof Error ? e.message : e);
+  }
+}
+
 export async function startBootServers() {
   try {
     const { db } = await import("@/db");
