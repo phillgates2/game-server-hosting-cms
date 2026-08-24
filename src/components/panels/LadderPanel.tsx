@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 interface LadderEntry {
   id: number;
@@ -49,6 +50,7 @@ const EMPTY_FORM = {
 };
 
 export default function LadderPanel() {
+  const confirm = useConfirm();
   const [ladders, setLadders] = useState<LadderOption[]>([]);
   const [activeLadderKey, setActiveLadderKey] = useState("");
   const [season, setSeason] = useState("S1");
@@ -164,7 +166,8 @@ export default function LadderPanel() {
   }
 
   async function deleteEntry(id: number) {
-    if (!confirm("Delete this ladder entry?")) return;
+    const ok = await confirm({ title: "Delete Entry", message: "Delete this ladder entry? This cannot be undone.", confirmLabel: "Delete", danger: true });
+    if (!ok) return;
     setMessage(null);
     try {
       const res = await fetch(`/api/ladder/${id}`, { method: "DELETE" });

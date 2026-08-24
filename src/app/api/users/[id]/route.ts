@@ -153,10 +153,10 @@ export async function DELETE(
       );
     }
 
-    // Content that is safe to remove with the account: API keys are useless
-    // without their owner, and forum posts are handled by the forum routes.
-    await db.delete(apiKeys).where(eq(apiKeys.userId, Number(id)));
-
+    // Check every refusal BEFORE deleting anything. This used to drop the
+    // user's API keys and only then count forum posts, so deleting an author
+    // returned "delete their posts first" with the keys already destroyed --
+    // a 400 that still caused irreversible data loss.
     const [{ count: authored } = { count: 0 }] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(forumPosts)
@@ -170,7 +170,14 @@ export async function DELETE(
       );
     }
 
-    await db.delete(users).where(eq(users.id, Number(id)));
+    // Both writes land or neither does: an account left without its API keys
+    // is a silent security hole, since the keys are useless but still listed.
+    await db.transaction(async (tx) => {
+      // API keys are useless without their owner; forum posts are handled by
+      // the forum routes and are refused above.
+      await tx.delete(apiKeys).where(eq(apiKeys.userId, Number(id)));
+      await tx.delete(users).where(eq(users.id, Number(id)));
+    });
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
     return apiError(e, "Unknown", 500);

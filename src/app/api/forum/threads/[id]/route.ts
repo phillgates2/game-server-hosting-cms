@@ -79,8 +79,20 @@ export async function POST(
     const { body } = await req.json();
     if (!body) return NextResponse.json({ error: "Body required" }, { status: 400 });
 
-    const [post] = await db.insert(forumPosts).values({ threadId: Number(id), userId: auth.userId, body }).returning();
-    await db.update(forumThreads).set({ updatedAt: new Date() }).where(eq(forumThreads.id, Number(id)));
+    // The reply and the thread's activity bump belong together; otherwise a
+    // failure leaves a visible reply on a thread that looks untouched, so it
+    // sorts to the bottom of an activity-ordered list and nobody sees it.
+    const post = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(forumPosts)
+        .values({ threadId: Number(id), userId: auth.userId, body })
+        .returning();
+      await tx
+        .update(forumThreads)
+        .set({ updatedAt: new Date() })
+        .where(eq(forumThreads.id, Number(id)));
+      return created;
+    });
 
     return NextResponse.json({ post }, { status: 201 });
   } catch (e: unknown) {
@@ -157,9 +169,13 @@ export async function DELETE(
 
     if (!canDeleteAny && !(isOwner && canDeleteOwn)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    // Delete posts first, then thread
-    await db.delete(forumPosts).where(eq(forumPosts.threadId, Number(id)));
-    await db.delete(forumThreads).where(eq(forumThreads.id, Number(id)));
+    // Posts first, then the thread -- in one transaction. Run as two separate
+    // statements, a failure in between wipes every reply while leaving the
+    // thread in place, and the replies are not recoverable.
+    await db.transaction(async (tx) => {
+      await tx.delete(forumPosts).where(eq(forumPosts.threadId, Number(id)));
+      await tx.delete(forumThreads).where(eq(forumThreads.id, Number(id)));
+    });
 
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {

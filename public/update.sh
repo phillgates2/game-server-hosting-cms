@@ -421,6 +421,31 @@ if [[ -f "$ENV_FILE" ]] && ! grep -qE "^NODE_ENV=" "$ENV_FILE" 2>/dev/null; then
   log "Added NODE_ENV=production to .env"
 fi
 
+# ── Remove files a release deleted that git cannot clean up ──────────────────
+# Next 16 replaced the middleware.ts convention with proxy.ts, and refuses to
+# build when both exist:
+#
+#   Error: Both middleware file "./src/middleware.ts" and proxy file
+#   "./src/proxy.ts" are detected.
+#
+# src/middleware.ts was never tracked in git, so a pull cannot delete it. On
+# any install that ran before the rename the stale file survives the update
+# and the build fails hard -- and because --rollback restores the same
+# untracked file, retrying fails the same way. Remove it before building.
+STALE_MIDDLEWARE="$INSTALL_DIR/src/middleware.ts"
+if [[ -f "$STALE_MIDDLEWARE" && -f "$INSTALL_DIR/src/proxy.ts" ]]; then
+  # THIS_BACKUP only exists when a backup was taken; --no-backup leaves it
+  # unset, and this script runs under `set -u`.
+  if [[ -n "${THIS_BACKUP:-}" && -d "${THIS_BACKUP:-}" ]]; then
+    mv -f "$STALE_MIDDLEWARE" "$THIS_BACKUP/middleware.ts.removed" 2>/dev/null \
+      || rm -f "$STALE_MIDDLEWARE"
+    log "A copy was kept in $THIS_BACKUP/ if you had customised it."
+  else
+    rm -f "$STALE_MIDDLEWARE"
+  fi
+  warn "Removed the obsolete src/middleware.ts (replaced by src/proxy.ts in Next 16)."
+fi
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  STEP 4: Install dependencies
 # ═══════════════════════════════════════════════════════════════════════════════

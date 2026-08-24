@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useToast } from "@/components/ToastProvider";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { mutate } from "@/lib/api-client";
 
 interface Task {
   id: number; serverId: number | null; taskType: string; cronExpression: string | null;
@@ -62,14 +63,17 @@ export default function SchedulerPanel() {
   }
 
   async function toggleTask(id: number, current: boolean | null) {
-    await fetch(`/api/scheduler/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !current }) });
+    const res = await mutate(`/api/scheduler/${id}`, { method: "PATCH", body: JSON.stringify({ enabled: !current }) });
+    if (!res.ok) return toast.error(current ? "Could not disable task" : "Could not enable task", res.error);
     load();
   }
 
   async function deleteTask(id: number) {
     const ok = await confirm({ title: "Delete Task", message: "Remove this scheduled task?", confirmLabel: "Delete", danger: true });
     if (!ok) return;
-    await fetch(`/api/scheduler/${id}`, { method: "DELETE" });
+    const res = await mutate(`/api/scheduler/${id}`, { method: "DELETE" });
+    // Previously announced success unconditionally, including on a 403.
+    if (!res.ok) return toast.error("Could not delete task", res.error);
     toast.info("Task Deleted");
     load();
   }

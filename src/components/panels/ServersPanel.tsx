@@ -771,7 +771,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                         <Btn onClick={() => openConsole(server.id)} color="muted" icon="📋" label="Console" />
                         <Btn onClick={() => cloneServer(server.id)} color="muted" icon="📑" label="Clone" />
                         <div className="ml-auto" />
-                        {user.role === "admin" && <Btn onClick={() => deleteServer(server.id)} color="danger" icon="🗑️" label="" small />}
+                        {user.role === "admin" && <Btn onClick={() => deleteServer(server.id)} color="danger" icon="🗑️" label="" title="Delete server" small />}
                       </div>
                     </div>
                   );
@@ -856,9 +856,24 @@ function VarField({
   );
 }
 
-function Btn({ onClick, color, icon, label, disabled, small }: { onClick: () => void; color: string; icon: string; label: string; disabled?: boolean; small?: boolean }) {
+function Btn({ onClick, color, icon, label, disabled, small, title }: { onClick: () => void; color: string; icon: string; label: string; disabled?: boolean; small?: boolean; title?: string }) {
   const colors: Record<string, string> = { success: "bg-success/15 text-success hover:bg-success/25", danger: "bg-danger/15 text-danger hover:bg-danger/25", warning: "bg-warning/15 text-warning hover:bg-warning/25", accent: "bg-accent/15 text-accent hover:bg-accent/25", muted: "bg-bg-tertiary text-text-secondary hover:bg-bg-hover" };
-  return <button onClick={onClick} disabled={disabled} className={`${small ? "px-2 py-1.5" : "px-3 py-1.5"} ${colors[color] || colors.muted} rounded-lg text-xs font-medium transition-colors disabled:opacity-40 flex items-center gap-1.5`}><span>{icon}</span>{label && <span>{label}</span>}</button>;
+  // With no visible label the button is an emoji, which a screen reader either
+  // skips or reads as "button". `title` names it for both assistive tech and
+  // a hovering mouse; the emoji itself is hidden so it is not read aloud.
+  const name = label || title;
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={label ? undefined : name}
+      className={`${small ? "px-2 py-1.5" : "px-3 py-1.5"} ${colors[color] || colors.muted} rounded-lg text-xs font-medium transition-colors disabled:opacity-40 flex items-center gap-1.5`}
+    >
+      <span aria-hidden="true">{icon}</span>
+      {label && <span>{label}</span>}
+    </button>
+  );
 }
 
 function Notice({ icon, text }: { icon: string; text: string }) {

@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { useConfirm } from "@/components/ConfirmDialog";
 import SandboxChat from "@/components/SandboxChat";
+import { useToast } from "@/components/ToastProvider";
+import { mutate } from "@/lib/api-client";
 
 interface AuthUser { id: number; username: string; role: string }
 
@@ -25,6 +28,8 @@ interface Post {
 type View = "categories" | "threads" | "thread";
 
 export default function ForumPanel({ user }: { user: AuthUser }) {
+  const confirm = useConfirm();
+  const toast = useToast();
   const [view, setView] = useState<View>("categories");
   const [categories, setCategories] = useState<Category[]>([]);
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -111,7 +116,8 @@ export default function ForumPanel({ user }: { user: AuthUser }) {
   }
 
   async function deleteCategory(catId: number, catName: string) {
-    if (!confirm(`Delete category "${catName}"? This only works if the category has no threads.`)) return;
+    const ok = await confirm({ title: "Delete Category", message: `Delete category "${catName}"? This only works if the category has no threads.`, confirmLabel: "Delete", danger: true });
+    if (!ok) return;
     setCatError("");
     const res = await fetch("/api/forum/categories", {
       method: "DELETE",
@@ -152,28 +158,36 @@ export default function ForumPanel({ user }: { user: AuthUser }) {
   }
 
   async function togglePin(threadId: number, current: boolean | null) {
-    await fetch(`/api/forum/threads/${threadId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pinned: !current }) });
+    const res = await mutate(`/api/forum/threads/${threadId}`, { method: "PATCH", body: JSON.stringify({ pinned: !current }) });
+    if (!res.ok) return toast.error(current ? "Could not unpin" : "Could not pin", res.error);
     if (selectedCat) loadThreads(selectedCat.id);
     loadThread(threadId);
   }
   async function toggleLock(threadId: number, current: boolean | null) {
-    await fetch(`/api/forum/threads/${threadId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locked: !current }) });
+    const res = await mutate(`/api/forum/threads/${threadId}`, { method: "PATCH", body: JSON.stringify({ locked: !current }) });
+    if (!res.ok) return toast.error(current ? "Could not unlock" : "Could not lock", res.error);
     loadThread(threadId);
   }
   async function deleteThread(threadId: number) {
-    if (!confirm("Delete this thread and all its posts?")) return;
-    await fetch(`/api/forum/threads/${threadId}`, { method: "DELETE" });
+    const ok = await confirm({ title: "Delete Thread", message: "Delete this thread and all of its posts? This cannot be undone.", confirmLabel: "Delete", danger: true });
+    if (!ok) return;
+    const res = await mutate(`/api/forum/threads/${threadId}`, { method: "DELETE" });
+    if (!res.ok) return toast.error("Could not delete thread", res.error);
+    toast.success("Thread deleted");
     if (selectedCat) { setView("threads"); loadThreads(selectedCat.id); }
   }
 
   async function savePostEdit(postId: number) {
-    await fetch(`/api/forum/posts/${postId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body: editBody }) });
+    const res = await mutate(`/api/forum/posts/${postId}`, { method: "PATCH", body: JSON.stringify({ body: editBody }) });
+    if (!res.ok) return toast.error("Could not save the edit", res.error);
     setEditingPostId(null); setEditBody("");
     if (selectedThread) loadThread(selectedThread.id);
   }
   async function deletePost(postId: number) {
-    if (!confirm("Delete this post?")) return;
-    await fetch(`/api/forum/posts/${postId}`, { method: "DELETE" });
+    const ok = await confirm({ title: "Delete Post", message: "Delete this post? This cannot be undone.", confirmLabel: "Delete", danger: true });
+    if (!ok) return;
+    const res = await mutate(`/api/forum/posts/${postId}`, { method: "DELETE" });
+    if (!res.ok) return toast.error("Could not delete post", res.error);
     if (selectedThread) loadThread(selectedThread.id);
   }
   function quotePost(post: Post) {

@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { asc, eq, sql } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
+import { slugify } from "@/lib/slug";
 
 export async function GET(_req: NextRequest) {
   // Forum categories are publicly readable — no auth required
@@ -58,11 +59,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Generate slug from name
-    const slug = name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 128);
+    const slug = slugify(name, 128);
 
     if (!slug) {
       return NextResponse.json({ error: "Could not generate a valid slug from the category name" }, { status: 400 });
@@ -118,12 +115,16 @@ export async function PATCH(req: NextRequest) {
       }
       updates.name = name.trim();
 
-      // Update slug too
-      const slug = name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-|-$/g, "")
-        .slice(0, 128);
+      // Update slug too. Unlike POST this had no empty-slug guard, so
+      // renaming a category to "---" silently blanked its slug and made the
+      // category unreachable.
+      const slug = slugify(name, 128);
+      if (!slug) {
+        return NextResponse.json(
+          { error: "Could not generate a valid slug from the category name" },
+          { status: 400 }
+        );
+      }
       updates.slug = slug;
     }
 

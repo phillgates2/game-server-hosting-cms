@@ -837,3 +837,277 @@ tables against 18 without anyone noticing.
 The check worth repeating: for anything that deletes, create a dependent row
 first and then try it. For anything that counts before it writes, issue the
 request five times at once.
+
+---
+
+# Sixth sweep — full workspace debug
+
+Five sweeps had covered the server: vulnerabilities, dead features, response
+shapes, authorization, and data lifecycle. Almost nothing had examined **the
+browser**, so that is where this one went — plus an audit of the settings work
+from the previous session, on the principle that the newest code is the least
+scrutinised.
+
+**Result: 5 found, 5 fixed.** 1 high (invisible failures), 2 medium, 2 low.
+
+| Gate | Before | After |
+| --- | --- | --- |
+| `npm test` | 244 | 260 |
+| `verify:security` | 95/95 | 101/101 |
+| `npm audit --omit=dev` | 0 vulns | 0 vulns |
+| `next build` | succeeds | succeeds |
+
+---
+
+## High
+
+### H1 — Refused actions were completely invisible ✅ FIXED
+`ForumPanel`, `UsersPanel`, `SchedulerPanel`, `DatabasePanel`
+
+Ten mutations across five panels did this:
+
+```ts
+await fetch(`/api/forum/threads/${threadId}`, { method: "DELETE" });
+loadThreads(selectedCat.id);          // reload, regardless of what happened
+```
+
+Those endpoints return 403 in **eighteen** places. Every one was discarded.
+
+A moderator without `forum.delete_any` pressed Delete, the thread stayed
+exactly where it was, and nothing explained why — visually identical to a
+broken button. The permission system was working perfectly; the UI simply
+never mentioned it.
+
+Two variants were worse than merely silent:
+
+- **`SchedulerPanel.deleteTask` announced "Task Deleted" unconditionally**,
+  including on a 403. It reported success for an action that had been refused.
+- **`DatabasePanel` swallowed constraint violations** on row edits, so a
+  rejected save looked like a successful one until the page was reloaded.
+
+Fixed with `src/lib/api-client.ts`, a small wrapper that always reports the
+outcome and **never throws** — a network failure comes back as `ok: false`
+with status 0, so `if (!res.ok)` catches every failure rather than some of
+them going down an exception path the callers do not have.
+
+It prefers the server's own message, because the API already writes good ones:
+*"This user owns 3 server(s). Delete or reassign them first."* is far more
+useful than anything generic, and that wording only reaches the user now.
+
+---
+
+## Medium
+
+### M1 — A public endpoint with no limit ✅ FIXED
+`src/app/api/forum/threads/route.ts`
+
+`GET /api/forum/threads` is **unauthenticated and publicly readable**, and it
+runs a correlated subquery per row to count replies:
+
+```sql
+(select count(*) from forum_posts where thread_id = ...) - 1
+```
+
+With no `LIMIT`, an anonymous visitor could force a scan of every thread in
+the forum — and the reply subquery again for each one — on every request.
+`/api/users` had the same shape behind an admin gate.
+
+Both now use `src/lib/pagination.ts`, which already existed for exactly this
+and simply had not been adopted here. Verified the clamps against the real
+helper rather than the tests' idea of it: `999999` caps at 500, and `-1`,
+`"abc"` and `"1e9"` all fall back safely instead of reaching the query.
+
+### M2 — The log tail parameter was unclamped ✅ FIXED
+`src/app/api/servers/[id]/log/route.ts`
+
+`parseInt(url.searchParams.get("tail") || "200")` feeding `lines.slice(-tail)`
+produces two answers that look like real output rather than rejected input:
+
+| `?tail=` | `parseInt` | Result |
+| --- | --- | --- |
+| `-5` | `-5` | `slice(5)` → **empty console** — reads as "the server printed nothing" |
+| `1e9` | `1` | **one line** — parseInt stops at the `e` |
+
+The file read was already capped at 256 KB, so this was a correctness problem
+rather than a resource one. Swept the rest of the API afterwards: no raw
+`parseInt`/`Number` on a query parameter remains anywhere.
+
+---
+
+## Low
+
+### L1 — The delete button had no accessible name ✅ FIXED
+
+`<Btn ... icon="🗑️" label="" />` renders a bare emoji. A screen reader
+announces it as "button" — on the most destructive control in the panel.
+
+Fixed in the shared `Btn` component rather than at the call site, so any
+future icon-only button is covered: the emoji is `aria-hidden` and `title`
+supplies the accessible name.
+
+---
+
+## Audit of the previous session's work
+
+The settings added last turn store values that change security-relevant
+behaviour, so rather than trust them I exercised them directly against a real
+JWT and the real throttle:
+
+```
+session length   default 7 -> token 7d, cookie 7d
+                 set to 30 -> token 30d, cookie 30d   (both move together)
+login throttle   limit 3   -> attempts 1,2 allowed; 3 blocks; 4 refused (900s)
+```
+
+Both hold. The token expiry and the cookie `maxAge` staying in step matters:
+if they diverged, a session would appear valid to the browser and be rejected
+by the server, or vice versa.
+
+## Checked and found clean
+
+- **No mutation reports success without checking the response** — the inverse
+  scan found zero.
+- **Every route guards `req.json()`**, so a malformed body cannot produce a
+  500.
+- **`MonitorPanel` and `RconPanel`** looked like silent mutations to the
+  pattern scan but both parse the response body and handle errors properly —
+  false positives, left alone.
+- **The other unbounded list endpoints** (roles, nodes, games, api-keys) are
+  bounded in practice by what they describe; only the two growth-prone ones
+  needed a limit.
+- **Native `confirm()` in seven panels** is inconsistent with the app's own
+  dialog but is not a defect; noted, not changed.
+
+## Theme
+
+Previous sweeps found things the server got wrong. This one found things the
+server got **right** and the browser then threw away.
+
+The permission checks fired correctly, returned the right status, and wrote a
+clear message — and ten call sites dropped all of it on the floor. From the
+user's side an enforced permission and a broken button are the same event, and
+no server-side test can tell them apart, because the server's behaviour is
+already correct.
+
+The check worth repeating: for every `fetch` with a mutating method, find the
+line that reads the response. If there isn't one, the user cannot tell success
+from failure.
+
+---
+
+# Closing the known gaps
+
+Four items had been carried across several sweeps as "known, not fixed". This
+session cleared all four. Unlike the sweeps above, these were not discovered
+here — they were already documented; what follows is what building them
+actually involved.
+
+| Gate | Before | After |
+| --- | --- | --- |
+| `npm test` | 260 | 293 |
+| `verify:security` | 101/101 | 105/105 |
+| `next build` | 1 deprecation warning | clean |
+
+---
+
+## CSRF protection
+
+The panel authenticates with a cookie, so any page on any site can cause the
+browser to send an authenticated request. `sameSite: "lax"` blocks most of
+that — but deliberately **not** top-level form submissions, and
+`/api/servers/[id]/files/upload` accepts `multipart/form-data`, which is
+exactly what a cross-site `<form method=POST>` sends, with no CORS preflight
+to intervene.
+
+Verified the vector against a running server before writing anything.
+
+**Origin validation, not tokens.** For a same-origin API, comparing the
+declared `Origin` against the host the request arrived at is equivalent
+protection with no state to store, rotate, or leak. Browsers set `Origin` on
+every state-changing request and will not let script forge it.
+
+Applied in `src/proxy.ts` across `/api/*` rather than per route, because the
+recurring lesson from these sweeps is that a guard applied by hand eventually
+gets forgotten on exactly one endpoint.
+
+Three exemptions, each tested rather than assumed:
+
+- **API keys** — sent in a header a cross-site form cannot set, so not a CSRF
+  vector. Blocking them would break every script and integration.
+- **Clients sending neither `Origin` nor `Referer`** — curl, node agents, and
+  the installer, which POSTs to `/api/install` during setup. These are not
+  driving a victim's browser. Failing closed here would have broken the
+  install flow, which is why it is a test and not an assumption.
+- **`GET`/`HEAD`/`OPTIONS`** — cannot be CSRF writes.
+
+The tests cover the cases that would break a real deployment: TLS terminated
+by a reverse proxy (`x-forwarded-proto`, or every write fails on a proxied
+install), a LAN install on `:3000`, and a malformed `Origin` header, which
+must not turn a buggy client into an outage.
+
+Used the **`proxy`** convention rather than `middleware` — Next 16 deprecates
+the latter and warns on every build. After the rename I re-verified the guard
+still fires, because a rename that silently disables a security control is the
+worst possible outcome.
+
+## Structured logging
+
+Most output already carried a `[subsystem]` tag, but by hand, so some lines
+had none — and under PM2 every stream lands in one file, which makes an
+untagged line impossible to place.
+
+Added a small logger rather than a dependency: this is a formatting concern.
+It keeps the existing human-readable shape so current greps and runbooks still
+work, and adds `GSM_LOG_FORMAT=json` and `GSM_LOG_LEVEL`. Converted the
+untagged call sites; every line is now attributable.
+
+## server_metrics is no longer a dead table
+
+Flagged in the third sweep and deferred twice. The table has existed since the
+first release, is pruned by the retention job and counted by its stats call —
+and nothing ever inserted a row. Monitoring could answer "is the box busy?"
+but never "which server is doing it?".
+
+Sampling reads `/proc`, matching how the host monitor already works, and rides
+on the existing 15-second status poll rather than adding a timer.
+
+**Verified the parsing against this machine** rather than trusting the field
+offsets — a mistake in `/proc/<pid>/stat` produces plausible numbers rather
+than an obvious failure:
+
+```
+ramMb from /proc/<pid>/stat : 83.0
+ramMb from VmRSS            : 83.0     agrees to 0.00 MB
+busy loop for 300ms         : 99.67%   ≈ one core
+nonexistent pid             : null     no throw
+```
+
+**Then throttled the writes.** At one row per poll, a fifty-server panel would
+retain 8.6 million rows at the default 30-day window — for a graph nobody
+reads at 15-second resolution. One sample per minute is a quarter of that, and
+it also means two admins with the dashboard open no longer double the write
+rate. The throttle is keyed per server and independent of the poll.
+
+Two details that would otherwise produce wrong graphs: a reused pid whose CPU
+counter resets is clamped to 0 rather than rendering as a negative percentage,
+and a stopped server's baseline is forgotten so a restart does not inherit it.
+
+## Unified confirmation dialogs
+
+Twelve destructive actions across nine panels used the browser's native
+`confirm()`. Not a defect — it works — but it cannot be styled or tested, and
+sat oddly beside the app's own dialog used everywhere else.
+
+All twelve now use the in-app dialog with a title and danger styling, and each
+message states whether the action can be undone. A security check pins it, so
+a native `confirm()` cannot quietly reappear.
+
+## What remains
+
+Nothing from the original list. Two smaller things noted along the way:
+
+- **`Btn` gained a `title` prop** for icon-only buttons; only the delete button
+  needed it, but the shared component now covers any future one.
+- **Two `console` calls in `MonitorPanel`/`RconPanel`** looked like silent
+  failures to a pattern scan but genuinely handle their errors — recorded here
+  so a later sweep does not re-investigate them.

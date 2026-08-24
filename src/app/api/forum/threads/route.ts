@@ -5,11 +5,14 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq, desc, sql } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
+import { limitParam, offsetParam } from "@/lib/pagination";
 
 export async function GET(req: NextRequest) {
   // Forum threads are publicly readable — no auth required
   const url = new URL(req.url);
   const categoryId = url.searchParams.get("categoryId");
+  const limit = limitParam(url.searchParams, 100);
+  const offset = offsetParam(url.searchParams);
 
   try {
     let query = db
@@ -34,8 +37,11 @@ export async function GET(req: NextRequest) {
       query = query.where(eq(forumThreads.categoryId, Number(categoryId)));
     }
 
-    const threads = await query;
-    return NextResponse.json({ threads });
+    // Publicly readable and unauthenticated, with a correlated subquery per
+    // row: without a cap an anonymous visitor can force a full scan of every
+    // thread in the forum on each request.
+    const threads = await query.limit(limit).offset(offset);
+    return NextResponse.json({ threads, limit, offset });
   } catch {
     return NextResponse.json({ threads: [] });
   }

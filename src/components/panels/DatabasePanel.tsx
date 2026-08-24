@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { useToast } from "@/components/ToastProvider";
+import { mutate } from "@/lib/api-client";
 
 interface TableInfo {
   name: string;
@@ -39,6 +42,8 @@ interface QueryResult {
 type DBView = "tables" | "browse" | "query" | "structure";
 
 export default function DatabasePanel() {
+  const confirm = useConfirm();
+  const toast = useToast();
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [view, setView] = useState<DBView>("tables");
   const [selectedTable, setSelectedTable] = useState<string>("");
@@ -111,7 +116,8 @@ export default function DatabasePanel() {
   }
 
   async function deleteRow(tableName: string, row: Record<string, unknown>) {
-    if (!confirm("Delete this row?")) return;
+    const ok = await confirm({ title: "Delete Row", message: "Delete this row? This cannot be undone.", confirmLabel: "Delete", danger: true });
+    if (!ok) return;
     const where: Record<string, unknown> = {};
     // Use first column as identifier (usually 'id')
     const keys = Object.keys(row);
@@ -121,11 +127,11 @@ export default function DatabasePanel() {
       where[keys[0]] = row[keys[0]];
     }
 
-    await fetch(`/api/database/table/${tableName}/row`, {
+    const res = await mutate(`/api/database/table/${tableName}/row`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "delete", where }),
     });
+    if (!res.ok) return toast.error("Could not delete row", res.error);
     browseTable(tableName, page);
   }
 
@@ -154,11 +160,13 @@ export default function DatabasePanel() {
       data[k] = v === "" ? null : v;
     }
 
-    await fetch(`/api/database/table/${selectedTable}/row`, {
+    const res = await mutate(`/api/database/table/${selectedTable}/row`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "update", data, where }),
     });
+    // A foreign-key or not-null violation used to vanish silently, leaving the
+    // row looking unchanged with no indication the save had been rejected.
+    if (!res.ok) return toast.error("Could not save row", res.error);
     setEditRow(null);
     browseTable(selectedTable, page);
   }

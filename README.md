@@ -16,7 +16,7 @@ Deploy, configure, and monitor game servers across multiple machines from one da
 
 <br>
 
-<samp>**27** games · **1,551** config options · **67** API routes · **244** tests · **95** security checks</samp>
+<samp>**27** games · **1,551** config options · **67** API routes · **327** tests · **111** security checks</samp>
 
 <br>
 
@@ -146,7 +146,7 @@ Then visit `http://your-server:3000` to finish setup in the install wizard.
 
 #### 🖥️ Infrastructure
 - **Multi-node** management over SSH/API
-- **Real-time metrics** — CPU, RAM, disk, network
+- **Real-time metrics** — host *and* per-server
 - **Auto firewall** — ports follow your servers
 - **LXC/container** networking auto-repair
 - **IPv6** throughout
@@ -181,7 +181,7 @@ Then visit `http://your-server:3000` to finish setup in the install wizard.
 </tr>
 </table>
 
-**Security & access** — TOTP two-factor auth · granular role-based permissions · **scoped API keys** *(a read-only key really is read-only)* · per-user server quotas · login throttling · full audit trail
+**Security & access** — TOTP two-factor auth · CSRF protection · granular role-based permissions · **scoped API keys** *(a read-only key really is read-only)* · per-user server quotas · login throttling · full audit trail
 
 **Notifications** — Discord on start, stop, restart, crash, auto-restart, update and delete · **a channel per server**, created automatically · SMTP email via Nodemailer
 
@@ -288,6 +288,8 @@ Only running non-Steam games? Skip it entirely with `--no-steamcmd`.
 | `DISCORD_BOT_TOKEN` | optional | Bot token, required only for automatic per-server channels *(webhooks cannot create channels)* |
 | `DISCORD_GUILD_ID` | optional | Discord server ID the bot creates channels in |
 | `GSM_DISABLE_AUTOSTART` | optional | Set `true` to stop servers marked *Start on node boot* from launching when the panel starts |
+| `GSM_LOG_FORMAT` | optional | `text` *(default)* or `json` for machine-readable logs |
+| `GSM_LOG_LEVEL` | optional | `debug`, `info` *(default)*, `warn` or `error` |
 | `METRICS_RETENTION_DAYS` | optional | Days of node/server metric samples to keep *(default `30`, `0` disables pruning)* |
 | `AUDIT_RETENTION_DAYS` | optional | Days of audit history to keep *(default `365`, `0` disables pruning)* |
 
@@ -639,12 +641,12 @@ One command chains every check, exiting non-zero on the first failure — drop i
 
 | Script | Checks |
 |:--|:--|
-| `npm test` | 244 tests over the config renderer, path guard, auth, pagination, API key scopes, server lifecycle rules, and **database integrity against a real PostgreSQL** *(see below)* |
+| `npm test` | 327 tests over the config renderer, path guard, auth, pagination, API key scopes, server lifecycle rules, and **database integrity, end-to-end installer round-trips, and multi-write atomicity against a real PostgreSQL** *(see below)* |
 | `npm run typecheck` | `tsc --noEmit` across the project |
 | `npm run lint` | ESLint, including React hooks rules |
 | `npm run verify:templates` | All 1,551 template options — types, enums, defaults, and that every declared variable is actually consumed |
 | `npm run verify:installers` | Renders every game's install script, runs `bash -n` + shellcheck, then **executes** it in a sandbox with SteamCMD/curl/apt mocked, and asserts the artifacts the panel needs were produced |
-| `npm run verify:security` | 95 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, and a sweep for leaked exception messages |
+| `npm run verify:security` | 111 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, and a sweep for leaked exception messages |
 
 All of these run automatically in CI on every push and pull request, along
 with a production build and a high-severity dependency audit.

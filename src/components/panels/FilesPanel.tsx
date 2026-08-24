@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 interface AuthUser { id: number; username: string; role: string }
 interface Server { id: number; name: string; gameName: string | null; gameIcon: string | null; gameSlug: string | null; status: string }
@@ -122,6 +123,7 @@ async function collectDroppedFiles(dataTransfer: DataTransfer): Promise<DroppedF
 
 
 export default function FilesPanel({ user }: { user: AuthUser }) {
+  const confirm = useConfirm();
   const [servers, setServers] = useState<Server[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [currentPath, setCurrentPath] = useState(".");
@@ -236,7 +238,9 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
   }
 
   async function deleteEntry(entry: FileEntry) {
-    if (!selectedId || !confirm(`Delete "${entry.name}"${entry.isDir ? " and all its contents" : ""}?`)) return;
+    if (!selectedId) return;
+    const ok = await confirm({ title: entry.isDir ? "Delete Folder" : "Delete File", message: `Delete "${entry.name}"${entry.isDir ? " and all of its contents" : ""}? This cannot be undone.`, confirmLabel: "Delete", danger: true });
+    if (!ok) return;
     try {
       await fetch(`/api/servers/${selectedId}/files`, {
         method: "POST",
@@ -302,7 +306,8 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
 
   async function deleteSelected() {
     if (!selectedId || selectedPaths.length === 0) return;
-    if (!confirm(`Delete ${selectedPaths.length} selected item(s)?`)) return;
+    const ok = await confirm({ title: "Delete Selected", message: `Delete ${selectedPaths.length} selected item(s)? This cannot be undone.`, confirmLabel: "Delete", danger: true });
+    if (!ok) return;
 
     try {
       const res = await fetch(`/api/servers/${selectedId}/files`, {

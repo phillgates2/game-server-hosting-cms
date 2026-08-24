@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
+import { toValidSlug } from "@/lib/slug";
 
 // POST /api/games/import — Import a Pterodactyl egg JSON or AMP template
 export async function POST(req: NextRequest) {
@@ -67,7 +68,7 @@ function detectFormat(data: Record<string, unknown>): string | null {
 
 function importPterodactyl(egg: Record<string, unknown>) {
   const name = (egg.name as string) || "Imported Game";
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const slug = toValidSlug(name) ?? "imported-game";
   const startup = (egg.startup as string) || "";
   const desc = (egg.description as string) || "";
   const scripts = egg.scripts as Record<string, Record<string, unknown>> | undefined;
@@ -105,7 +106,7 @@ function importPterodactyl(egg: Record<string, unknown>) {
 
 function importAmp(kvp: Record<string, unknown>) {
   const name = (kvp["App.DisplayName"] as string) || (kvp["Meta.DisplayName"] as string) || "Imported Game";
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const slug = toValidSlug(name) ?? "imported-game";
 
   const cmdArgs = (kvp["App.CommandLineArgs"] as string) || "";
   const execLinux = (kvp["App.ExecutableLinux"] as string) || "";

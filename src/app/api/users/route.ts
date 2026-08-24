@@ -4,6 +4,10 @@ import { users, gameServers } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq, sql, ilike, or } from "drizzle-orm";
+import { limitParam, offsetParam } from "@/lib/pagination";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("users");
 
 // GET /api/users — Admin: list all users
 export async function GET(req: NextRequest) {
@@ -15,6 +19,8 @@ export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
     const search = url.searchParams.get("search") || "";
+    const limit = limitParam(url.searchParams, 100);
+    const offset = offsetParam(url.searchParams);
 
     let query = db
       .select({
@@ -46,7 +52,9 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const allUsers = await query;
+    // Admin-only, but a panel with thousands of accounts should not ship them
+    // all in one response.
+    const allUsers = await query.limit(limit).offset(offset);
 
     // Get server counts per user
     const serverCounts = await db
@@ -64,9 +72,9 @@ export async function GET(req: NextRequest) {
       serverCount: countMap.get(u.id) || 0,
     }));
 
-    return NextResponse.json({ users: usersWithCounts });
+    return NextResponse.json({ users: usersWithCounts, limit, offset });
   } catch (e) {
-    console.error("GET /api/users error:", e);
+    log.exception("failed to list users", e);
     return NextResponse.json({ users: [] });
   }
 }

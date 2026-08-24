@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 interface Role {
   id: number; name: string; displayName: string; color: string | null; icon: string | null;
@@ -48,6 +49,7 @@ function PermGrid({ perms, onChange, categories: permCategories }: { perms: Reco
 }
 
 export default function RolesPanel() {
+  const confirm = useConfirm();
   const [rolesList, setRolesList] = useState<Role[]>([]);
   const [categories, setCategories] = useState<Record<string, PermCategory>>({});
   const [editing, setEditing] = useState<Role | null>(null);
@@ -111,7 +113,8 @@ export default function RolesPanel() {
   }
 
   async function deleteRole(id: number) {
-    if (!confirm("Delete this role?")) return;
+    const ok = await confirm({ title: "Delete Role", message: "Delete this role? Users assigned to it will fall back to the default role.", confirmLabel: "Delete", danger: true });
+    if (!ok) return;
     const res = await fetch(`/api/roles/${id}`, { method: "DELETE" });
     if (!res.ok) { const d = await res.json(); setMessage({ type: "error", text: d.error }); return; }
     setMessage({ type: "success", text: "Role deleted" }); loadRoles();

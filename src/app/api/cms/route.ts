@@ -6,6 +6,7 @@ import { hasPermission } from "@/lib/permissions";
 import { eq, desc, and } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
 import { limitParam } from "@/lib/pagination";
+import { toValidSlug } from "@/lib/slug";
 
 // GET /api/cms?type=blog|changelog|page&published=true
 export async function GET(req: NextRequest) {
@@ -73,7 +74,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Title and content required" }, { status: 400 });
     }
 
-    const finalSlug = slug || title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    // Normalize a caller-supplied slug too: an unnormalized one ("My Page",
+    // "a/b") is stored fine but can never be fetched back through
+    // /api/cms/[slug], so the page becomes invisible.
+    const finalSlug = toValidSlug(slug, 256) ?? toValidSlug(title, 256);
+    if (!finalSlug) {
+      return NextResponse.json(
+        { error: "Slug must contain at least one letter or number" },
+        { status: 400 }
+      );
+    }
 
     const [post] = await db
       .insert(cmsPages)

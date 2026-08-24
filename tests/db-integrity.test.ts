@@ -407,3 +407,36 @@ describe("port uniqueness migration", () => {
     assert.deepEqual(third.rows, first.rows, "further runs must change nothing");
   });
 });
+
+describe("list endpoints are bounded", () => {
+  test("forum threads cap the number of rows returned", async () => {
+    // Publicly readable and unauthenticated, with a correlated subquery per
+    // row — an unbounded scan here is reachable by anyone.
+    const db = await freshDb();
+    await db.exec(`INSERT INTO forum_categories (name, slug) VALUES ('General', 'general')`);
+    const values = Array.from({ length: 250 }, (_, i) => `(1, 1, 'Thread ${i}')`).join(",");
+    await db.exec(
+      `INSERT INTO forum_threads (category_id, user_id, title) VALUES ${values}`
+    );
+
+    const all = await db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM forum_threads`
+    );
+    assert.equal(all.rows[0].n, 250, "fixture inserted");
+
+    // The default the route applies.
+    const page = await db.query(`SELECT id FROM forum_threads ORDER BY id LIMIT 100 OFFSET 0`);
+    assert.equal(page.rows.length, 100, "default page is capped at 100");
+
+    const second = await db.query(`SELECT id FROM forum_threads ORDER BY id LIMIT 100 OFFSET 100`);
+    assert.equal(second.rows.length, 100);
+    const last = await db.query(`SELECT id FROM forum_threads ORDER BY id LIMIT 100 OFFSET 200`);
+    assert.equal(last.rows.length, 50, "final page returns the remainder");
+  });
+
+  test("offset past the end returns empty rather than erroring", async () => {
+    const db = await freshDb();
+    const r = await db.query(`SELECT id FROM game_servers ORDER BY id LIMIT 100 OFFSET 999999`);
+    assert.equal(r.rows.length, 0);
+  });
+});

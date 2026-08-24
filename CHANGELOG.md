@@ -4,6 +4,84 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.20.0] — 2026-08-24
+
+### 💾 Deletes No Longer Half-Finish
+
+- **Deleting an account could destroy its API keys and then refuse to continue.** The account deletion removed the user's API keys *before* checking whether they had written any forum posts. If they had, the panel returned "delete their posts first" — but the keys were already gone, and nothing put them back. Every refusal is now decided before the first write.
+- **Deleting a forum thread wiped the replies as a separate step from the thread.** A failure in between left the thread listed with every reply permanently gone. Thread and replies now go together, or not at all.
+- **Deleting a server removed its schedules and metrics history separately too.** Same problem: a failure partway through stripped a live server's data while leaving the server in place.
+- These are now single transactions. Nothing partially applies: either the whole delete lands, or the database is untouched.
+
+### 🧪 Installers Verified Through the Database
+
+- The installer check rendered each game straight from its definition file, but a real install goes through the database first, and only some of those fields are copied across. That gap was never tested — a game could verify clean and still install wrong.
+- Every game is now round-tripped through the database and re-rendered from the stored row, covering the install script, start and stop commands, and generated config files.
+- **327 tests** (34 new) and **111 security checks** (6 new).
+
+### ⬆️ Updater
+
+- **Updating an existing install would fail to build.** Next 16 renamed the `middleware.ts` convention to `proxy.ts` and refuses to build when both files exist. The old file was never tracked in git, so pulling the new release could not delete it — the update stopped with a failed build, and rolling back restored the same file, so retrying hit the same wall.
+- `update.sh` now removes the obsolete `src/middleware.ts` before building, keeping a copy in the backup folder in case it was customised. Fresh installs were never affected.
+
+### 🔗 Slugs
+
+- **A page or game could be saved with a blank web address.** The "slug is required" check ran against what you typed, but the value was cleaned up afterwards — so a name like `-` or a few spaces passed the check and then became empty. The result was invisible: it could not be opened by address, and it blocked the next one from being saved at all.
+- **Ordinary names produced malformed addresses.** Creating a custom game called "My Game!!" gave you `my-game-`, with a stray dash on the end; leading spaces produced one at the front too.
+- Renaming a forum category to something with no letters or numbers blanked its address and made the category unreachable. It is now refused, the same way creating one already was.
+- All six places that build addresses now share one implementation.
+
+---
+
+## [1.19.0] — 2026-08-22
+
+### 🔒 Cross-Site Request Forgery Protection
+
+- **Another site could make your browser perform actions in the panel.** Because the panel signs you in with a cookie, the browser attaches it to any request a web page can trigger — including a hidden form on someone else's site. The file upload endpoint was the clearest route in, since a plain HTML form can post files with no permission from the browser.
+- Every state-changing API request now has to come from the panel's own address. Applied centrally, so new endpoints are covered automatically.
+- **Nothing legitimate is affected.** API keys still work from anywhere (they travel in a header a foreign page cannot set), command-line tools and the installer are unaffected, and ordinary page loads are untouched.
+
+### 📈 Per-Server Resource History
+
+- **The panel could tell you the machine was busy, but never which server was doing it.** The table for per-server CPU and memory history had existed since the first release and was even being cleaned up on schedule — but nothing ever wrote to it. It is now populated for every running server.
+- Samples are recorded once a minute per server, which keeps a year of history for a busy panel at a sensible size rather than flooding the database.
+
+### 📋 Readable Logs
+
+- Log output is now consistently tagged by subsystem, so a line in the PM2 log can always be traced to what produced it. Set `GSM_LOG_FORMAT=json` for machine-readable output, or `GSM_LOG_LEVEL=warn` to quieten routine chatter.
+
+### 💬 Consistent Confirmations
+
+- **Twelve destructive actions used the browser's plain grey confirm box** while the rest of the panel used its own styled dialog. They now match, and each one says plainly whether the action can be undone.
+
+### 🧪 Quality
+
+- **293 tests** (33 new) and **105 security checks** (4 new). The CSRF rules are tested against the cases that would break a real install — a reverse proxy terminating TLS, a LAN install on port 3000, the installer's own requests — because a guard that fails closed on legitimate traffic is worse than none.
+
+---
+
+## [1.18.0] — 2026-08-22
+
+### 💬 The Panel Now Tells You When Something Is Refused
+
+- **Actions you lack permission for failed silently.** Deleting a forum thread, pinning a post, suspending a user, toggling a scheduled task — if your role did not allow it, the request was refused, the list reloaded unchanged, and *nothing said why*. It looked exactly like a broken button. Ten actions across five panels now report the reason, using the message the server already provides.
+- **Two were worse than silent.** Deleting a scheduled task announced *"Task Deleted"* even when the deletion had been refused, and the database row editor swallowed constraint errors so a rejected save looked like a successful one.
+
+### ⚡ Performance & Correctness
+
+- **The public forum thread list had no limit.** It is readable without logging in and counts replies with a per-row subquery, so any visitor could make the server read every thread in the forum on every request. Both it and the user list are now paginated.
+- **The log viewer mishandled unusual values.** Requesting a negative number of lines returned an *empty* console — indistinguishable from a server that had printed nothing — and asking for `1e9` lines returned exactly one. Both now clamp sensibly.
+
+### ♿ Accessibility
+
+- **The Delete Server button had no name.** It was a bare wastebasket icon, which a screen reader announced simply as "button" — on the most destructive control in the panel. Fixed for every icon-only button at once.
+
+### 🧪 Quality
+
+- **260 tests** (16 new) and **101 security checks** (6 new). The settings added in the previous release were re-verified against a real token: changing the session length moves the token expiry and the cookie together, and the login throttle blocks at exactly the configured attempt.
+
+---
+
 ## [1.17.1] — 2026-08-22
 
 ### 🔧 Discord Settings Moved

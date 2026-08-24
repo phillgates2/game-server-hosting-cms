@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { mutate } from "@/lib/api-client";
 
 interface UserRow {
   id: number;
@@ -21,6 +23,7 @@ interface UserRow {
 }
 
 export default function UsersPanel() {
+  const confirm = useConfirm();
   const [usersList, setUsersList] = useState<UserRow[]>([]);
   const [search, setSearch] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -80,7 +83,8 @@ export default function UsersPanel() {
   }
 
   async function deleteUser(u: UserRow) {
-    if (!confirm(`Delete user "${u.username}"? This cannot be undone.`)) return;
+    const ok = await confirm({ title: "Delete User", message: `Delete user "${u.username}"? This cannot be undone.`, confirmLabel: "Delete", danger: true });
+    if (!ok) return;
     try {
       const res = await fetch(`/api/users/${u.id}`, { method: "DELETE" });
       const data = await res.json();
@@ -90,11 +94,16 @@ export default function UsersPanel() {
   }
 
   async function quickAction(id: number, field: string, value: string) {
-    await fetch(`/api/users/${id}`, {
+    // Suspending or promoting needs a specific permission; without a check the
+    // refusal was invisible and the row simply reappeared unchanged.
+    const res = await mutate(`/api/users/${id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ [field]: value }),
     });
+    if (!res.ok) {
+      setMessage({ type: "error", text: res.error ?? "Could not update user" });
+      return;
+    }
     loadUsers();
   }
 

@@ -5,6 +5,9 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission, invalidateRoleCache, PERMISSION_CATEGORIES } from "@/lib/permissions";
 import { sql } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("roles");
 
 // GET /api/roles — List all roles with user counts
 export async function GET(req: NextRequest) {
@@ -30,7 +33,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ roles: result, categories: PERMISSION_CATEGORIES });
   } catch (e) {
-    console.error("GET /api/roles error:", e);
+    log.exception("failed to list roles", e);
     return NextResponse.json({ roles: [], categories: PERMISSION_CATEGORIES });
   }
 }

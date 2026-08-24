@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
+import { toValidSlug } from "@/lib/slug";
 
 // POST /api/games/custom — Create a fully custom game definition
 export async function POST(req: NextRequest) {
@@ -21,7 +22,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Name, slug, default port, install script, and start command are required" }, { status: 400 });
     }
 
-    const finalSlug = slug.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/^-|-$/g, "");
+    // Validate the normalized slug, not the raw input: "-" and "   " both
+    // pass the required-field check above and then normalize to "".
+    const finalSlug = toValidSlug(slug);
+    if (!finalSlug) {
+      return NextResponse.json(
+        { error: "Slug must contain at least one letter or number" },
+        { status: 400 }
+      );
+    }
 
     const existing = await db.select().from(gameDefinitions).where(eq(gameDefinitions.slug, finalSlug)).limit(1);
     if (existing.length > 0) {

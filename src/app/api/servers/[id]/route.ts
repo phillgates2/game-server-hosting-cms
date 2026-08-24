@@ -328,9 +328,13 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     // Scheduling a restart therefore made a server permanently undeletable --
     // and because the files are removed above, the user lost their data and
     // still had the server listed.
-    await db.delete(scheduledTasks).where(eq(scheduledTasks.serverId, Number(id)));
-    await db.delete(serverMetrics).where(eq(serverMetrics.serverId, Number(id)));
-    await db.delete(gameServers).where(eq(gameServers.id, Number(id)));
+    // One transaction: a failure partway through would strip a live server's
+    // schedules and metrics history but leave the server itself listed.
+    await db.transaction(async (tx) => {
+      await tx.delete(scheduledTasks).where(eq(scheduledTasks.serverId, Number(id)));
+      await tx.delete(serverMetrics).where(eq(serverMetrics.serverId, Number(id)));
+      await tx.delete(gameServers).where(eq(gameServers.id, Number(id)));
+    });
 
     // Remove firewall rules for the deleted server (best-effort)
     denyServerPorts({

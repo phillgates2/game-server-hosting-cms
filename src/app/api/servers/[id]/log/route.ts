@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { apiError } from "@/lib/api-error";
+import { intParam } from "@/lib/pagination";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,7 +39,10 @@ export async function GET(
 
     const logPath = join(server.installPath, "gsm-server.log");
     const url = new URL(req.url);
-    const tailLines = parseInt(url.searchParams.get("tail") || "200");
+    // Raw parseInt let "-5" return an empty log (indistinguishable from a
+    // server that produced no output) and "1e9" return a single line, because
+    // parseInt stops at the "e". Clamped to a sane range instead.
+    const tailLines = intParam(url.searchParams.get("tail"), 200, 1, 5000);
 
     let content = "";
     let fileSize = 0;

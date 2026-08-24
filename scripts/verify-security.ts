@@ -395,6 +395,72 @@ console.log("\nH2/H3 auth enforcement wiring");
     /\/api\/settings\/discord/.test(read("../src/components/panels/DiscordSettings.tsx"))
   );
 
+  // A publicly readable list endpoint with no cap lets an anonymous visitor
+  // force a full table scan on every request.
+  const threadsRoute = read("../src/app/api/forum/threads/route.ts");
+  check(
+    "public forum thread list is bounded",
+    /limitParam\(/.test(threadsRoute) && /\.limit\(/.test(threadsRoute)
+  );
+  check(
+    "the user list is bounded",
+    /limitParam\(/.test(read("../src/app/api/users/route.ts"))
+  );
+
+  // A refused mutation must tell the user, not silently redisplay the old data.
+  const forumPanel = read("../src/components/panels/ForumPanel.tsx");
+  const usersPanel = read("../src/components/panels/UsersPanel.tsx");
+  check(
+    "forum moderation reports a refusal",
+    /mutate\(/.test(forumPanel) && !/^\s*await fetch\(`\/api\/forum\/threads\/\$\{threadId\}`, \{ method: "DELETE" \}\);$/m.test(forumPanel)
+  );
+  check(
+    "user quick actions report a refusal",
+    /mutate\(/.test(usersPanel)
+  );
+
+  // Numbers from a query string reach slice()/LIMIT and must be clamped.
+  check(
+    "log tail is clamped, not raw parseInt",
+    /intParam\(/.test(read("../src/app/api/servers/[id]/log/route.ts"))
+  );
+  // Icon-only buttons must still be announceable.
+  check(
+    "icon-only action buttons have an accessible name",
+    /aria-label=\{label \? undefined : name\}/.test(
+      read("../src/components/panels/ServersPanel.tsx")
+    )
+  );
+
+  // The panel authenticates with a cookie, so a cross-site form can make the
+  // browser send an authenticated write. sameSite=lax does not cover top-level
+  // form posts, and the upload route accepts multipart/form-data.
+  const proxyGuard = read("../src/proxy.ts");
+  check(
+    "state-changing API requests are CSRF-checked in middleware",
+    /checkCsrf\(/.test(proxyGuard) && /\/api\/:path\*/.test(proxyGuard)
+  );
+  const csrf = read("../src/lib/csrf.ts");
+  check(
+    "the CSRF check covers every state-changing method",
+    ["POST", "PUT", "PATCH", "DELETE"].every((m) => csrf.includes(`"${m}"`))
+  );
+  check(
+    "API keys are exempt from the CSRF check, so integrations keep working",
+    /hasApiKey/.test(csrf)
+  );
+  // Native confirm() cannot be styled or tested and was inconsistent with the
+  // app's own dialog.
+  const panelFiles = ["CmsPanel", "DatabasePanel", "FilesPanel", "ForumPanel",
+                      "GamesPanel", "LadderPanel", "NodesPanel", "RolesPanel", "UsersPanel"];
+  check(
+    "destructive actions use the in-app confirm dialog",
+    panelFiles.every((f) => {
+      const src = read(`../src/components/panels/${f}.tsx`);
+      return !/(^|[^.\w])confirm\("/.test(src) && !/(^|[^.\w])confirm\(`/.test(src);
+    })
+  );
+
   // Operational settings must not be readable by an anonymous visitor, and
   // must not leak into the public site-settings endpoint.
   const panelSettings = read("../src/app/api/settings/panel/route.ts");
@@ -431,6 +497,51 @@ console.log("\nH2/H3 auth enforcement wiring");
   const backup = read("../src/app/api/servers/[id]/backup/route.ts");
   check("backup no longer spawns a shell", !/spawn\("sh"/.test(backup));
   check("backup passes tar an argument array", /spawn\(file, args/.test(backup));
+
+  // Cascading deletes must be atomic. Run as loose statements, a failure
+  // between them destroys the children and leaves the parent behind.
+  const threadRoute = read("../src/app/api/forum/threads/[id]/route.ts");
+  check(
+    "deleting a forum thread removes posts and thread in one transaction",
+    /db\.transaction\(/.test(threadRoute) &&
+      /tx\.delete\(forumPosts\)/.test(threadRoute) &&
+      /tx\.delete\(forumThreads\)/.test(threadRoute)
+  );
+
+  const serverDeleteRoute = read("../src/app/api/servers/[id]/route.ts");
+  check(
+    "deleting a server removes its dependants in one transaction",
+    /db\.transaction\(/.test(serverDeleteRoute) &&
+      /tx\.delete\(scheduledTasks\)/.test(serverDeleteRoute) &&
+      /tx\.delete\(gameServers\)/.test(serverDeleteRoute)
+  );
+
+  const userRoute = read("../src/app/api/users/[id]/route.ts");
+  check(
+    "deleting a user removes its API keys in one transaction",
+    /db\.transaction\(/.test(userRoute) &&
+      /tx\.delete\(apiKeys\)/.test(userRoute) &&
+      /tx\.delete\(users\)/.test(userRoute)
+  );
+  // Every refusal has to be decided before the first write, or a 400 can
+  // still leave the account stripped of its keys.
+  check(
+    "user delete counts forum posts before deleting anything",
+    userRoute.indexOf("forum post(s)") < userRoute.indexOf("db.transaction(")
+  );
+
+  // src/middleware.ts was never tracked, so `git pull` cannot delete it from
+  // an existing install. Next 16 refuses to build when it sits alongside
+  // proxy.ts, which breaks the update AND the rollback.
+  const updater = read("../public/update.sh");
+  check(
+    "the updater removes the obsolete src/middleware.ts",
+    /src\/middleware\.ts/.test(updater) && /src\/proxy\.ts/.test(updater)
+  );
+  check(
+    "the middleware cleanup tolerates --no-backup (THIS_BACKUP unset)",
+    /\$\{THIS_BACKUP:-\}/.test(updater)
+  );
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed`);

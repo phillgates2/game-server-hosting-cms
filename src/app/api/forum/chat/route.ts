@@ -4,6 +4,9 @@ import { chatMessages, users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { desc, gt, eq, sql } from "drizzle-orm";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("chat");
 
 // GET /api/forum/chat — fetch recent messages (with optional ?after=<id> for polling)
 // Public: anyone can read chat messages (guests see read-only view)
@@ -50,7 +53,7 @@ export async function GET(req: NextRequest) {
       onlineCount: onlineResult[0]?.count ?? 0,
     });
   } catch (e: unknown) {
-    console.error("Chat GET error:", e);
+    log.exception("failed to list messages", e);
     return NextResponse.json({ error: "Failed to load messages" }, { status: 500 });
   }
 }
@@ -101,7 +104,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ message: full });
   } catch (e: unknown) {
-    console.error("Chat POST error:", e);
+    log.exception("failed to post a message", e);
     return NextResponse.json({ error: "Failed to send message" }, { status: 500 });
   }
 }
@@ -143,7 +146,7 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
-    console.error("Chat DELETE error:", e);
+    log.exception("failed to delete a message", e);
     return NextResponse.json({ error: "Failed to delete message" }, { status: 500 });
   }
 }

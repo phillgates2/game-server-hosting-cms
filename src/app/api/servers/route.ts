@@ -10,6 +10,9 @@ import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { apiError } from "@/lib/api-error";
 import { validatePorts, parsePort, withinServerQuota } from "@/lib/server-lifecycle";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("servers");
 
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
@@ -53,7 +56,7 @@ export async function GET(req: NextRequest) {
     const servers = await query;
     return NextResponse.json({ servers });
   } catch (e) {
-    console.error("GET /api/servers error:", e);
+    log.exception("failed to list servers", e);
     return NextResponse.json({ servers: [] });
   }
 }

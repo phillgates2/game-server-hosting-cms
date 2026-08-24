@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 interface NodeMetrics {
   cpuPercent: number | null;
@@ -44,6 +45,7 @@ interface AuthUser {
 }
 
 export default function NodesPanel({ user }: { user: AuthUser }) {
+  const confirm = useConfirm();
   const [nodes, setNodes] = useState<Node[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
@@ -190,7 +192,8 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
   }
 
   async function deleteNode(id: number) {
-    if (!confirm("Delete this node? This cannot be undone.")) return;
+    const ok = await confirm({ title: "Delete Node", message: "Delete this node? This cannot be undone.", confirmLabel: "Delete", danger: true });
+    if (!ok) return;
 
     try {
       const res = await fetch(`/api/nodes/${id}`, { method: "DELETE" });

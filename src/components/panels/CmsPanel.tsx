@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 interface CmsPost {
   id: number;
@@ -17,6 +18,7 @@ interface CmsPost {
 }
 
 export default function CmsPanel() {
+  const confirm = useConfirm();
   const [posts, setPosts] = useState<CmsPost[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -120,7 +122,8 @@ export default function CmsPanel() {
   }
 
   async function deletePost(slug: string) {
-    if (!confirm("Delete this post?")) return;
+    const ok = await confirm({ title: "Delete Post", message: "Delete this post? This cannot be undone.", confirmLabel: "Delete", danger: true });
+    if (!ok) return;
     try {
       await fetch(`/api/cms/${slug}`, { method: "DELETE" });
       loadPosts();

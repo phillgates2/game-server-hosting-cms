@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { gameServers, gameDefinitions, nodes } from "@/db/schema";
+import { gameServers, gameDefinitions, nodes, serverMetrics } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
 import { join } from "node:path";
 import { apiError } from "@/lib/api-error";
 import { hasCrashed, shouldAutoRestart } from "@/lib/server-lifecycle";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("metrics");
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -98,7 +101,40 @@ export async function POST(
       // plain "stopped" and sent no notification at all.
       const crashed = hasCrashed({ status: server.status, alive });
 
+      // Record a per-server resource sample. server_metrics has existed from
+      // the start and been pruned by the retention job, but nothing ever wrote
+      // to it, so per-server history was permanently empty and monitoring
+      // could only ever show host-wide figures.
+      //
+      // Sampling rides on the existing 15s status poll rather than adding a
+      // timer, and is best-effort: a failure here must never affect the poll.
+      if (alive && server.pid) {
+        try {
+          const { sampleProcess, cpuPercentFor, shouldStoreSample } = await import("@/lib/process-metrics");
+          // Throttled independently of the poll: several open dashboards must
+          // not multiply the write rate.
+          const sample = shouldStoreSample(server.id) ? await sampleProcess(server.pid) : null;
+          if (sample) {
+            await db.insert(serverMetrics).values({
+              serverId: server.id,
+              cpuPercent: cpuPercentFor(server.pid, sample),
+              ramUsedMb: Math.round(sample.ramMb * 100) / 100,
+            });
+          }
+        } catch (e: unknown) {
+          log.warn("could not record a metric sample", {
+            server: server.name,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+
       if (alive !== (server.status === "running")) {
+        if (!alive && server.pid) {
+          const { forgetProcess, forgetSampleThrottle } = await import("@/lib/process-metrics");
+          forgetProcess(server.pid);
+          forgetSampleThrottle(server.id);
+        }
         await db.update(gameServers).set({
           status: crashed ? "crashed" : alive ? "running" : "stopped",
           pid: alive ? server.pid : null,

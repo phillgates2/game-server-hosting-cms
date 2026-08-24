@@ -6,6 +6,9 @@ import { hasPermission } from "@/lib/permissions";
 import { eq, desc, sql } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
 import { publicNode } from "@/lib/server-lifecycle";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("nodes");
 
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
@@ -66,7 +69,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ nodes: nodesWithData });
   } catch (e) {
-    console.error("GET /api/nodes error:", e);
+    log.exception("failed to list nodes", e);
     return NextResponse.json({ nodes: [] });
   }
 }

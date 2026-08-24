@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 interface InstalledGame {
   id: number; slug: string; name: string; engine: string | null; defaultPort: number;
@@ -83,6 +84,7 @@ function GameForm({ form, setForm, onSave, onCancel, saveLabel, title }: {
 }
 
 export default function GamesPanel() {
+  const confirm = useConfirm();
   const [tab, setTab] = useState<Tab>("installed");
   const [installedGames, setInstalledGames] = useState<InstalledGame[]>([]);
   const [templates, setTemplates] = useState<GameTemplate[]>([]);
@@ -132,7 +134,8 @@ export default function GamesPanel() {
   }
 
   async function uninstallGame(slug: string) {
-    if (!confirm("Remove this game? Existing servers using it may stop working.")) return;
+    const ok = await confirm({ title: "Remove Game", message: "Remove this game template? Existing servers using it may stop working.", confirmLabel: "Remove", danger: true });
+    if (!ok) return;
     try {
       const res = await fetch(`/api/templates/${slug}/install`, { method: "DELETE" });
       if (!res.ok) { const d = await res.json(); setMessage({ type: "error", text: d.error }); }
