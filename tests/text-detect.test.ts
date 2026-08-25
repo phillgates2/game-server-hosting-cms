@@ -73,6 +73,74 @@ describe("text files open in the editor", () => {
     }
   });
 
+  test("the config formats operators actually hand-edit", () => {
+    // Drawn from the files these 27 games ship plus the ones admins add
+    // alongside them (bans, motd, mapcycle, admin lists).
+    for (const name of [
+      "gameinfo.txt", "addons.vdf", "pack.mcmeta", "ops.json",
+      "whitelist.json", "banned-players.json", "init.sqf", "cfg.arma3profile",
+      "motd.txt", "admins.cfg", "mapcycle.txt", "settings.json5",
+      "docker-compose.yml", "Caves/server.ini", "server.cnf", "map.lst",
+    ]) {
+      assert.equal(
+        looksLikeText(text("key = value\n"), name).isText,
+        true,
+        `${name} should be editable`
+      );
+    }
+  });
+
+  test("backup and disabled copies stay editable", () => {
+    for (const name of ["server.cfg.bak", "config.ini.disabled", "rules.txt.old"]) {
+      const check = looksLikeText(text("a=1\n"), name);
+      assert.equal(check.isText, true, name);
+      // Assert the route, not just the verdict: plain text passes the sniffer
+      // regardless, so only this pins the suffixes as recognised formats and
+      // keeps an empty or control-dense .bak editable.
+      assert.equal(check.reason, "known text extension", name);
+    }
+  });
+
+  test("a binary renamed .bak is judged by content, not the suffix", () => {
+    // .bak is on the text list, so only sniffing can catch this.
+    assert.equal(
+      looksLikeText(bytes(0x47, 0x4d, 0x41, 0x44, 0x00, 0xff), "addon.gma.bak").isText,
+      false
+    );
+    assert.equal(
+      looksLikeText(bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a), "icon.png.old").isText,
+      false
+    );
+  });
+
+  test("PEM certificates open but their DER equivalents do not", () => {
+    // Same extensions carry both encodings; content has to decide.
+    assert.equal(
+      looksLikeText(text("-----BEGIN CERTIFICATE-----\nMIIB\n"), "server.crt").isText,
+      true
+    );
+    assert.equal(
+      looksLikeText(bytes(0x30, 0x82, 0x01, 0x0a, 0x02, 0x82), "server.crt").isText,
+      false
+    );
+  });
+
+  test("a known text format is not refused for looking unusual", () => {
+    // Checked before the control-character heuristic: the file is already
+    // valid UTF-8, so the editor round-trips it losslessly regardless.
+    const dense = bytes(0x01, 0x02, 0x03, 0x04, 0x41, 0x42, 0x43, 0x44);
+    assert.equal(looksLikeText(dense, "server.cfg").isText, true);
+    // The same bytes under an unknown extension are still refused.
+    assert.equal(looksLikeText(dense, "thing.zzzzz").isText, false);
+  });
+
+  test("the text list never overrides the corruption gates", () => {
+    // Null bytes and invalid UTF-8 corrupt on save whatever the extension.
+    assert.equal(looksLikeText(bytes(0x41, 0x00, 0x42), "server.cfg").isText, false);
+    assert.equal(looksLikeText(bytes(0x41, 0xff, 0x42), "server.cfg").isText, false);
+    assert.equal(looksLikeText(bytes(0xff, 0xfe, 0x41, 0x00), "server.cfg").isText, false);
+  });
+
   test("an unknown extension holding plain text is still editable", () => {
     // The allowlist's other failure: refusing to open obvious text.
     const check = looksLikeText(text("plain text\n"), "notes.whatever");

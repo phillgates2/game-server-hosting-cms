@@ -17,7 +17,9 @@ All notable changes to GameServer Manager are documented here.
 
 - The installer check rendered each game straight from its definition file, but a real install goes through the database first, and only some of those fields are copied across. That gap was never tested — a game could verify clean and still install wrong.
 - Every game is now round-tripped through the database and re-rendered from the stored row, covering the install script, start and stop commands, and generated config files.
-- **350 tests** (57 new) and **113 security checks** (8 new).
+- **Many more config formats are recognised by name**, including Source engine `.vdf`/`.res`, Minecraft `.mcmeta`/`.mcfunction`, Arma `.sqf`/`.arma3profile`, admin lists (`ops`, `whitelist`, `banlist`, `motd`, `mapcycle`), and `.bak`/`.old`/`.disabled` copies of any of them.
+- Recognised formats are now accepted a step earlier, so a valid config is never rejected for looking unusual. The safety checks still come first — a file that would be damaged by editing is refused no matter what it is called, and a binary renamed to `.bak` is still caught.
+- **356 tests** (63 new) and **113 security checks** (8 new).
 
 ### 📝 File Editor
 

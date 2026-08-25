@@ -16,7 +16,7 @@ Deploy, configure, and monitor game servers across multiple machines from one da
 
 <br>
 
-<samp>**27** games · **1,551** config options · **67** API routes · **350** tests · **113** security checks</samp>
+<samp>**27** games · **1,551** config options · **67** API routes · **356** tests · **113** security checks</samp>
 
 <br>
 
@@ -641,7 +641,7 @@ One command chains every check, exiting non-zero on the first failure — drop i
 
 | Script | Checks |
 |:--|:--|
-| `npm test` | 350 tests over the config renderer, path guard, auth, pagination, API key scopes, server lifecycle rules, and **database integrity, end-to-end installer round-trips, and multi-write atomicity against a real PostgreSQL** *(see below)* |
+| `npm test` | 356 tests over the config renderer, path guard, auth, pagination, API key scopes, server lifecycle rules, and **database integrity, end-to-end installer round-trips, and multi-write atomicity against a real PostgreSQL** *(see below)* |
 | `npm run typecheck` | `tsc --noEmit` across the project |
 | `npm run lint` | ESLint, including React hooks rules |
 | `npm run verify:templates` | All 1,551 template options — types, enums, defaults, and that every declared variable is actually consumed |

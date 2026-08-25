@@ -16,20 +16,52 @@
  * bytes, which is both safer and more permissive.
  */
 
-/** Extensions that are always text, even if the sniffer is unsure. */
+/**
+ * Extensions that are always text.
+ *
+ * Checked after the corruption gates (null bytes, invalid UTF-8) but BEFORE
+ * the control-character heuristic, so a known config format is never refused
+ * for looking unusual. Valid UTF-8 round-trips through the editor byte for
+ * byte, so accepting it here cannot corrupt anything - the heuristic only
+ * exists to catch binaries wearing an unknown extension.
+ */
 const KNOWN_TEXT_EXTS = new Set([
-  // Config and data
-  "cfg", "ini", "conf", "config", "properties", "yml", "yaml", "toml",
-  "json", "xml", "csv", "tsv", "env", "vdf", "acf", "kv", "gi",
+  // Generic config
+  "cfg", "ini", "conf", "config", "cnf", "properties", "props", "prop",
+  "yml", "yaml", "toml", "json", "json5", "jsonc", "jsonl", "ndjson",
+  "xml", "csv", "tsv", "env", "rc", "settings", "options", "opts",
+  "prefs", "params", "defaults", "dist", "sample", "example", "template",
+  "tmpl", "default", "spec",
+  // Source engine / Steam
+  "vdf", "acf", "kv", "kv3", "gi", "res", "gameinfo", "vmt", "smx_txt",
+  // Minecraft ecosystem
+  "mcmeta", "mcfunction", "snbt", "lang", "properties_bak",
+  // Arma / Unreal / id Tech / other engines
+  "sqf", "sqm", "ext", "hpp", "inc", "sp", "shader", "script", "arena",
+  "menu", "cvar", "bot", "def", "profile",
+  // Lists operators hand-edit
+  "list", "lst", "motd", "banlist", "whitelist", "blacklist", "adminlist",
+  "ops", "admins", "bans", "allow", "deny", "users",
   // Docs and logs
-  "txt", "md", "log", "readme", "nfo",
-  // Scripts
-  "sh", "bash", "zsh", "bat", "cmd", "ps1",
-  "lua", "gm", "nut", "py", "pl", "rb", "js", "mjs", "cjs", "ts", "as",
+  "txt", "md", "markdown", "rst", "adoc", "log", "out", "err", "trace",
+  "readme", "nfo", "changelog", "license", "authors", "todo",
+  // Scripts and shells
+  "sh", "bash", "zsh", "ksh", "fish", "bat", "cmd", "ps1", "psm1",
+  "lua", "gm", "nut", "py", "pl", "rb", "tcl", "awk", "sed",
+  "js", "mjs", "cjs", "ts", "mts", "cts", "jsx", "tsx", "as", "vue", "svelte",
+  // Other source files that ship alongside servers
+  "java", "kt", "groovy", "gradle", "cs", "go", "rs", "c", "h", "cpp", "cc",
+  "hxx", "php", "sql", "diff", "patch",
   // Web
-  "html", "htm", "css", "scss",
-  // Misc
-  "sql", "service", "timer", "socket", "desktop", "gitignore", "editorconfig",
+  "html", "htm", "xhtml", "css", "scss", "sass", "less", "svg",
+  // systemd and packaging
+  "service", "timer", "socket", "mount", "path", "target", "desktop",
+  "gitignore", "gitattributes", "gitmodules", "dockerignore", "editorconfig",
+  "npmrc", "nvmrc", "eslintrc", "prettierrc", "babelrc",
+  // Text-encoded keys and certificates (PEM); binary DER is caught by sniffing
+  "pem", "crt", "csr", "pub", "asc",
+  // Backup and disabled copies of the above
+  "bak", "old", "orig", "backup", "disabled", "save", "prev",
 ]);
 
 /**
@@ -39,16 +71,21 @@ const KNOWN_TEXT_EXTS = new Set([
  */
 const KNOWN_BINARY_EXTS = new Set([
   // Archives
-  "zip", "gz", "tgz", "bz2", "xz", "7z", "rar", "tar", "jar", "gma", "pak",
-  "vpk", "bsp", "wad", "pk3", "pk4",
+  "zip", "gz", "tgz", "bz2", "xz", "zst", "lz4", "7z", "rar", "tar", "jar",
+  "gma", "pak", "vpk", "bsp", "wad", "pk3", "pk4", "pbo", "ebo",
   // Executables and libraries
   "exe", "dll", "so", "dylib", "bin", "o", "a", "class", "pyc", "wasm",
-  // Media
+  "smx", "msi", "deb", "rpm", "appimage",
+  // Media and fonts
   "png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "svgz", "tga", "dds",
-  "mp3", "ogg", "wav", "flac", "mp4", "avi", "mkv", "webm", "mov",
+  "vtf", "mp3", "ogg", "wav", "flac", "mp4", "avi", "mkv", "webm", "mov",
   "ttf", "otf", "woff", "woff2",
+  // Game assets and world data
+  "mdl", "vtx", "vvd", "phy", "nav", "ain", "uasset", "umap", "upk", "pck",
+  "locres", "acd", "bikey", "mca", "mcr", "nbt", "schem", "schematic",
+  "fwl", "rdb", "hprof", "jfr",
   // Data stores
-  "db", "sqlite", "sqlite3", "mdb", "dat", "sav", "idx",
+  "db", "sqlite", "sqlite3", "mdb", "dat", "sav", "idx", "ldb", "wal",
 ]);
 
 /** Byte-order marks that positively identify a text file. */
@@ -128,8 +165,16 @@ export function looksLikeText(sample: Uint8Array, fileName = ""): TextCheck {
     return { isText: false, reason: "invalid utf-8" };
   }
 
-  // Valid UTF-8 can still be binary-ish. Control characters other than the
-  // ordinary whitespace ones are the giveaway.
+  // Past this point the file is valid UTF-8 with no null bytes, so the editor
+  // can round-trip it losslessly. A recognised config format is accepted here
+  // rather than being put through the heuristic below, which would refuse a
+  // legitimate file that happens to be dense in control characters.
+  if (KNOWN_TEXT_EXTS.has(ext)) {
+    return { isText: true, reason: "known text extension" };
+  }
+
+  // For everything else, control characters other than ordinary whitespace
+  // are the giveaway that a file is binary despite decoding cleanly.
   let control = 0;
   for (const byte of sample) {
     const isAllowedWhitespace =
@@ -141,9 +186,6 @@ export function looksLikeText(sample: Uint8Array, fileName = ""): TextCheck {
     return { isText: false, reason: "too many control characters" };
   }
 
-  if (KNOWN_TEXT_EXTS.has(ext)) {
-    return { isText: true, reason: "known text extension" };
-  }
   return { isText: true, reason: "utf8 text" };
 }
 
