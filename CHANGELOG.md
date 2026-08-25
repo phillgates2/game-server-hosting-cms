@@ -17,7 +17,14 @@ All notable changes to GameServer Manager are documented here.
 
 - The installer check rendered each game straight from its definition file, but a real install goes through the database first, and only some of those fields are copied across. That gap was never tested — a game could verify clean and still install wrong.
 - Every game is now round-tripped through the database and re-rendered from the stored row, covering the install script, start and stop commands, and generated config files.
-- **327 tests** (34 new) and **111 security checks** (6 new).
+- **350 tests** (57 new) and **113 security checks** (8 new).
+
+### 📝 File Editor
+
+- **`.gm` (GameMonkey) scripts and other plain-text files can now be opened.** The editor decided what was editable from a fixed list of file extensions, so anything not on it — however obviously text — could only be downloaded.
+- Editability is now judged by looking at the file's actual contents. Any genuine text file opens, whatever it is called.
+- **This also closes a way to destroy files.** The editor reads and writes as UTF-8, which silently mangles anything that is not text: bytes it cannot interpret are replaced, and saving writes the damaged version back. A file on the old list that was secretly binary — a rotated log that is really compressed, for instance — could be opened and saved, and the original was unrecoverable. The check now runs on the server, so it cannot be sidestepped, and saving over a binary file is refused outright.
+- Files that cannot be edited now say why (binary, wrong encoding, not valid text) instead of always reporting "Binary file".
 
 ### ⬆️ Updater
 

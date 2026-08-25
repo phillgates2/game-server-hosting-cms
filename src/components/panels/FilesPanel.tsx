@@ -6,7 +6,7 @@ import { useConfirm } from "@/components/ConfirmDialog";
 interface AuthUser { id: number; username: string; role: string }
 interface Server { id: number; name: string; gameName: string | null; gameIcon: string | null; gameSlug: string | null; status: string }
 interface FileEntry { name: string; path: string; isDir: boolean; size: number; modified: string; ext: string | null }
-interface FileContent { type: "file"; path: string; name: string; size: number; content: string | null; tooLarge?: boolean; modified?: string }
+interface FileContent { type: "file"; path: string; name: string; size: number; content: string | null; tooLarge?: boolean; binary?: boolean; reason?: string; modified?: string }
 
 function fmtSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -34,7 +34,11 @@ function fileIcon(ext: string | null, isDir: boolean): string {
   return icons[ext || ""] || "📄";
 }
 
-const EDITABLE_EXTS = new Set(["cfg", "ini", "conf", "config", "properties", "yml", "yaml", "toml", "json", "xml", "csv", "txt", "md", "log", "sh", "bash", "bat", "cmd", "lua", "py", "js", "ts", "html", "css", "sql", "env", "service", "timer", ""]);
+// Which files are editable is decided by the server, which sniffs the actual
+// bytes (src/lib/text-detect.ts). An extension list here would both block
+// plain-text formats nobody listed (.gm, .vdf, .kv) and happily open a file
+// that is binary despite an allowlisted extension -- a .log that is really
+// gzip. The server returns `binary: true` with a reason when it refuses.
 
 /** A file picked up from a drop, together with the folder path it came from. */
 interface DroppedFile {
@@ -566,7 +570,7 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
   }
 
   const breadcrumbs = currentPath === "." ? ["root"] : ["root", ...currentPath.split("/")];
-  const isEditable = editingFile && !editingFile.tooLarge && EDITABLE_EXTS.has((editingFile.name.split(".").pop() || "").toLowerCase());
+  const isEditable = editingFile && !editingFile.tooLarge && !editingFile.binary;
   const allSelected = entries.length > 0 && selectedPaths.length === entries.length;
 
   return (
@@ -845,7 +849,15 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
           ) : (
             <div className="gaming-surface rounded-xl p-8 text-center">
               <span className="text-3xl block mb-2">{fileIcon(editingFile.name.split(".").pop() || null, false)}</span>
-              <p className="text-text-secondary">Binary file — cannot edit in browser</p>
+              <p className="text-text-secondary">
+                {editingFile.reason === "utf-16 without a decoder"
+                  ? "This file is UTF-16 encoded — editing it here would corrupt it."
+                  : editingFile.reason === "too many control characters" ||
+                    editingFile.reason === "invalid utf-8" ||
+                    editingFile.reason === "contains null bytes"
+                  ? "This file is not valid UTF-8 text — editing it here would corrupt it."
+                  : "Binary file — cannot edit in browser"}
+              </p>
               <button onClick={() => { if (selectedId) downloadFile({ name: editingFile.name, path: editingFile.path, isDir: false, size: editingFile.size, modified: "", ext: null }); }}
                 className="mt-3 px-4 py-2 bg-accent text-white rounded-lg text-sm">Download File</button>
             </div>

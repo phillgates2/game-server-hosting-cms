@@ -1,5 +1,6 @@
 import { readdir, stat, readFile, writeFile, mkdir, rm, rename } from "node:fs/promises";
 import { join, resolve, relative, extname, basename, dirname, sep } from "node:path";
+import { looksLikeText } from "./text-detect";
 
 export interface ServerFileItem {
   name: string;
@@ -70,14 +71,34 @@ export async function readText(basePath: string, requestedPath: string, maxBytes
     };
   }
 
-  const content = await readFile(fullPath, "utf8");
+  // Sniff the real bytes before decoding. Reading a binary file as utf8
+  // turns every undecodable byte into U+FFFD, and saving writes those
+  // replacements back over the original -- silent, unrecoverable corruption.
+  const raw = await readFile(fullPath);
+  const check = looksLikeText(
+    new Uint8Array(raw.buffer, raw.byteOffset, Math.min(raw.length, 8192)),
+    basename(fullPath)
+  );
+  if (!check.isText) {
+    return {
+      type: "file" as const,
+      path: relPath,
+      name: basename(fullPath),
+      size: s.size,
+      modified: s.mtime.toISOString(),
+      binary: true as const,
+      reason: check.reason,
+      content: null,
+    };
+  }
+
   return {
     type: "file" as const,
     path: relPath,
     name: basename(fullPath),
     size: s.size,
     modified: s.mtime.toISOString(),
-    content,
+    content: raw.toString("utf8"),
   };
 }
 
@@ -126,6 +147,26 @@ export async function listDirectory(basePath: string, requestedPath: string) {
 export async function writeTextFile(basePath: string, requestedPath: string, content: string) {
   const fullPath = safePath(basePath, requestedPath);
   if (!fullPath) throw new Error("Path outside server directory");
+
+  // Refuse to overwrite a file the editor should never have opened. Without
+  // this, a client that skips the read (or an out-of-date tab) can replace a
+  // binary with its mojibake transcription.
+  try {
+    const existing = await readFile(fullPath);
+    if (existing.length > 0) {
+      const check = looksLikeText(
+        new Uint8Array(existing.buffer, existing.byteOffset, Math.min(existing.length, 8192)),
+        basename(fullPath)
+      );
+      if (!check.isText) {
+        throw new Error("Refusing to overwrite a binary file with text");
+      }
+    }
+  } catch (e) {
+    // A missing file is fine -- this is how new files are created.
+    if ((e as NodeJS.ErrnoException)?.code !== "ENOENT") throw e;
+  }
+
   await writeFile(fullPath, content, "utf8");
 }
 

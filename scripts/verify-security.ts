@@ -542,6 +542,19 @@ console.log("\nH2/H3 auth enforcement wiring");
     "the middleware cleanup tolerates --no-backup (THIS_BACKUP unset)",
     /\$\{THIS_BACKUP:-\}/.test(updater)
   );
+
+  // Reading a binary file as utf8 replaces undecodable bytes with U+FFFD, and
+  // saving writes those back over the original. The editor's guard has to be
+  // server-side: a browser-only allowlist is bypassed by any direct API call.
+  const fileOps = read("../src/lib/server-file-ops.ts");
+  check(
+    "the file editor sniffs content before serving it as text",
+    /looksLikeText\(/.test(fileOps) && /binary: true/.test(fileOps)
+  );
+  check(
+    "saving refuses to overwrite a binary file with text",
+    /Refusing to overwrite a binary file/.test(fileOps)
+  );
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed`);
