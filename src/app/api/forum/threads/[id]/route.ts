@@ -6,6 +6,10 @@ import { hasPermission } from "@/lib/permissions";
 import { eq, asc, sql } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
 
+/** Kept in step with POST /api/forum/threads so the limits cannot drift. */
+const MAX_TITLE_LENGTH = 256;
+const MAX_POST_LENGTH = 100_000;
+
 // GET thread with posts and rich user data — publicly readable
 export async function GET(
   _req: NextRequest,
@@ -77,7 +81,11 @@ export async function POST(
     if (thread?.locked) return NextResponse.json({ error: "Thread is locked" }, { status: 403 });
 
     const { body } = await req.json();
-    if (!body) return NextResponse.json({ error: "Body required" }, { status: 400 });
+    const replyBody = String(body ?? "").trim();
+    if (!replyBody) return NextResponse.json({ error: "Body required" }, { status: 400 });
+    if (replyBody.length > MAX_POST_LENGTH) {
+      return NextResponse.json({ error: `body is limited to ${MAX_POST_LENGTH} characters` }, { status: 400 });
+    }
 
     // The reply and the thread's activity bump belong together; otherwise a
     // failure leaves a visible reply on a thread that looks untouched, so it
@@ -85,7 +93,7 @@ export async function POST(
     const post = await db.transaction(async (tx) => {
       const [created] = await tx
         .insert(forumPosts)
-        .values({ threadId: Number(id), userId: auth.userId, body })
+        .values({ threadId: Number(id), userId: auth.userId, body: replyBody })
         .returning();
       await tx
         .update(forumThreads)
@@ -128,16 +136,22 @@ export async function PATCH(
     }
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
-    if (body.title !== undefined && (canThreadModerate || isOwner)) update.title = body.title;
+    if (body.title !== undefined && (canThreadModerate || isOwner)) {
+      const title = String(body.title ?? "").trim();
+      if (!title || title.length > MAX_TITLE_LENGTH) {
+        return NextResponse.json({ error: `title is required (max ${MAX_TITLE_LENGTH} characters)` }, { status: 400 });
+      }
+      update.title = title;
+    }
     if (body.pinned !== undefined) {
       const canPin = canThreadModerate || (await hasPermission(auth.userId, "forum.thread.pin")) || (await hasPermission(auth.userId, "forum.pin"));
       if (!canPin) return NextResponse.json({ error: "Permission denied" }, { status: 403 });
-      update.pinned = body.pinned;
+      update.pinned = body.pinned === true || body.pinned === "true";
     }
     if (body.locked !== undefined) {
       const canLock = canThreadModerate || (await hasPermission(auth.userId, "forum.thread.lock")) || (await hasPermission(auth.userId, "forum.lock"));
       if (!canLock) return NextResponse.json({ error: "Permission denied" }, { status: 403 });
-      update.locked = body.locked;
+      update.locked = body.locked === true || body.locked === "true";
     }
 
     const [updated] = await db.update(forumThreads).set(update).where(eq(forumThreads.id, Number(id))).returning();

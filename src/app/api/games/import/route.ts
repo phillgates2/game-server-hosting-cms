@@ -4,7 +4,7 @@ import { gameDefinitions } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
-import { apiError } from "@/lib/api-error";
+import { apiError, isUniqueViolation } from "@/lib/api-error";
 import { toValidSlug } from "@/lib/slug";
 
 // POST /api/games/import — Import a Pterodactyl egg JSON or AMP template
@@ -46,7 +46,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Slug "${game.slug}" already exists. Uninstall it first or use a different name.` }, { status: 409 });
     }
 
-    const [created] = await db.insert(gameDefinitions).values(game).returning();
+    let created;
+    try {
+      [created] = await db.insert(gameDefinitions).values(game).returning();
+    } catch (e: unknown) {
+      // Two parallel imports of the same game can both pass the check above;
+      // the unique index arbitrates and deserves the same 409, not a 500.
+      if (isUniqueViolation(e)) {
+        return NextResponse.json({ error: `Slug "${game.slug}" already exists. Uninstall it first or use a different name.` }, { status: 409 });
+      }
+      throw e;
+    }
 
     return NextResponse.json({
       ok: true,

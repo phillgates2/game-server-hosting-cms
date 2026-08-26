@@ -162,3 +162,117 @@ describe("sendDiscordWebhook payload", () => {
     assert.match(String(res.error), /Invalid Discord webhook URL/);
   });
 });
+
+describe("status dot and player count fields", () => {
+  async function capture(fn: () => Promise<unknown>) {
+    const { createServer } = await import("node:http");
+    let body: Record<string, unknown> = {};
+    const srv = createServer((req, res) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        body = JSON.parse(raw || "{}");
+        res.writeHead(204);
+        res.end();
+      });
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
+    const port = (srv.address() as { port: number }).port;
+
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((_url: string, init: RequestInit) =>
+      realFetch(`http://127.0.0.1:${port}/`, init)) as typeof fetch;
+    try {
+      await fn();
+    } finally {
+      globalThis.fetch = realFetch;
+      srv.close();
+    }
+    return body;
+  }
+
+  const HOOK = "https://discord.com/api/webhooks/123/abc";
+
+  function fieldsOf(body: Record<string, unknown>) {
+    const embed = (body.embeds as Array<Record<string, unknown>>)[0];
+    return (embed.fields ?? []) as Array<{ name: string; value: string }>;
+  }
+
+  test("a started notification carries the green dot and the live count", async () => {
+    const { sendDiscordWebhook } = await import("../src/lib/discord");
+    const body = await capture(() =>
+      sendDiscordWebhook(HOOK, {
+        serverName: "Survival SMP", gameName: "Minecraft", port: 25565,
+        event: "server_started",
+        serverStatus: "online", playerCount: 3, maxPlayers: 16,
+      })
+    );
+    const fields = fieldsOf(body);
+    const status = fields.find((f) => f.name === "Status");
+    assert.ok(status, "Status field missing");
+    assert.equal(status.value, "🟢 Online");
+    const players = fields.find((f) => f.name === "👥 Players");
+    assert.ok(players, "Players field missing");
+    assert.equal(players.value, "3/16");
+  });
+
+  test("a stopped notification carries the red dot and the pre-stop count", async () => {
+    const { sendDiscordWebhook } = await import("../src/lib/discord");
+    const body = await capture(() =>
+      sendDiscordWebhook(HOOK, {
+        serverName: "S", gameName: "G", port: 1,
+        event: "server_stopped",
+        serverStatus: "offline", playerCount: 5, maxPlayers: 10,
+      })
+    );
+    const fields = fieldsOf(body);
+    assert.equal(fields.find((f) => f.name === "Status")?.value, "🔴 Offline");
+    assert.equal(fields.find((f) => f.name === "👥 Players")?.value, "5/10");
+  });
+
+  test("an explicit status wins over the event's default", async () => {
+    const { sendDiscordWebhook } = await import("../src/lib/discord");
+    const body = await capture(() =>
+      sendDiscordWebhook(HOOK, {
+        serverName: "S", gameName: "G", port: 1,
+        event: "server_stopped",
+        serverStatus: "online",
+      })
+    );
+    assert.equal(fieldsOf(body).find((f) => f.name === "Status")?.value, "🟢 Online");
+  });
+
+  test("no explicit status: lifecycle events derive it, players shows an em dash", async () => {
+    const { notifyServerCrashed } = await import("../src/lib/discord");
+    const body = await capture(() =>
+      notifyServerCrashed(HOOK, "S", "G", 1, 137)
+    );
+    const fields = fieldsOf(body);
+    assert.equal(fields.find((f) => f.name === "Status")?.value, "🔴 Offline");
+    assert.equal(fields.find((f) => f.name === "👥 Players")?.value, "—");
+  });
+
+  test("a max-only result renders as —/max, not a missing row", async () => {
+    const { sendDiscordWebhook } = await import("../src/lib/discord");
+    const body = await capture(() =>
+      sendDiscordWebhook(HOOK, {
+        serverName: "S", gameName: "G", port: 1,
+        event: "server_started",
+        serverStatus: "online", maxPlayers: 32,
+      })
+    );
+    assert.equal(fieldsOf(body).find((f) => f.name === "👥 Players")?.value, "—/32");
+  });
+
+  test("account events have no status dot — there is no server to dot", async () => {
+    const { sendDiscordWebhook } = await import("../src/lib/discord");
+    const body = await capture(() =>
+      sendDiscordWebhook(HOOK, {
+        serverName: "S", gameName: "G", port: 1,
+        event: "user_login",
+      })
+    );
+    const fields = fieldsOf(body);
+    assert.ok(!fields.some((f) => f.name === "Status"), "no Status field for account events");
+  });
+});

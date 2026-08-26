@@ -237,6 +237,7 @@ export async function POST(req: NextRequest) {
             discord = { channel: result.channelName };
 
             const { notifyServerCreated } = await import("@/lib/discord");
+            const { maxPlayersFrom } = await import("@/lib/players");
             await notifyServerCreated(
               result.webhookUrl,
               name,
@@ -244,7 +245,12 @@ export async function POST(req: NextRequest) {
               game?.iconEmoji || "🎮",
               ipv4 || null,
               ipv6 || null,
-              serverPort
+              serverPort,
+              {
+                serverStatus: "offline",
+                playerCount: 0,
+                maxPlayers: maxPlayersFrom(body.variables, body.config),
+              }
             ).catch(() => {});
           } else {
             discord = { error: result.error };

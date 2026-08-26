@@ -16,7 +16,7 @@ Deploy, configure, and monitor game servers across multiple machines from one da
 
 <br>
 
-<samp>**27** games · **1,551** config options · **67** API routes · **356** tests · **113** security checks</samp>
+<samp>**27** games · **1,551** config options · **67** API routes · **434** tests · **136** security checks</samp>
 
 <br>
 
@@ -161,7 +161,7 @@ Then visit `http://your-server:3000` to finish setup in the install wizard.
 - **Auto-restart** crashed servers
 - **Start on boot** after a reboot
 - **File manager** — browse, edit, upload
-- **Scheduler** — cron restarts & backups
+- **Scheduler** — cron restarts, backups, updates & commands, executed by the panel itself
 - **Backups** with one-click restore
 - **Live logs** streamed to the panel
 
@@ -183,7 +183,7 @@ Then visit `http://your-server:3000` to finish setup in the install wizard.
 
 **Security & access** — TOTP two-factor auth · CSRF protection · granular role-based permissions · **scoped API keys** *(a read-only key really is read-only)* · per-user server quotas · login throttling · full audit trail
 
-**Notifications** — Discord on start, stop, restart, crash, auto-restart, update and delete · **a channel per server**, created automatically · SMTP email via Nodemailer
+**Notifications** — Discord on start, stop, restart, crash, auto-restart, update and delete, **each with a 🟢/🔴 status dot and the live player count** *(probed straight from the game: Steam A2S, Minecraft ping, Bedrock RakNet, Quake3)* · **a channel per server**, created automatically · SMTP email via Nodemailer
 
 **Appearance** — 4 built-in themes plus a custom theme editor · 3 layout densities *(compact, cozy, spacious)*
 
@@ -482,7 +482,7 @@ Two places to configure things, split by who they are for:
 | Where | What |
 |:--|:--|
 | **Settings** *(Administration)* | Data retention, default server quota, self-registration, login attempt limit, session length, and everything Discord — webhook, bot, and channel backfill |
-| **Site Editor** *(✏️ on the public site)* | Panel name, hero text, footer, announcements, navigation links, chat widget |
+| **Site Editor** *(✏️ on the public site)* | Panel name, hero text, footer, announcements, navigation links, chat widget, and **custom CSS** |
 
 Everything in **Settings** overrides the matching environment variable, so you
 can change it without editing `.env` or restarting the panel.
@@ -641,12 +641,12 @@ One command chains every check, exiting non-zero on the first failure — drop i
 
 | Script | Checks |
 |:--|:--|
-| `npm test` | 356 tests over the config renderer, path guard, auth, pagination, API key scopes, server lifecycle rules, and **database integrity, end-to-end installer round-trips, and multi-write atomicity against a real PostgreSQL** *(see below)* |
+| `npm test` | 434 tests over the config renderer, path guard, auth, pagination, API key scopes, server lifecycle rules, and **database integrity, end-to-end installer round-trips, and multi-write atomicity against a real PostgreSQL** *(see below)* |
 | `npm run typecheck` | `tsc --noEmit` across the project |
 | `npm run lint` | ESLint, including React hooks rules |
 | `npm run verify:templates` | All 1,551 template options — types, enums, defaults, and that every declared variable is actually consumed |
 | `npm run verify:installers` | Renders every game's install script, runs `bash -n` + shellcheck, then **executes** it in a sandbox with SteamCMD/curl/apt mocked, and asserts the artifacts the panel needs were produced |
-| `npm run verify:security` | 113 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, and a sweep for leaked exception messages |
+| `npm run verify:security` | 136 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, and a sweep for leaked exception messages |
 
 All of these run automatically in CI on every push and pull request, along
 with a production build and a high-severity dependency audit.

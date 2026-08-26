@@ -7,6 +7,10 @@ import { eq, desc, sql } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
 import { limitParam, offsetParam } from "@/lib/pagination";
 
+/** Post bodies are text; cap them so a paste cannot become a multi-MB row. */
+const MAX_TITLE_LENGTH = 256;
+const MAX_POST_LENGTH = 100_000;
+
 export async function GET(req: NextRequest) {
   // Forum threads are publicly readable — no auth required
   const url = new URL(req.url);
@@ -60,12 +64,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "All fields required" }, { status: 400 });
     }
 
-    const [thread] = await db
-      .insert(forumThreads)
-      .values({ categoryId: Number(categoryId), userId: auth.userId, title })
-      .returning();
+    const categoryIdNum = Number(categoryId);
+    if (!Number.isInteger(categoryIdNum) || categoryIdNum <= 0) {
+      return NextResponse.json({ error: "Invalid category" }, { status: 400 });
+    }
+    const finalTitle = String(title).trim();
+    if (!finalTitle || finalTitle.length > MAX_TITLE_LENGTH) {
+      return NextResponse.json({ error: `title is required (max ${MAX_TITLE_LENGTH} characters)` }, { status: 400 });
+    }
+    const finalBody = String(body).trim();
+    if (!finalBody || finalBody.length > MAX_POST_LENGTH) {
+      return NextResponse.json({ error: `body is required (max ${MAX_POST_LENGTH} characters)` }, { status: 400 });
+    }
 
-    await db.insert(forumPosts).values({ threadId: thread.id, userId: auth.userId, body });
+    // A thread without its opening post would be a broken thread (the reply
+    // count subtracts one for it), and the GET above would show -1 replies.
+    let thread;
+    await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(forumThreads)
+        .values({ categoryId: categoryIdNum, userId: auth.userId, title: finalTitle })
+        .returning();
+      await tx.insert(forumPosts).values({ threadId: created.id, userId: auth.userId, body: finalBody });
+      thread = created;
+    });
 
     return NextResponse.json({ thread }, { status: 201 });
   } catch (e: unknown) {

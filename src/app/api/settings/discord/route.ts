@@ -84,6 +84,9 @@ export async function POST(req: NextRequest) {
         port: 0,
         event: "server_updated",
         message: "✅ Panel webhook is working. Notifications will be delivered here.",
+        serverStatus: "online",
+        playerCount: 3,
+        maxPlayers: 16,
       });
       return res.success
         ? NextResponse.json({ ok: true, message: "Test message sent" })

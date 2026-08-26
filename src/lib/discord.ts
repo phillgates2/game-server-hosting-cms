@@ -1,5 +1,7 @@
 // Discord Webhook Integration for Game Server Notifications
 
+export type ServerStatus = "online" | "offline";
+
 export type WebhookEvent = 
   | "server_created"
   | "server_started"
@@ -27,6 +29,8 @@ interface WebhookPayload {
   message?: string;
   playerCount?: number;
   maxPlayers?: number;
+  /** Explicit up/down state; when omitted server lifecycle events derive it. */
+  serverStatus?: ServerStatus;
   extra?: Record<string, string | number>;
 }
 
@@ -63,6 +67,41 @@ const EVENT_TITLES: Record<WebhookEvent, string> = {
   player_joined: "👋 Player Joined",
   player_left: "👋 Player Left",
 };
+
+/**
+ * Every embed carries a status dot: an explicit serverStatus wins, server
+ * lifecycle events derive one (a started server is up, a stopped one is not),
+ * and account events are not about a server at all, so they get no dot.
+ */
+const SERVER_LIFECYCLE_EVENTS: ReadonlySet<WebhookEvent> = new Set([
+  "server_created",
+  "server_started",
+  "server_stopped",
+  "server_restarted",
+  "server_crashed",
+  "server_deleted",
+  "server_updated",
+  "server_installed",
+  "server_backup",
+  "server_cloned",
+]);
+
+function statusFor(payload: WebhookPayload): ServerStatus | null {
+  if (payload.serverStatus === "online" || payload.serverStatus === "offline") {
+    return payload.serverStatus;
+  }
+  if (!SERVER_LIFECYCLE_EVENTS.has(payload.event)) return null;
+  return payload.event === "server_started" || payload.event === "server_restarted"
+    ? "online"
+    : "offline";
+}
+
+/** Optional detail the notify* helpers accept so callers stay terse. */
+export interface NotificationExtras {
+  serverStatus?: ServerStatus;
+  playerCount?: number;
+  maxPlayers?: number;
+}
 
 /**
  * Discord accepts webhooks on two hostnames, and both are handed out by the
@@ -108,18 +147,31 @@ export async function sendDiscordWebhook(
       ? `\`[${payload.ipv6}]:${payload.port}\``
       : `Port \`${payload.port}\``;
 
-  const fields = [
-    { name: "🎮 Game", value: payload.gameName, inline: true },
-    { name: "🌐 Connection", value: connectionString, inline: true },
-  ];
+  const fields = [];
 
-  if (payload.playerCount !== undefined) {
+  // Status dot first: the single at-a-glance answer to "is the server up?".
+  const status = statusFor(payload);
+  if (status) {
     fields.push({
-      name: "👥 Players",
-      value: `${payload.playerCount}${payload.maxPlayers ? `/${payload.maxPlayers}` : ""}`,
-      inline: true,
+      name: "Status",
+      value: status === "online" ? "🟢 Online" : "🔴 Offline",
+      inline: false,
     });
   }
+
+  fields.push(
+    { name: "🎮 Game", value: payload.gameName, inline: true },
+    { name: "🌐 Connection", value: connectionString, inline: true },
+  );
+
+  // Players is always present so the count is never silently absent — an
+  // unknown count renders as an em dash rather than a missing row.
+  const playersValue = payload.playerCount !== undefined
+    ? `${payload.playerCount}${payload.maxPlayers ? `/${payload.maxPlayers}` : ""}`
+    : payload.maxPlayers
+      ? `—/${payload.maxPlayers}`
+      : "—";
+  fields.push({ name: "👥 Players", value: playersValue, inline: true });
 
   if (payload.extra) {
     for (const [key, value] of Object.entries(payload.extra)) {
@@ -222,7 +274,8 @@ export async function notifyServerCreated(
   gameIcon: string,
   ipv4: string | null,
   ipv6: string | null,
-  port: number
+  port: number,
+  extras?: NotificationExtras
 ) {
   return sendDiscordWebhook(webhookUrl, {
     serverName,
@@ -233,6 +286,7 @@ export async function notifyServerCreated(
     port,
     event: "server_created",
     message: `**${serverName}** has been created and is ready to install!`,
+    ...extras,
   });
 }
 
@@ -242,7 +296,8 @@ export async function notifyServerStarted(
   gameName: string,
   ipv4: string | null,
   ipv6: string | null,
-  port: number
+  port: number,
+  extras?: NotificationExtras
 ) {
   return sendDiscordWebhook(webhookUrl, {
     serverName,
@@ -252,6 +307,7 @@ export async function notifyServerStarted(
     port,
     event: "server_started",
     message: `**${serverName}** is now online and accepting connections!`,
+    ...extras,
   });
 }
 
@@ -259,7 +315,8 @@ export async function notifyServerStopped(
   webhookUrl: string,
   serverName: string,
   gameName: string,
-  port: number
+  port: number,
+  extras?: NotificationExtras
 ) {
   return sendDiscordWebhook(webhookUrl, {
     serverName,
@@ -267,6 +324,7 @@ export async function notifyServerStopped(
     port,
     event: "server_stopped",
     message: `**${serverName}** has been stopped.`,
+    ...extras,
   });
 }
 
@@ -275,7 +333,8 @@ export async function notifyServerCrashed(
   serverName: string,
   gameName: string,
   port: number,
-  exitCode?: number
+  exitCode?: number,
+  extras?: NotificationExtras
 ) {
   return sendDiscordWebhook(webhookUrl, {
     serverName,
@@ -284,6 +343,7 @@ export async function notifyServerCrashed(
     event: "server_crashed",
     message: `⚠️ **${serverName}** has crashed unexpectedly!`,
     extra: exitCode !== undefined ? { "Exit Code": exitCode } : undefined,
+    ...extras,
   });
 }
 

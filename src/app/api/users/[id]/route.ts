@@ -4,8 +4,16 @@ import { users, gameServers, forumPosts, apiKeys } from "@/db/schema";
 import { getCurrentUser, hashPassword } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq, sql } from "drizzle-orm";
-import { apiError } from "@/lib/api-error";
+import { apiError, isUniqueViolation } from "@/lib/api-error";
 import { publicUser } from "@/lib/server-lifecycle";
+import {
+  normalizeRole,
+  normalizeStatus,
+  normalizeMaxServers,
+  normalizeEmail,
+  normalizeProfileText,
+  checkPassword,
+} from "@/lib/user-fields";
 
 // GET /api/users/[id] — Admin: get user detail
 export async function GET(
@@ -82,32 +90,72 @@ export async function PATCH(
       if (!(await hasPermission(auth.userId, "users.roles"))) {
         return NextResponse.json({ error: "users.roles permission required" }, { status: 403 });
       }
-      updateData.role = body.role;
+      // Refusing here is what keeps the last admin from locking the panel:
+      // without it, an admin (or admin role edit) could demote themselves
+      // and leave no account able to reach the admin surfaces.
+      const byId = Number(id);
+      const roleCheck = normalizeRole(body.role);
+      if (!roleCheck.ok) return NextResponse.json({ error: roleCheck.error }, { status: 400 });
+      if (byId === auth.userId && roleCheck.value !== "admin" && auth.role === "admin") {
+        return NextResponse.json({ error: "You cannot remove your own admin role" }, { status: 400 });
+      }
+      updateData.role = roleCheck.value;
     }
     if (body.status !== undefined) {
       if (!(await hasPermission(auth.userId, "users.suspend"))) {
         return NextResponse.json({ error: "users.suspend permission required" }, { status: 403 });
       }
-      updateData.status = body.status;
+      const statusCheck = normalizeStatus(body.status);
+      if (!statusCheck.ok) return NextResponse.json({ error: statusCheck.error }, { status: 400 });
+      updateData.status = statusCheck.value;
     }
     if (body.maxServers !== undefined) {
       if (!(await hasPermission(auth.userId, "users.limits"))) {
         return NextResponse.json({ error: "users.limits permission required" }, { status: 403 });
       }
-      updateData.maxServers = body.maxServers;
+      const limitCheck = normalizeMaxServers(body.maxServers);
+      if (!limitCheck.ok) return NextResponse.json({ error: limitCheck.error }, { status: 400 });
+      updateData.maxServers = limitCheck.value;
     }
-    if (body.email !== undefined) updateData.email = body.email;
-    if (body.bio !== undefined) updateData.bio = body.bio;
-    if (body.location !== undefined) updateData.location = body.location;
-    if (body.website !== undefined) updateData.website = body.website;
-    if (body.password) {
+    if (body.email !== undefined) {
+      const emailCheck = normalizeEmail(body.email);
+      if (!emailCheck.ok) return NextResponse.json({ error: emailCheck.error }, { status: 400 });
+      updateData.email = emailCheck.value;
+    }
+    if (body.bio !== undefined) {
+      const bio = normalizeProfileText(body.bio, "bio");
+      if (!bio.ok) return NextResponse.json({ error: bio.error }, { status: 400 });
+      updateData.bio = bio.value;
+    }
+    if (body.location !== undefined) {
+      const location = normalizeProfileText(body.location, "location");
+      if (!location.ok) return NextResponse.json({ error: location.error }, { status: 400 });
+      updateData.location = location.value;
+    }
+    if (body.website !== undefined) {
+      const website = normalizeProfileText(body.website, "website");
+      if (!website.ok) return NextResponse.json({ error: website.error }, { status: 400 });
+      updateData.website = website.value;
+    }
+    if (body.password !== undefined && String(body.password ?? "") !== "") {
       if (!((await hasPermission(auth.userId, "users.reset_password")) || (await hasPermission(auth.userId, "users.edit.security")))) {
         return NextResponse.json({ error: "users.reset_password permission required" }, { status: 403 });
       }
-      updateData.passwordHash = await hashPassword(body.password);
+      const pwCheck = checkPassword(body.password);
+      if (!pwCheck.ok) return NextResponse.json({ error: pwCheck.error }, { status: 400 });
+      updateData.passwordHash = await hashPassword(pwCheck.value);
     }
 
-    const [updated] = await db.update(users).set(updateData).where(eq(users.id, Number(id))).returning();
+    let updated;
+    try {
+      [updated] = await db.update(users).set(updateData).where(eq(users.id, Number(id))).returning();
+    } catch (e: unknown) {
+      // Two admins editing the same email: the unique index arbitrates.
+      if (isUniqueViolation(e)) {
+        return NextResponse.json({ error: "That email is already in use" }, { status: 409 });
+      }
+      throw e;
+    }
     // .returning() yields every column, including passwordHash and
     // twoFactorSecret; never hand those to a browser.
     return NextResponse.json({ user: updated ? publicUser(updated) : updated });

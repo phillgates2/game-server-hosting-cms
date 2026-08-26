@@ -555,7 +555,179 @@ console.log("\nH2/H3 auth enforcement wiring");
     "saving refuses to overwrite a binary file with text",
     /Refusing to overwrite a binary file/.test(fileOps)
   );
+
+  // Discord notifications must answer "is it up?" (a green/red dot) and
+  // "how many are on it?" — a live count, not a placeholder.
+  const players = read("../src/lib/players.ts");
+  check(
+    "live player counts are probed over the game's own query protocols",
+    /export async function probePlayers/.test(players) &&
+      /"a2s"/.test(players) &&
+      /"minecraft"/.test(players) &&
+      /"bedrock"/.test(players) &&
+      /"quake3"/.test(players) &&
+      /probeSpecFor/.test(players)
+  );
+  check(
+    "games without a query protocol short-circuit instead of timing out",
+    /"none"/.test(players) && /probeSpecFor\(slug/.test(players)
+  );
+  check(
+    "the embed builder renders a status dot and always shows a players row",
+    /statusFor\(payload\)/.test(discord) && /SERVER_LIFECYCLE_EVENTS/.test(discord) &&
+      /👥 Players/.test(discord) && /🟢 Online/.test(discord) && /🔴 Offline/.test(discord)
+  );
+  check(
+    "server start/stop notifications carry the dot and a probed count",
+    /probeServerPlayers/.test(processRoute) && /serverStatus/.test(processRoute) &&
+      /playerCount/.test(processRoute) && /maxPlayersFrom/.test(processRoute)
+  );
+  // Settings import used to apply rows with independent statements, so a bad
+  // entry halfway through left half the import applied. It must be atomic.
+  const settingsImport = read("../src/app/api/settings/import/route.ts");
+  check(
+    "settings import applies everything or nothing",
+    /db.transaction\(/.test(settingsImport) && /onConflictDoUpdate/.test(settingsImport)
+  );
+  check(
+    "settings import validates role permissions and priority before writing",
+    /asPermissionSet/.test(settingsImport) && /parseBoundedInt/.test(settingsImport)
+  );
+  check(
+    "the role cache is invalidated only after the import commits",
+    settingsImport.indexOf("invalidateRoleCache()") > settingsImport.indexOf("db.transaction(")
+  );
+
+  // Ladder stats are Postgres integers; `Number("abc")` reached the driver as
+  // NaN and returned a 500 instead of a 400, and negatives were accepted.
+  const ladderPost = read("../src/app/api/ladder/route.ts");
+  const ladderPatch = read("../src/app/api/ladder/[id]/route.ts");
+  check(
+    "ladder stats are validated before they reach the integer columns",
+    /const wins = parseLadderStat/.test(ladderPost) &&
+      /const losses = parseLadderStat/.test(ladderPost) &&
+      /const draws = parseLadderStat/.test(ladderPost) &&
+      /const streak = parseLadderStat/.test(ladderPost) &&
+      /const points = parseLadderStat/.test(ladderPost) &&
+      /update\.wins = wins;/.test(ladderPatch) &&
+      /update\.losses = losses;/.test(ladderPatch) &&
+      /update\.draws = draws;/.test(ladderPatch) &&
+      /update\.points = points;/.test(ladderPatch) &&
+      /update\.streak = streak;/.test(ladderPatch) &&
+      /ladderStatError/.test(ladderPost) && /ladderStatError/.test(ladderPatch)
+  );
+
+  // The pre-insert slug check is a race; the unique index is the arbiter and
+  // the loser deserves the same friendly 409 as the check path.
+  const customGame = read("../src/app/api/games/custom/route.ts");
+  const importGame = read("../src/app/api/games/import/route.ts");
+  check(
+    "custom games map the duplicate-slug race to a friendly 409",
+    /isUniqueViolation/.test(customGame) && /isUniqueViolation/.test(importGame) &&
+      /status: 409/.test(customGame) && /status: 409/.test(importGame)
+  );
+  check(
+    "custom game ports are validated as real ports",
+    /defaultPort must be a port number/.test(customGame)
+  );
+
+  // custom_css was exposed by the public settings API but never rendered.
+  // `publicSite` is read once above; that same source drives the Discord check.
+  check(
+    "custom_css is rendered on the public site and cannot close the style element",
+    /custom_css/.test(publicSite) && /dangerouslySetInnerHTML/.test(publicSite) &&
+      publicSite.includes("\\/style")
+  );
+  // Scheduled tasks used to be display-only: created, listed, never run.
+  // The runner is the feature; the validation guards what it will execute.
+  const schedulerLib = read("../src/lib/scheduler.ts");
+  const schedulerRoute = read("../src/app/api/scheduler/route.ts");
+  const schedulerPatch = read("../src/app/api/scheduler/[id]/route.ts");
+  check(
+    "scheduled tasks are actually executed by a boot-time runner",
+    /startSchedulerTimer/.test(read("../src/instrumentation-node.ts")) &&
+      /void startSchedulerTimer/.test(read("../src/instrumentation.ts")) &&
+      /setInterval/.test(schedulerLib) && /tickOnce/.test(schedulerLib)
+  );
+  check(
+    "scheduler accepts only real 5-field cron, never the old parseInt guess",
+    /parseCron/.test(schedulerRoute) && /nextCronRun\(cron\)/.test(schedulerRoute) &&
+      !/calculateNextRun/.test(schedulerRoute)
+  );
+  check(
+    "scheduler task types and commands are bounded",
+    /TASK_TYPES/.test(schedulerRoute) && /MAX_COMMAND_LENGTH/.test(schedulerRoute) &&
+      /MAX_COMMAND_LENGTH/.test(schedulerPatch)
+  );
+  check(
+    "the manual backup route and the scheduler share one archive format",
+    /createServerBackup/.test(read("../src/app/api/servers/[id]/backup/route.ts")) &&
+      /createServerBackup/.test(schedulerLib)
+  );
+
+  // A new thread and its opening post go in together, or not at all; a failed
+  // second insert used to leave a thread with a negative reply count.
+  check(
+    "a new forum thread and its opening post are one transaction",
+    /db\.transaction\(/.test(read("../src/app/api/forum/threads/route.ts"))
+  );
+  check(
+    "forum inputs are capped and game ports validated on edit",
+    /MAX_POST_LENGTH/.test(read("../src/app/api/forum/threads/[id]/route.ts")) &&
+      /defaultPort must be a port number/.test(read("../src/app/api/games/[id]/route.ts"))
+  );
+  // The raw SQL console is admin-only but runs Postgres' simple protocol,
+  // which executes all statements in a string. One guard, one timeout.
+  const queryRoute = read("../src/app/api/database/query/route.ts");
+  check(
+    "the SQL console accepts exactly one statement at a time",
+    /const guard = assertSingleStatement\(sql\)/.test(queryRoute) &&
+      /client\.query\(`SET statement_timeout/.test(queryRoute) &&
+      /client\.release\(true\)/.test(queryRoute)
+  );
+  check(
+    "the database listing quotes table names as identifiers",
+    /quotePgIdent/.test(read("../src/app/api/database/route.ts")) &&
+      /quotePgIdent/.test(read("../src/app/api/database/table/[name]/route.ts"))
+  );
+
+  // Audit entries are append-only and read back directly; unbounded details
+  // bloated every listing, and plain-text details 500'd against the jsonb
+  // column instead of being stored.
+  const auditRoute = read("../src/app/api/audit-log/route.ts");
+  check(
+    "audit-log entries are capped and details are stored as JSON",
+    /LIMITS/.test(auditRoute) && /JSON\.parse/.test(auditRoute) &&
+      /entityId: normId/.test(auditRoute)
+  );
+
+  // Site settings: admin-only, but a bulk save must not create junk keys,
+  // and JSON-baked settings must be JSON when saved, not at render time.
+  const siteSettings2 = read("../src/app/api/site-settings/route.ts");
+  check(
+    "site settings keys and values are validated before writing",
+    /isValidSettingKey/.test(siteSettings2) && /validateSettingValue/.test(siteSettings2)
+  );
+  check(
+    "global search is bounded and joins on the real foreign key",
+    /100 characters/.test(read("../src/app/api/search/route.ts")) &&
+      /eq\(gameServers\.gameId, gameDefinitions\.id\)/.test(read("../src/app/api/search/route.ts"))
+  );
+  // Users PATCH: permissions gated WHO edits; the values themselves were
+  // unvetted, so an invented role string became a JWT claim.
+  const userPatch = read("../src/app/api/users/[id]/route.ts");
+  check(
+    "user fields are validated and the last admin cannot demote itself",
+    /const roleCheck = normalizeRole\(body\.role\)/.test(userPatch) &&
+      /const statusCheck = normalizeStatus\(body\.status\)/.test(userPatch) &&
+      /const limitCheck = normalizeMaxServers\(body\.maxServers\)/.test(userPatch) &&
+      /const emailCheck = normalizeEmail\(body\.email\)/.test(userPatch) &&
+      /normalizeMaxServers/.test(userPatch) && /normalizeEmail/.test(userPatch) &&
+      /You cannot remove your own admin role/.test(userPatch) &&
+      /That email is already in use/.test(userPatch)
+  );
 }
+
 
 console.log(`\n${checks - failures}/${checks} checks passed`);
 if (failures > 0) {

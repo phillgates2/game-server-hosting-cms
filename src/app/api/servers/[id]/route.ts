@@ -121,6 +121,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         rconPort: gameServers.rconPort,
         discordWebhook: gameServers.discordWebhook,
         gameName: gameDefinitions.name,
+        gameSlug: gameDefinitions.slug,
+        variables: gameServers.variables,
+        config: gameServers.config,
       })
       .from(gameServers)
       .leftJoin(gameDefinitions, eq(gameServers.gameId, gameDefinitions.id))
@@ -216,6 +219,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       else if (updates.status === "restarting") event = "server_restarted";
 
       if (event) {
+        // A manual status edit to "running" may report the live count; a move
+        // to stopped/dead always shows zero and the red dot.
+        const toRunning = updates.status === "running";
+        const { probePlayers, maxPlayersFrom } = await import("@/lib/players");
+        const probe = toRunning
+          ? await probePlayers({
+              gameSlug: current.gameSlug ?? "",
+              host: current.ipv4 ?? "127.0.0.1",
+              port: current.port,
+              queryPort: current.queryPort,
+              attempts: 1,
+            })
+          : null;
         await sendDiscordWebhook(updateHook, {
           serverName: current.name,
           gameName: current.gameName || "Unknown",
@@ -224,6 +240,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           port: current.port,
           event,
           message: `**${current.name}** status changed to ${updates.status}`,
+          serverStatus: toRunning ? "online" : "offline",
+          playerCount: toRunning ? probe?.players : 0,
+          maxPlayers: probe?.maxPlayers ?? maxPlayersFrom(current.variables, current.config),
         }).catch(() => {});
       }
     }
@@ -351,6 +370,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         port: server.port,
         event: "server_deleted",
         message: `**${server.name}** has been deleted.${filesDeleted ? " Server files were removed." : ""}`,
+        serverStatus: "offline",
+        playerCount: 0,
       }).catch(() => {});
     }
 

@@ -14,6 +14,37 @@ const log = createLogger("metrics");
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+type ServerForPlayerProbe = {
+  gameSlug: string | null;
+  ipv4: string | null;
+  port: number;
+  queryPort: number | null;
+  variables: unknown;
+  config: unknown;
+};
+
+/**
+ * Best-effort live player figures for a Discord notification.
+ *
+ * Bounded by the probe's short timeouts so it can never hold up process
+ * control for long, and honest about failures: no count just means the game
+ * has no reachable query port, which must never break the notification.
+ */
+async function probeServerPlayers(server: ServerForPlayerProbe, attempts: number) {
+  const { probePlayers, maxPlayersFrom } = await import("@/lib/players");
+  const probe = await probePlayers({
+    gameSlug: server.gameSlug ?? "",
+    host: server.ipv4 ?? "127.0.0.1",
+    port: server.port,
+    queryPort: server.queryPort,
+    attempts,
+  });
+  return {
+    playerCount: probe.players,
+    maxPlayers: probe.maxPlayers ?? maxPlayersFrom(server.variables, server.config),
+  };
+}
+
 // POST /api/servers/[id]/process — Start or stop the actual game server process
 /**
  * Servers currently being auto-restarted.
@@ -46,8 +77,11 @@ export async function POST(
         ipv4: gameServers.ipv4,
         ipv6: gameServers.ipv6,
         port: gameServers.port,
+        queryPort: gameServers.queryPort,
         status: gameServers.status,
         pid: gameServers.pid,
+        variables: gameServers.variables,
+        config: gameServers.config,
         discordWebhook: gameServers.discordWebhook,
         discordNotifyStart: gameServers.discordNotifyStart,
         discordNotifyStop: gameServers.discordNotifyStop,
@@ -150,11 +184,15 @@ export async function POST(
         const hook = resolveWebhookUrl(server.discordWebhook);
         if (hook) {
           // Never let a webhook failure change the response the poller sees.
+          // The process is gone, so there is no player count to probe — the
+          // notification carries the red dot and an honest unknown count.
           await notifyServerCrashed(
             hook,
             server.name,
             server.gameName || "Unknown",
-            server.port
+            server.port,
+            undefined,
+            { serverStatus: "offline" }
           ).catch(() => {});
         }
       }
@@ -184,6 +222,7 @@ export async function POST(
             const { resolveWebhookUrl, sendDiscordWebhook } = await import("@/lib/discord");
             const hook = resolveWebhookUrl(server.discordWebhook);
             if (hook) {
+              const players = await probeServerPlayers(server, 2);
               await sendDiscordWebhook(hook, {
                 serverName: server.name,
                 gameName: server.gameName || "Unknown",
@@ -192,6 +231,8 @@ export async function POST(
                 port: server.port,
                 event: "server_restarted",
                 message: `🔁 **${server.name}** crashed and was restarted automatically.`,
+                serverStatus: back ? "online" : "offline",
+                ...players,
               }).catch(() => {});
             }
           }
@@ -213,6 +254,13 @@ export async function POST(
 
     // ─── STOP ───
     if (action === "stop") {
+      // Read the count before killing: it is the last chance to know how many
+      // people were on the server, and it answers "how many did this kick?".
+      const stopHook = server.discordNotifyStop === false
+        ? null
+        : await import("@/lib/discord").then((m) => m.resolveWebhookUrl(server.discordWebhook));
+      const players = stopHook ? await probeServerPlayers(server, 1) : null;
+
       const { isProcessAlive, killProcess } = await import("@/lib/process-control");
       if (server.pid && isProcessAlive(server.pid)) {
         await killProcess(server.pid);
@@ -227,15 +275,14 @@ export async function POST(
         updatedAt: new Date(),
       }).where(eq(gameServers.id, server.id));
 
-      const stopHook = server.discordNotifyStop === false
-        ? null
-        : await import("@/lib/discord").then((m) => m.resolveWebhookUrl(server.discordWebhook));
       if (stopHook) {
         const { sendDiscordWebhook } = await import("@/lib/discord");
         await sendDiscordWebhook(stopHook, {
           serverName: server.name, gameName: server.gameName || "Unknown",
           ipv4: server.ipv4, ipv6: server.ipv6, port: server.port,
           event: "server_stopped", message: `**${server.name}** has been stopped.`,
+          serverStatus: "offline",
+          ...(players ?? {}),
         }).catch(() => {});
       }
 
@@ -271,11 +318,16 @@ export async function POST(
         : null;
       if (startHook) {
         const { sendDiscordWebhook } = await import("@/lib/discord");
+        // Two passes: a freshly spawned game may still be binding its query
+        // socket, and the second attempt usually catches it.
+        const players = await probeServerPlayers(server, 2);
         await sendDiscordWebhook(startHook, {
           serverName: server.name, gameName: server.gameName || "Unknown",
           ipv4: server.ipv4, ipv6: server.ipv6, port: server.port,
           event: action === "restart" ? "server_restarted" : "server_started",
           message: `**${server.name}** is now ${action === "restart" ? "restarting" : "online"}!`,
+          serverStatus: alive ? "online" : "offline",
+          ...players,
         }).catch(() => {});
       }
 

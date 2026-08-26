@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { gameServers, gameDefinitions, users, forumThreads, cmsPages, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
-import { ilike, or } from "drizzle-orm";
+import { eq, ilike, or } from "drizzle-orm";
 
 // GET /api/search?q=term — Global search across servers, users, games, forum, CMS, nodes
 export async function GET(req: NextRequest) {
@@ -16,13 +16,16 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const q = url.searchParams.get("q")?.trim();
   if (!q || q.length < 2) return NextResponse.json({ results: [] });
+  // `%<everything>%` via ilike would scan every text column it touches;
+  // the box is tiny in practice, but the cap keeps it that way.
+  if (q.length > 100) return NextResponse.json({ error: "Search term is limited to 100 characters" }, { status: 400 });
 
   const pattern = `%${q}%`;
 
   try {
     const [srvResults, userResults, gameResults, threadResults, cmsResults, nodeResults] = await Promise.allSettled([
       db.select({ id: gameServers.id, name: gameServers.name, status: gameServers.status, gameName: gameDefinitions.name, gameIcon: gameDefinitions.iconEmoji })
-        .from(gameServers).leftJoin(gameDefinitions, ilike(gameServers.name, pattern)).where(ilike(gameServers.name, pattern)).limit(5),
+        .from(gameServers).leftJoin(gameDefinitions, eq(gameServers.gameId, gameDefinitions.id)).where(ilike(gameServers.name, pattern)).limit(5),
       db.select({ id: users.id, username: users.username, email: users.email, role: users.role })
         .from(users).where(or(ilike(users.username, pattern), ilike(users.email, pattern))).limit(5),
       db.select({ id: gameDefinitions.id, name: gameDefinitions.name, slug: gameDefinitions.slug, iconEmoji: gameDefinitions.iconEmoji })

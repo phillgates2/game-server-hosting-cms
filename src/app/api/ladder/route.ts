@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
+import { parseLadderStat, ladderStatError, MAX_LADDER_COUNT, MAX_LADDER_POINTS } from "@/lib/ladder-stats";
 
 function normalizeTeamTag(value: string | null | undefined) {
   if (!value) return null;
@@ -198,7 +199,7 @@ export async function POST(req: NextRequest) {
     await ensureLadderSchema();
 
     const body = await req.json();
-    const teamName = String(body.teamName || "").trim();
+    const teamName = String(body.teamName || "").trim().slice(0, 128);
     if (!teamName) return NextResponse.json({ error: "teamName required" }, { status: 400 });
 
     // Determine ladder scope: gameId OR ladderName (at least one required)
@@ -229,11 +230,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Either gameId or ladderName is required" }, { status: 400 });
     }
 
-    const wins = Number(body.wins || 0);
-    const losses = Number(body.losses || 0);
-    const draws = Number(body.draws || 0);
-    const points = Number(body.points ?? wins * 3 + draws);
-    const streak = Number(body.streak || 0);
+    // Number() alone let "abc" through as NaN, "1.5" as a float, negatives
+    // and int4-overflowing values — each a 500 or silently corrupt standings.
+    const wins = parseLadderStat(body.wins, 0, MAX_LADDER_COUNT);
+    const losses = parseLadderStat(body.losses, 0, MAX_LADDER_COUNT);
+    const draws = parseLadderStat(body.draws, 0, MAX_LADDER_COUNT);
+    const streak = parseLadderStat(body.streak, 0, MAX_LADDER_COUNT);
+    if (wins === null || losses === null || draws === null || streak === null) {
+      const field = wins === null ? "wins" : losses === null ? "losses" : draws === null ? "draws" : "streak";
+      return NextResponse.json({ error: ladderStatError(field) }, { status: 400 });
+    }
+    const points = parseLadderStat(body.points, wins * 3 + draws, MAX_LADDER_POINTS);
+    if (points === null) {
+      return NextResponse.json({ error: ladderStatError("points", MAX_LADDER_POINTS) }, { status: 400 });
+    }
 
     const [created] = await db.insert(leagueLadderEntries).values({
       gameId,

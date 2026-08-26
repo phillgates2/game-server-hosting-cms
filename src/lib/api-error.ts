@@ -1,6 +1,17 @@
 import { NextResponse } from "next/server";
 
 /**
+ * True when a database error is the Postgres unique-violation code (23505).
+ *
+ * Several routes check-then-insert a unique column; the check is a race and
+ * the insert is the arbiter. Races resolved here still need a friendly 409
+ * rather than a raw 500.
+ */
+export function isUniqueViolation(error: unknown): boolean {
+  return (error as { code?: string } | null)?.code === "23505";
+}
+
+/**
  * Return a safe error response.
  *
  * Raw exception messages routinely carry SQL fragments, absolute filesystem

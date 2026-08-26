@@ -87,18 +87,12 @@ export async function POST(
     await mkdir(backupDir, { recursive: true });
 
     if (action === "create") {
-      const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      const backupName = `backup-${ts}.tar.gz`;
-      const backupPath = join(backupDir, backupName);
+      // Shared with the scheduled-task runner so the archive format and
+      // exclusions cannot drift between manual and scheduled backups.
+      const { createServerBackup } = await import("@/lib/backup");
+      const result = await createServerBackup(server.installPath);
 
-      const result = await runCmd(
-        "tar",
-        ["czf", backupPath, "--exclude=gsm-backups", "--exclude=steamcmd", "--exclude=.steam", "-C", server.installPath, "."],
-        server.installPath,
-        600000
-      );
-
-      return NextResponse.json({ ok: true, message: `Backup created: ${backupName}`, name: backupName, output: result.stdout.slice(-2000) });
+      return NextResponse.json({ ok: true, message: `Backup created: ${result.name}`, name: result.name, output: result.output.slice(-2000) });
     }
 
     if (action === "restore") {

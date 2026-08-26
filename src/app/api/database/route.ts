@@ -22,8 +22,12 @@ export async function GET(req: NextRequest) {
 
     const tables = [];
     for (const row of tablesResult.rows) {
+      // Table names from information_schema are trusted as names, not as SQL:
+      // a name built through the console with a quote in it must still be
+      // quoted properly rather than spliced in and left to luck.
+      const { quotePgIdent } = await import("@/lib/sql-guard");
       const countResult = await pool.query(
-        `SELECT COUNT(*) as count FROM "${row.table_name}"`
+        `SELECT COUNT(*) as count FROM ${quotePgIdent(row.table_name)}`
       );
       const columnsResult = await pool.query(`
         SELECT column_name, data_type, is_nullable, column_default, character_maximum_length

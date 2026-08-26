@@ -5,6 +5,8 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq, desc } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
+import { parseCron, nextCronRun } from "@/lib/cron";
+import { TASK_TYPES, MAX_COMMAND_LENGTH } from "@/lib/scheduler";
 
 // GET /api/scheduler — List all scheduled tasks
 export async function GET(req: NextRequest) {
@@ -49,18 +51,58 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { serverId, taskType, cronExpression, command, enabled } = body;
 
-    if (!serverId || !taskType || !cronExpression) {
+    if (serverId === undefined || !taskType || !cronExpression) {
       return NextResponse.json({ error: "serverId, taskType, and cronExpression required" }, { status: 400 });
     }
 
-    // Calculate next run from cron expression
-    const nextRun = calculateNextRun(cronExpression);
+    // The taskType maps to a switch in the runner; anything else would be
+    // silently skipped at run time, so refuse it now.
+    if (typeof taskType !== "string" || !(TASK_TYPES as readonly string[]).includes(taskType)) {
+      return NextResponse.json({ error: `taskType must be one of: ${TASK_TYPES.join(", ")}` }, { status: 400 });
+    }
+
+    // The old "parser" returned +1h for anything it did not understand, so
+    // `*/30` silently became a 1-hour-ish schedule. Invalid cron is a 400.
+    const cron = String(cronExpression).trim();
+    if (!parseCron(cron)) {
+      return NextResponse.json(
+        { error: `Invalid cron expression — use a 5-field schedule like "0 4 * * *"` },
+        { status: 400 }
+      );
+    }
+
+    const serverIdNum = Number(serverId);
+    if (!Number.isInteger(serverIdNum) || serverIdNum <= 0) {
+      return NextResponse.json({ error: "Invalid serverId" }, { status: 400 });
+    }
+    const [target] = await db
+      .select({ id: gameServers.id, userId: gameServers.userId })
+      .from(gameServers)
+      .where(eq(gameServers.id, serverIdNum))
+      .limit(1);
+    if (!target) return NextResponse.json({ error: "Server not found" }, { status: 404 });
+    // scheduler.create is admin-only today, but a role could grant it: never
+    // let a non-admin schedule commands against someone else's server.
+    if (auth.role !== "admin" && target.userId !== auth.userId) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const cmd = String(command ?? "").trim();
+    if (taskType === "command" && !cmd) {
+      return NextResponse.json({ error: "command is required for command tasks" }, { status: 400 });
+    }
+    if (cmd.length > MAX_COMMAND_LENGTH) {
+      return NextResponse.json({ error: `command is limited to ${MAX_COMMAND_LENGTH} characters` }, { status: 400 });
+    }
+
+    // The runner advances nextRun itself; this is the initial schedule.
+    const nextRun = nextCronRun(cron);
 
     const [task] = await db.insert(scheduledTasks).values({
-      serverId: Number(serverId),
+      serverId: serverIdNum,
       taskType,
-      cronExpression,
-      command: command || null,
+      cronExpression: cron.slice(0, 64),
+      command: cmd || null,
       enabled: enabled !== false,
       nextRun,
     }).returning();
@@ -69,29 +111,4 @@ export async function POST(req: NextRequest) {
   } catch (e: unknown) {
     return apiError(e, "Failed", 500);
   }
-}
-
-function calculateNextRun(cron: string): Date {
-  // Simple cron parser for common patterns
-  const now = new Date();
-  const parts = cron.trim().split(/\s+/);
-  if (parts.length < 5) return new Date(now.getTime() + 3600000); // fallback 1h
-
-  const [minStr, hourStr] = parts;
-  const min = minStr === "*" ? now.getMinutes() : parseInt(minStr);
-  const hour = hourStr === "*" ? now.getHours() : parseInt(hourStr);
-
-  const next = new Date(now);
-  next.setMinutes(min);
-  next.setSeconds(0);
-  next.setMilliseconds(0);
-
-  if (hourStr !== "*") {
-    next.setHours(hour);
-    if (next <= now) next.setDate(next.getDate() + 1);
-  } else {
-    if (next <= now) next.setHours(next.getHours() + 1);
-  }
-
-  return next;
 }

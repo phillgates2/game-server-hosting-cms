@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
+import { isValidSettingKey, validateSettingValue } from "@/lib/settings-keys";
 
 // Public settings keys that are safe to expose without auth
 const PUBLIC_KEYS = [
@@ -70,11 +71,19 @@ export async function POST(req: NextRequest) {
     }
 
     for (const [key, value] of Object.entries(updates)) {
+      // The endpoint is admin-only, but a bulk save still accepts whatever
+      // the editor UI sends: keys are validated (a junk key pollutes the
+      // table and the public reader) and every value is capped.
+      const keyCheck = isValidSettingKey(key);
+      if (!keyCheck.ok) return NextResponse.json({ error: keyCheck.error }, { status: 400 });
+      const valueCheck = validateSettingValue(key, value);
+      if (!valueCheck.ok) return NextResponse.json({ error: valueCheck.error }, { status: 400 });
+
       const existing = await db.select().from(settings).where(eq(settings.key, key)).limit(1);
       if (existing.length === 0) {
-        await db.insert(settings).values({ key, value });
+        await db.insert(settings).values({ key, value: valueCheck.value });
       } else {
-        await db.update(settings).set({ value, updatedAt: new Date() }).where(eq(settings.key, key));
+        await db.update(settings).set({ value: valueCheck.value, updatedAt: new Date() }).where(eq(settings.key, key));
       }
     }
 

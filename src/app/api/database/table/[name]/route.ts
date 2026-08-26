@@ -38,11 +38,15 @@ export async function GET(
       ORDER BY ordinal_position
     `, [tableName]);
 
-    const countResult = await pool.query(`SELECT COUNT(*) as count FROM "${tableName}"`);
+    // The name has been verified to exist above, but a real table can still
+    // contain a quote; splice it in as an identifier, not as raw text.
+    const { quotePgIdent } = await import("@/lib/sql-guard");
+    const ident = quotePgIdent(tableName);
+    const countResult = await pool.query(`SELECT COUNT(*) as count FROM ${ident}`);
     const totalRows = parseInt(countResult.rows[0].count);
 
     const dataResult = await pool.query(
-      `SELECT * FROM "${tableName}" ORDER BY 1 LIMIT $1 OFFSET $2`,
+      `SELECT * FROM ${ident} ORDER BY 1 LIMIT $1 OFFSET $2`,
       [limit, offset]
     );
 

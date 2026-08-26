@@ -7,6 +7,24 @@
  * under Node.
  */
 
+/**
+ * Start the scheduled-task runner.
+ *
+ * Tasks are due in the database regardless of who is watching; a server-side
+ * timer is the only thing that can fire them, so it lives here rather than
+ * in a dashboard poll. Best-effort: a failure to boot is logged, not fatal.
+ */
+export async function startSchedulerTimer() {
+  if (process.env.GSM_DISABLE_SCHEDULER === "true") return;
+  try {
+    const { startScheduler } = await import("./lib/scheduler");
+    startScheduler();
+    console.log("[scheduler] started (30s tick)");
+  } catch (e: unknown) {
+    console.error("[scheduler] could not start:", e instanceof Error ? e.message : e);
+  }
+}
+
 /** Load operator settings so auth.ts has them before the first request. */
 export async function loadAuthPolicy() {
   try {

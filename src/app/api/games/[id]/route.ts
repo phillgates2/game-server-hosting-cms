@@ -42,26 +42,37 @@ export async function PATCH(
   try {
     const canEditScripts = (await hasPermission(auth.userId, "games.edit.scripts")) || (await hasPermission(auth.userId, "games.install"));
     const update: Record<string, unknown> = {};
-    if (body.name !== undefined) update.name = body.name;
-    if (body.engine !== undefined) update.engine = body.engine;
-    if (body.defaultPort !== undefined) update.defaultPort = Number(body.defaultPort);
-    if (body.steamAppId !== undefined) update.steamAppId = body.steamAppId || null;
+    if (body.name !== undefined) {
+      const name = String(body.name ?? "").trim();
+      if (!name || name.length > 128) return NextResponse.json({ error: "name is required (max 128 characters)" }, { status: 400 });
+      update.name = name;
+    }
+    if (body.engine !== undefined) update.engine = String(body.engine ?? "").slice(0, 64) || null;
+    if (body.defaultPort !== undefined) {
+      // Number() alone accepted "abc" (NaN → driver error) and "1.5".
+      const port = Number(body.defaultPort);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        return NextResponse.json({ error: "defaultPort must be a port number (1-65535)" }, { status: 400 });
+      }
+      update.defaultPort = port;
+    }
+    if (body.steamAppId !== undefined) update.steamAppId = body.steamAppId ? String(body.steamAppId).slice(0, 32) : null;
     if (body.installScript !== undefined) {
       if (!canEditScripts) return NextResponse.json({ error: "games.edit.scripts permission required" }, { status: 403 });
-      update.installScript = body.installScript;
+      update.installScript = String(body.installScript ?? "");
     }
     if (body.startCommand !== undefined) {
       if (!canEditScripts) return NextResponse.json({ error: "games.edit.scripts permission required" }, { status: 403 });
-      update.startCommand = body.startCommand;
+      update.startCommand = String(body.startCommand ?? "");
     }
     if (body.stopCommand !== undefined) {
       if (!canEditScripts) return NextResponse.json({ error: "games.edit.scripts permission required" }, { status: 403 });
-      update.stopCommand = body.stopCommand || null;
+      update.stopCommand = body.stopCommand ? String(body.stopCommand) : null;
     }
     if (body.configFiles !== undefined) update.configFiles = body.configFiles;
     if (body.defaultConfig !== undefined) update.defaultConfig = body.defaultConfig;
-    if (body.supportsIpv6 !== undefined) update.supportsIpv6 = body.supportsIpv6;
-    if (body.iconEmoji !== undefined) update.iconEmoji = body.iconEmoji;
+    if (body.supportsIpv6 !== undefined) update.supportsIpv6 = body.supportsIpv6 === true || body.supportsIpv6 === "true";
+    if (body.iconEmoji !== undefined) update.iconEmoji = String(body.iconEmoji || "🎮").slice(0, 8);
 
     const [updated] = await db.update(gameDefinitions).set(update).where(eq(gameDefinitions.id, Number(id))).returning();
     return NextResponse.json({ game: updated });

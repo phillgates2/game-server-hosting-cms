@@ -34,6 +34,8 @@ interface SiteSettings {
   panel_name?: string; hero_title?: string; hero_subtitle?: string;
   hero_cta_text?: string; footer_text?: string;
   announcement?: string; announcement_type?: string;
+  /** Admin-provided CSS injected into the public site. */
+  custom_css?: string;
 }
 interface Props {
   user: { id: number; username: string; role: string;
@@ -205,6 +207,13 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
   /* ═══════════════════════════════════════════════════════════════════════════ */
   return (
     <div className="min-h-screen bg-bg-primary flex flex-col">
+      {ss.custom_css?.trim() && (
+        // Admin-authored CSS is applied verbatim; escaping would turn CSS
+        // combinators like `>` into entities and break the stylesheet. The
+        // one thing that must not survive is `</style`, which would close
+        // the element and turn the rest of the value into page markup.
+        <style dangerouslySetInnerHTML={{ __html: ss.custom_css.replace(/<\/style/gi, "") }} />
+      )}
       {ss.announcement && (
         <div className={`text-center text-xs sm:text-sm py-2 px-4 ${ss.announcement_type === "warning" ? "bg-warning/15 text-warning" : ss.announcement_type === "error" ? "bg-danger/15 text-danger" : "bg-accent/15 text-accent"}`}>{ss.announcement}</div>
       )}
@@ -377,6 +386,18 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                     <option value="warning">Warning (yellow)</option>
                     <option value="error">Error (red)</option>
                   </select>
+                </div>
+              </div>
+              <div className="bg-bg-card border border-border rounded-xl p-4 sm:p-6 space-y-4">
+                <h3 className="font-semibold text-lg">Custom CSS</h3>
+                <p className="text-xs text-text-muted">
+                  Plain CSS applied to the public site. Leave empty to use the default theme.
+                </p>
+                <div>
+                  <label className="block text-xs text-text-muted mb-1">Stylesheet</label>
+                  <textarea value={editorSettings.custom_css || ""} onChange={(e) => setEditorSettings({ ...editorSettings, custom_css: e.target.value })}
+                    placeholder={`.hero-title {\n  letter-spacing: 2px;\n}`} rows={8} spellCheck={false}
+                    className="w-full px-3 sm:px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent" />
                 </div>
               </div>
 

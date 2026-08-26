@@ -24,6 +24,11 @@ export async function POST(req: NextRequest) {
       port: 27015,
       event: "server_created",
       message: `🔔 **Webhook Test**\n\nThis is a test notification from GameServer Manager!\n\nIf you see this message, your Discord webhook is configured correctly.`,
+      // Demonstrate the live status dot and player count every notification
+      // now carries.
+      serverStatus: "online",
+      playerCount: 3,
+      maxPlayers: 16,
     });
 
     if (result.success) {

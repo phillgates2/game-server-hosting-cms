@@ -4,6 +4,103 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.21.0] — 2026-08-26
+
+### 🟢 Discord Status Dot & Live Player Count
+
+- **Every server notification now answers "is it up?" and "how many are on it?"** Notifications carry a status row — 🟢 Online or 🔴 Offline — and a players row with the live count, e.g. `3/16`.
+- **The count is probed from the game itself**, so it is real, not a guess: Steam A2S info + player queries (CS2, TF2, Garry's Mod, L4D2, Rust, ARK, Palworld, Satisfactory, Squad, V Rising, Enshrouded, Insurgency: Sandstorm, 7 Days to Die, Xonotic), the Minecraft Java server-list ping, the Bedrock RakNet ping, and the Quake 3 `getstatus` protocol (Quake Live, Wolfenstein: ET).
+- A stopped server shows the count it had **at the moment it stopped** (the count is read before the process is killed); a crashed one shows an honest "—" rather than a made-up zero.
+- Games with no public query protocol (Valheim, Factorio, Project Zomboid, …) and custom games are skipped instantly instead of waiting out a timeout, and the probe is bounded and best-effort — a firewalled query port can never slow down or break a panel request.
+- The max slot count comes from the probe when it answers and from the server's own `MAX_PLAYERS` setting otherwise, and the webhook test button shows the dot and a sample count so you can see the format before relying on it.
+
+### 🏆 Ladder Stats
+
+- **Entering "abc" as a stat returned a server error instead of a useful message.** The ladder routes ran `Number()` on the body directly, so `"abc"` became `NaN`, `"1.5"` a float, and anything over the column's range — each one blew up at the database with a 500. Negative values were accepted outright, silently corrupting the standings.
+- Every stat now goes through one validator: whole numbers only, never negative, with sane ceilings. Bad input is a 400 that names the field (`wins must be a whole number between 0 and 1000000`).
+
+### 📥 Settings Import
+
+- **Importing settings was not atomic.** The import applied each row as a separate write, so a bad entry halfway through left half the settings changed and no way to tell which half.
+- The whole import is now one transaction — either everything lands or nothing does — settings are written in a single upsert instead of a select-then-write per key, and the role permission cache is refreshed only after the commit.
+- Hand-imported role data is validated too: a permissions field that is not an object (which previously stored a JSON string and silently revoked every permission for that role) becomes an empty permission set, and out-of-range priorities are clamped.
+
+### 🎨 Custom CSS
+
+- The public settings API exposed `custom_css` but nothing ever rendered it — the setting was invisible no matter what you saved.
+- The Site Editor now has a **Custom CSS** field, and the stylesheet is applied to the public site. The one thing it cannot do is close the `<style>` element: a `</style>` in the value is stripped so the CSS can never become page markup.
+
+### 🐛 Friendly Errors
+
+- **Creating two custom games with the same name at once returned a raw 500.** The duplicate-slug check is a race and the database's unique index is what actually arbitrates; the loser now gets the same friendly "slug already exists" 409 as the non-racing path — for both custom games and imported eggs.
+- **Creating a custom game named with a non-port default port gave a 500 instead of a 400.** The port is now validated as a real port number (1-65535) before it reaches the database.
+### ⏰ Scheduled Tasks Actually Run
+
+- **Scheduled tasks never ran.** Tasks could be created, edited and listed —
+  "restart every night at 4am", "backup every Sunday" — but nothing in the
+  panel ever executed them. The scheduler was a display widget.
+- A runner now lives in the panel process, started at boot: it ticks every
+  30 seconds, picks up every due enabled task, executes it (restart / backup /
+  SteamCMD update / custom command), and advances the schedule with a real
+  cron calculation. A failing task logs and moves on — it can never take the
+  panel down, and a task on a remote node is skipped rather than attempted.
+- **Cron input was also fabricated.** The old "parser" ran `parseInt` on two
+  of the five fields, so `*/30` became an invalid date, `5,10` was treated as
+  `5`, and anything unrecognised was quietly scheduled an hour out. The panel
+  now accepts only genuine 5-field cron (steps, ranges, lists, the standard
+  Sunday-7 rule) and rejects the rest with a 400.
+- Manual backups and scheduled backups share one archive builder, so the two
+  cannot drift; scheduled updates refuse to run on a running server; command
+  tasks are capped and run in the server's own directory.
+- **414 tests** (13 new) and **130 security checks** (6 new).
+
+### 🛡️ SQL Console & Settings Hardening
+
+- **The SQL console could run several statements at once.** `pool.query(text)`
+  uses Postgres' simple protocol, which executes everything in the string — a
+  stray semicolon could turn "delete a row" into "delete a row, drop a table".
+  The console is admin-only on purpose, so the guard is about accidents: it
+  accepts exactly one statement (with strings, identifiers, comments and
+  dollar-quoted bodies understood) and refuses anything more.
+- **`SELECT pg_sleep(3600)` had no timeout.** It pinned the request and its
+  pooled connection for an hour. Queries now run on a dedicated connection
+  with a 15-second statement timeout, and that connection is discarded
+  afterwards so the timeout can never leak onto another request.
+- **Table names were spliced into SQL in the database browser.** They were
+  checked against `information_schema` first, but a real table name can still
+  contain a quote; names are now quoted as identifiers.
+- **Audit entries were unbounded and plain-text details 500'd.** The
+  `details` column is jsonb, so `"something happened"` failed to insert
+  instead of being stored. Details are now normalised to JSON (capped),
+  and action/entity fields are validated and capped.
+- **Site settings accepted any key and any size.** A stray character in a
+  bulk save created a junk settings row; JSON-shaped settings (features,
+  nav links) are now validated as JSON at save time so a bad value breaks
+  immediately, not at page render; values are capped (custom CSS tighter).
+- **Global search had no bound and a wrong join.** A 10 MB `q` scanned text
+  columns with `%…%`; the search term is capped at 100 characters, and the
+  server query joined on a LIKE condition instead of `game_id` — correct by
+  coincidence, and one edit away from silently dropping rows.
+- **426 tests** (12 new) and **135 security checks** (5 new).
+
+### 👤 User Accounts
+
+- **User editing accepted invented roles, bad emails and unbounded limits.**
+  The PATCH route gated who may edit but never what the values may contain: a
+  role string like `"superadmin"` went straight into the JWT claim, `"abc"` as
+  max servers 500'd at the database, a duplicate email was a raw 500, and a
+  password could be one character long.
+- **The last admin could lock themselves out.** Demoting your own admin role
+  left the panel with no account able to reach admin surfaces; it is now
+  refused with a clear message.
+- Roles and statuses are allowlisted to what the UI offers, emails are shaped
+  and deduped (a duplicate returns 409, not 500), limits are bounded (0 =
+  unlimited), profile fields are capped, and passwords must be 8-256
+  characters.
+- **434 tests** (8 new) and **136 security checks** (1 new).
+
+---
+
 ## [1.20.0] — 2026-08-24
 
 ### 💾 Deletes No Longer Half-Finish
