@@ -510,6 +510,43 @@ export async function deleteChannel(cfg: BotConfig, channelId: string): Promise<
 }
 
 /**
+ * Rename a channel — the WolfET-style "status in the channel name" update.
+ *
+ * The live status board posts a detail message, and its tick calls this to
+ * keep the channel name itself current. Discord lowercases channel names and
+ * caps them at 100 characters; both are handled here.
+ */
+export async function renameChannel(
+  cfg: BotConfig,
+  channelId: string,
+  name: string
+): Promise<{ ok: true } | { ok: false; error?: string }> {
+  const safe = name.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 100);
+  if (!safe || !/^\d{5,25}$/.test(channelId)) return { ok: false, error: "Invalid channel name or id" };
+  const res = await discordApi(cfg, `/channels/${encodeURIComponent(channelId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name: safe }),
+  });
+  return res.ok ? { ok: true } : { ok: false, error: res.error };
+}
+
+/**
+ * WolfET-style channel name for a server: `🟢 et: (5) - et_beach`,
+ * `🟠 et: (0) - et_beach` when up but empty, `🔴 et: server offline`.
+ */
+export function statusChannelName(view: {
+  online: boolean;
+  players?: number;
+  map?: string;
+}, label = "ET"): string {
+  if (!view.online) return `🔴 ${label}: Server Offline`;
+  const count = view.players ?? 0;
+  const emoji = count > 0 ? "🟢" : "🟠";
+  const map = view.map?.trim() ? view.map.trim() : "unknown-map";
+  return `${emoji} ${label}: (${count}) - ${map}`;
+}
+
+/**
  * Whether a channel the panel recorded still exists in Discord.
  *
  * Someone deleting a channel by hand leaves the panel holding a stale id and

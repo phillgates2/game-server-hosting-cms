@@ -25,6 +25,42 @@ export async function startSchedulerTimer() {
   }
 }
 
+/**
+ * Start the live Discord status-board updater.
+ *
+ * Board messages need re-probing on a timer — no browser tab is open in the
+ * panel while the operator is in Discord — so the loop lives here next to the
+ * scheduler. Best-effort: disabled with an env guard, never fatal on boot.
+ */
+export async function startStatusBoardLoop() {
+  if (process.env.GSM_DISABLE_STATUS_BOARDS === "true") return;
+  try {
+    const { startStatusBoardUpdater } = await import("./lib/status-board");
+    startStatusBoardUpdater();
+    console.log("[status-board] updater started (60s tick)");
+  } catch (e: unknown) {
+    console.error("[status-board] could not start:", e instanceof Error ? e.message : e);
+  }
+}
+
+/**
+ * Start the WolfET-style chat bot (!etwho, !stats, !etverify, ...).
+ *
+ * Only connects when a bot token and guild are configured; login failures
+ * (including the privileged intents not being enabled) are logged with
+ * instructions and retried in the background — never fatal to the panel.
+ */
+export async function startDiscordChatBot() {
+  if (process.env.GSM_DISABLE_DISCORD_BOT === "true") return;
+  try {
+    const { startDiscordBot } = await import("./lib/discord-bot");
+    startDiscordBot();
+    console.log("[discord-bot] start requested (connects when configured)");
+  } catch (e: unknown) {
+    console.error("[discord-bot] could not start:", e instanceof Error ? e.message : e);
+  }
+}
+
 /** Load operator settings so auth.ts has them before the first request. */
 export async function loadAuthPolicy() {
   try {

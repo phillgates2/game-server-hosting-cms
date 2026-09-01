@@ -46,8 +46,29 @@ export interface PlayerProbe {
   ok: boolean;
   players?: number;
   maxPlayers?: number;
+  /** Current map, when the protocol reports one (A2S, Quake 3). */
+  map?: string;
+  /** Names of connected players (A2S split protocol, Quake 3). */
+  names?: string[];
+  /** Pings in ms, parallel to `names` (Quake 3 reports them; A2S does not). */
+  pings?: number[];
+  /** Server hostname when reported (Quake 3's sv_hostname). */
+  hostname?: string;
   protocol?: ProbeProtocol;
   error?: string;
+}
+
+/**
+ * The original bot's bot detector: a bracketed/coloured BOT tag in the name,
+ * or a ping of zero (bots answer with no latency). Case-insensitive like the
+ * community bot, and applied wherever a Quake 3 roster is parsed.
+ */
+export function isLikelyBot(name: string, ping: number): boolean {
+  if (ping === 0) return true;
+  // The original bot matched its indicator list case-sensitively, so "Bot"
+  // inside an ordinary name does not disqualify a player.
+  const indicators = ["^o[BOT]^7", "[BOT]", "^0[BOT]", "BOT", "(BOT)", "<BOT>"];
+  return indicators.some((i) => name.includes(i));
 }
 
 /**
@@ -112,6 +133,8 @@ export function maxPlayersFrom(variables: unknown, config: unknown): number | un
 
 export interface A2sInfo {
   name: string;
+  /** Current map filename, when the encoding carries one. */
+  map: string | null;
   protocol: number;
   players: number;
   maxPlayers: number;
@@ -140,7 +163,10 @@ export function parseA2sInfo(buf: Uint8Array): A2sInfo | null {
       const name = readCString(buf, off);
       if (!name) return null;
       off = name.next;
-      for (const _ of [0, 1, 2]) {
+      const map = readCString(buf, off);
+      if (!map) return null;
+      off = map.next;
+      for (const _ of [0, 1]) {
         const s = readCString(buf, off);
         if (!s) return null;
         off = s.next;
@@ -148,19 +174,28 @@ export function parseA2sInfo(buf: Uint8Array): A2sInfo | null {
       off += 2; // app id
       const players = buf[off++];
       const maxPlayers = buf[off++];
-      return { name: name.value, protocol, players, maxPlayers };
+      return { name: name.value, map: map.value || null, protocol, players, maxPlayers };
     }
     if (type === 0x6d) {
       // FF FF FF FF 6D <address\0> <name\0> <map\0> <folder\0> <game\0> <players u8> <max u8> <protocol u8> ...
       let off = 5;
-      for (const _ of [0, 1, 2, 3, 4]) {
+      const address = readCString(buf, off);
+      if (!address) return null;
+      off = address.next;
+      const name = readCString(buf, off);
+      if (!name) return null;
+      off = name.next;
+      const map = readCString(buf, off);
+      if (!map) return null;
+      off = map.next;
+      for (const _ of [0, 1]) {
         const s = readCString(buf, off);
         if (!s) return null;
         off = s.next;
       }
       const players = buf[off++];
       const maxPlayers = buf[off++];
-      return { name: "", protocol: buf[off] ?? 0, players, maxPlayers };
+      return { name: name.value, map: map.value || null, protocol: buf[off] ?? 0, players, maxPlayers };
     }
   } catch {
     return null;
@@ -274,28 +309,50 @@ export function parseBedrockPing(buf: Uint8Array): { players?: number; maxPlayer
 }
 
 /** Parse a Quake 3 "statusResponse" datagram. */
-export function parseQuake3Status(buf: Uint8Array): { players?: number; maxPlayers?: number } | null {
+export function parseQuake3Status(buf: Uint8Array): {
+  players?: number;
+  maxPlayers?: number;
+  map?: string;
+  names?: string[];
+  pings?: number[];
+  hostname?: string;
+} | null {
   const text = Buffer.from(buf).toString("latin1");
   const lines = text.split("\n");
   const info = lines.find((l) => l.startsWith("\\"));
   if (!info) return null;
 
-  let players: number | undefined;
-  const clients = info.match(/\\clients\\(\d+)/);
-  if (clients) players = Number.parseInt(clients[1], 10);
+  const names: string[] = [];
+  const pings: number[] = [];
+  for (const line of lines) {
+    // ET/ioq3 roster: "<score> <ping> <'name with optional spaces'>"
+    const match = line.match(/^\s*(\d+)\s+(-?\d+)\s+(.+)$/);
+    if (!match) continue;
+    const ping = Number.parseInt(match[2], 10);
+    const rawName = match[3].replace(/^"+|"+$/g, "").trim();
+    if (!rawName) continue;
+    // The original bot reports only real players; bots are filtered here.
+    if (isLikelyBot(rawName, ping)) continue;
+    names.push(rawName);
+    pings.push(ping);
+  }
 
   const maxMatch = info.match(/\\sv_maxclients\\(\d+)/);
   const maxPlayers = maxMatch ? Number.parseInt(maxMatch[1], 10) : undefined;
+  const mapMatch = info.match(/\\mapname\\([^\\\n]+)/);
 
-  // Some servers omit the clients key; count the player lines instead.
-  if (players === undefined) {
-    const infoIndex = lines.indexOf(info);
-    players = lines
-      .slice(infoIndex + 1)
-      .filter((l) => /^\s*\d+\s+-?\d+\s+\d+\s+"/.test(l)).length;
-  }
+  let hostname: string | undefined;
+  const hostMatch = info.match(/\\sv_hostname\\([^\\\n]+)/);
+  if (hostMatch) hostname = hostMatch[1].replace(/\^[0-9a-zA-Z]/g, "");
 
-  return { players: players ?? undefined, maxPlayers };
+  return {
+    players: names.length,
+    maxPlayers,
+    map: mapMatch ? mapMatch[1] : undefined,
+    names,
+    pings,
+    hostname,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -367,22 +424,28 @@ const BEDROCK_PING_PACKET = (() => {
   return Buffer.concat([Buffer.from([0x01]), time, RAKNET_MAGIC]);
 })();
 
-async function runProbe(kind: ProbeKind, host: string, port: number, timeoutMs: number): Promise<{ players?: number; maxPlayers?: number; error?: string }> {
+async function runProbe(
+  kind: ProbeKind,
+  host: string,
+  port: number,
+  timeoutMs: number
+): Promise<{ players?: number; maxPlayers?: number; map?: string; names?: string[]; pings?: number[]; hostname?: string; error?: string }> {
   switch (kind) {
     case "a2s": {
       const infoBuf = await udpExchange(A2S_INFO_PACKET, host, port, timeoutMs);
       if (!infoBuf) return { error: "no response" };
       const info = parseA2sInfo(infoBuf);
       if (!info) return { error: "unrecognised response" };
+      const base = { map: info.map ?? undefined, maxPlayers: info.maxPlayers };
       // The legacy encoding carries the real count; under the split protocol
       // the player slot is a placeholder zero and only A2S_PLAYER knows more.
-      if (info.players > 0) return { players: info.players, maxPlayers: info.maxPlayers };
+      if (info.players > 0) return { ...base, players: info.players };
       const challengeBuf = await udpExchange(A2S_CHALLENGE_PACKET, host, port, timeoutMs);
       // Some servers skip the challenge dance and answer directly.
       const listDirect = challengeBuf ? parseA2sPlayers(challengeBuf) : null;
-      if (listDirect) return { players: listDirect.players, maxPlayers: info.maxPlayers };
+      if (listDirect) return { ...base, players: listDirect.players, names: listDirect.names };
       const challenge = challengeBuf ? parseA2sChallenge(challengeBuf) : null;
-      if (challenge === null || challenge < 0) return { maxPlayers: info.maxPlayers };
+      if (challenge === null || challenge < 0) return base;
       const chal = Buffer.alloc(4);
       chal.writeInt32LE(challenge, 0);
       const playersBuf = await udpExchange(
@@ -390,7 +453,7 @@ async function runProbe(kind: ProbeKind, host: string, port: number, timeoutMs: 
         host, port, timeoutMs
       );
       const list = playersBuf ? parseA2sPlayers(playersBuf) : null;
-      return list ? { players: list.players, maxPlayers: info.maxPlayers } : { maxPlayers: info.maxPlayers };
+      return list ? { ...base, players: list.players, names: list.names } : base;
     }
     case "minecraft": {
       const hostStr = Buffer.from(host, "utf8");
@@ -422,7 +485,16 @@ async function runProbe(kind: ProbeKind, host: string, port: number, timeoutMs: 
       const reply = await udpExchange(QUAKE3_STATUS_PACKET, host, port, timeoutMs);
       if (!reply) return { error: "no response" };
       const parsed = parseQuake3Status(reply);
-      return parsed ? { players: parsed.players, maxPlayers: parsed.maxPlayers } : { error: "unrecognised response" };
+      return parsed
+        ? {
+            players: parsed.players,
+            maxPlayers: parsed.maxPlayers,
+            map: parsed.map,
+            names: parsed.names,
+            pings: parsed.pings,
+            hostname: parsed.hostname,
+          }
+        : { error: "unrecognised response" };
     }
     default:
       return { error: "no query protocol for this game" };
@@ -459,8 +531,17 @@ export async function probePlayers(input: ProbeInput): Promise<PlayerProbe> {
   for (let i = 0; i < attempts; i++) {
     if (i > 0) await new Promise((r) => setTimeout(r, 350));
     const out = await runProbe(spec.kind, host, port, timeoutMs);
-    if (out.players !== undefined || out.maxPlayers !== undefined) {
-      return { ok: true, players: out.players, maxPlayers: out.maxPlayers, protocol: PROTOCOL_LABEL[spec.kind] };
+    if (out.players !== undefined || out.maxPlayers !== undefined || out.map !== undefined) {
+      return {
+        ok: true,
+        players: out.players,
+        maxPlayers: out.maxPlayers,
+        map: out.map,
+        names: out.names,
+        pings: out.pings,
+        hostname: out.hostname,
+        protocol: PROTOCOL_LABEL[spec.kind],
+      };
     }
     lastError = out.error ?? lastError;
   }

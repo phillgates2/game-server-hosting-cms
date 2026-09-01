@@ -99,6 +99,62 @@ All notable changes to GameServer Manager are documented here.
   characters.
 - **434 tests** (8 new) and **136 security checks** (1 new).
 
+### 📋 Live Discord Status Boards
+
+- **Status boards, WolfET-style: one message per server in its Discord channel that keeps itself current.** The message shows a 🟢/🔴 status dot, the game, the current **map** (A2S and Quake 3 now report it), the **player count (X/Y)** and the **players online** — up to 14 named, colour codes stripped, the rest summarised and the field kept under Discord's 1024-character cap.
+- **It refreshes itself.** A background loop (started at boot, `GSM_DISABLE_STATUS_BOARDS=true` to switch off) re-probes every enabled server at an operator-chosen interval (default 3 min, clamped 1-60) and edits the board message in place. No bot gateway needed — webhooks can edit their own messages.
+- **It repairs itself.** A board message deleted in Discord is re-posted. A webhook that is gone entirely disables the board and surfaces the reason in the panel.
+- **Check it from the panel.** Settings → Discord now has a **Status Boards** section: enable/disable per server, refresh one right now, set the interval, and see the last error.
+- The player probe also now reports the **map and player names** (A2S split-protocol query, Quake 3 `getstatus`), so boards and notifications share one richer probe.
+- Fresh installs get the new columns (the installer's `game_servers` DDL was also missing `discord_channel_id`, which previously broke the "Create missing channels" backfill on fresh installs).
+- **445 tests** (11 new) and **140 security checks** (4 new).
+
+### 🤖 WolfET-Style Discord Chat Bot (ET community bot)
+
+- **The panel now runs the full command bot on the gateway** — the same one the ET community uses:
+  `!etwho [name]` (live status: map, players, roster), `!etallofoz` (real players across every ET
+  server), `!stats <player>` (level, seven skills, total XP, last active), `!ettop10` (XP leaderboard
+  with medals), `!etverify <GUID>` (links your Discord account to your ET GUID in a DM — the GUID is
+  never left in the channel, and the bot grants an **ET Verified** role), `!etsync` (sets your nickname
+  to `name | 12,345 XP`) and `!desync` (unlinks and removes the role).
+- **Channel names carry the status** like the community bot: `🟢 et: (5) - et_beach`, `🟠 et: (0) - et_beach`
+  when up but empty, `🔴 et: server offline` — updated with the status-board loop.
+- **Verified users' nicknames are kept current** by a 10-minute XP sync, with the server-owner and
+  role-hierarchy exceptions handled the same way the original bot did.
+- **XP comes from the game itself.** The mods' `user.sqlite` is read from each ET server's install
+  directory (`GSM_ET_USER_SQLITE` overrides the path). The base64 XP token format, ET colour codes,
+  bot filtering, the name-matching ladder (exact → partial → fuzzy) and the 32-char GUID rules are all
+  ported and unit-tested.
+- **Guest appearances from the port:**
+  - `discord_verifications` table holds the links (panel database, not a sidecar file) — the updater's
+    `drizzle-kit push` adds it, and fresh installs create it too.
+  - **sql.js was dropped after it broke production builds** — its 24 MB wasm runtime made Turbopack
+    exhaust memory on small hosts. A zero-dependency SQLite reader (`sqlite-reader.ts`, ~260 lines)
+    reads the stats file instead, verified against a real SQLite database fixture.
+  - `discord.js` ships as a server-external package and is loaded via a non-analyzable import.
+- Enable **Server Members Intent** and **Message Content Intent** in the Developer Portal (the bot
+  logs the refusal and retries); `GSM_DISABLE_DISCORD_BOT=true` turns it off entirely.
+- **468 tests** (23 new) and **145 security checks** (5 new).
+
+### 🎯 Parity Pass — every remaining detail of the community bot
+
+- **`!etwho` now uses the bot's 3-minute status cache.** A fresh view is shared between the
+  status-board loop and the chat commands, so `!etwho` / `!etallofoz` inside the window never
+  re-query the game; a stale cache shows the original's `⌛ Fetching fresh server status...`
+  message first.
+- **Rosters carry pings** (`• Rifleman [12ms]`) and **`sv_hostname`** drives the `!etallofoz`
+  field names, exactly like the original — the Quake 3 parser now returns ping and hostname
+  per player and filters bots the same way (indicator list, or ping 0).
+- **Progress message + edit** for `!etallofoz` ("⌛ Checking all OZ servers...") and `!ettop10`
+  ("⌛ Calculating top 10 players..."), with the result replacing the progress message; the
+  empty `!ettop10` / `!etallofoz` states carry the `Active Servers: N/M` footer.
+- **`!etverify` deletes the command message** in guild channels so the GUID never lingers,
+  and cooldown replies plus the command message tidy themselves up after the wait.
+- **Server owners get the DM button** — `!etsync` sends a `Set This Nickname` button that shows
+  the nickname to copy (the original's `UpdateNicknameButton`), and the button verifies the
+  clicker is the owner before replying.
+- **472 tests** (4 new) and **146 security checks** (1 new).
+
 ---
 
 ## [1.20.0] — 2026-08-24

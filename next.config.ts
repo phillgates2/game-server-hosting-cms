@@ -52,6 +52,11 @@ const csp = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
+  // The gateway bot is loaded at runtime via a non-analyzable import; keep it
+  // out of the bundler so server bundles stay small on memory-constrained
+  // hosts. (sql.js was deliberately dropped — a zero-dependency SQLite reader
+  // replaced it, see src/lib/sqlite-reader.ts.)
+  serverExternalPackages: ["discord.js"],
   outputFileTracingExcludes: {
     "/api/servers/[id]/process": ["./next.config.ts"],
     "/api/servers/[id]/update": ["./next.config.ts"],

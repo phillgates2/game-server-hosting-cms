@@ -726,7 +726,78 @@ console.log("\nH2/H3 auth enforcement wiring");
       /You cannot remove your own admin role/.test(userPatch) &&
       /That email is already in use/.test(userPatch)
   );
+
+  // Live status boards: webhooks may only edit their OWN messages, so the
+  // refresh path must hit /webhooks/{id}/{token}/messages/{id} — and the
+  // roster must be bounded so a full server never exceeds Discord's 1024-char
+  // field cap.
+  const statusBoard = read("../src/lib/status-board.ts");
+  const statusEmbed = read("../src/lib/status-board-embed.ts");
+  check(
+    "status boards refresh by editing the webhook's own message",
+    /messageEndpoint/.test(statusBoard) &&
+      /\/messages\//.test(statusEmbed) &&
+      /editBoardMessage/.test(statusBoard) && /re-post/.test(statusBoard)
+  );
+  check(
+    "status boards are bounded (interval clamp, roster cap, field cap)",
+    /clampInterval/.test(statusEmbed) && /MAX_LISTED_PLAYERS/.test(statusEmbed) &&
+      /MAX_EMBED_FIELD_LENGTH/.test(statusEmbed)
+  );
+  check(
+    "the status board loop is started at boot and can be disabled",
+    /startStatusBoardLoop/.test(read("../src/instrumentation-node.ts")) &&
+      /void startStatusBoardLoop/.test(read("../src/instrumentation.ts")) &&
+      /GSM_DISABLE_STATUS_BOARDS/.test(read("../src/instrumentation-node.ts"))
+  );
+  check(
+    "boards are admin-only and never send the bot token to the browser",
+    /panel\.settings/.test(read("../src/app/api/settings/discord/boards/route.ts"))
+  );
+  // WolfET chat bot: gateway runs only when configured, dies silently never,
+  // and every command path is bounded (cooldowns, sanitised input, capped).
+  const botMod = read("../src/lib/discord-bot.ts");
+  check(
+    "the chat bot is boot-started, env-off-switchable, and never fatal",
+    /startDiscordChatBot/.test(read("../src/instrumentation-node.ts")) &&
+      /void startDiscordChatBot/.test(read("../src/instrumentation.ts")) &&
+      /GSM_DISABLE_DISCORD_BOT/.test(read("../src/instrumentation-node.ts"))
+  );
+  check(
+    "discord.js stays out of the server bundle and the sqlite reader is dep-free",
+    /serverExternalPackages/.test(read("../next.config.ts")) &&
+      /discord\.js/.test(read("../next.config.ts")) &&
+      /readSqliteTable/.test(read("../src/lib/sqlite-reader.ts")) &&
+      !/sql\.js/.test(read("../src/lib/et-stats.ts"))
+  );
+  check(
+    "chat commands are cooldown-bounded and inputs sanitised",
+    /COOLDOWNS/.test(botMod) && /sanitizeInput/.test(botMod) && /isValidGuid/.test(botMod) &&
+      /PREFIX/.test(botMod)
+  );
+  check(
+    "GUID verification is stored in the panel database, never a sidecar file",
+    /discordVerifications/.test(botMod) &&
+      /discord_verifications/.test(read("../src/db/schema.ts")) &&
+      /discord_verifications/.test(read("../src/app/api/install/route.ts"))
+  );
+  check(
+    "!etwho shares the three-minute cache with the status-board loop",
+    /getCachedView/.test(read("../src/lib/discord-bot.ts")) &&
+      /setCachedView/.test(read("../src/lib/discord-bot.ts")) &&
+      /setCachedView/.test(read("../src/lib/status-board.ts")) &&
+      /STATUS_CACHE_MS/.test(read("../src/lib/status-cache.ts"))
+  );
+  check(
+    "WolfET channel renames use PATCH /channels and the three-state name",
+    /renameChannel/.test(read("../src/lib/discord.ts")) &&
+      /statusChannelName/.test(read("../src/lib/discord.ts")) &&
+      /updateChannelName/.test(read("../src/lib/status-board.ts")) &&
+      /🟢/.test(read("../src/lib/discord.ts")) && /🔴/.test(read("../src/lib/discord.ts"))
+  );
+
 }
+
 
 
 console.log(`\n${checks - failures}/${checks} checks passed`);

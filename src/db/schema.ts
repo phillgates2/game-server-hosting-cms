@@ -162,6 +162,15 @@ export const gameServers = pgTable("game_servers", {
   discordNotifyCrash: boolean("discord_notify_crash").default(true),
   /** Channel the panel provisioned for this server, so it can be cleaned up. */
   discordChannelId: text("discord_channel_id"),
+  /**
+   * Live status board: one message in the server's Discord channel that the
+   * background loop keeps refreshed with the status dot, map and roster.
+   */
+  discordStatusEnabled: boolean("discord_status_enabled").default(false),
+  discordStatusMessageId: text("discord_status_message_id"),
+  discordStatusUpdatedAt: timestamp("discord_status_updated_at"),
+  /** Last board error, surfaced in the panel so a dead channel is diagnosable. */
+  discordStatusError: text("discord_status_error"),
   // Timestamps
   lastStarted: timestamp("last_started"),
   lastStopped: timestamp("last_stopped"),
@@ -278,6 +287,17 @@ export const settings = pgTable("settings", {
   value: text("value"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ── Discord GUID verifications ──────────────────────────────────
+// Links a Discord account to an ET GUID (and optional panel user). This is
+// what the chat bot's !etverify / !etsync / !desync commands read and write.
+export const discordVerifications = pgTable("discord_verifications", {
+  discordId: varchar("discord_id", { length: 32 }).primaryKey(),
+  guid: varchar("guid", { length: 32 }).notNull().unique(),
+  userId: integer("user_id").references(() => users.id),
+  verifiedAt: timestamp("verified_at").defaultNow().notNull(),
+  discordName: text("discord_name"),
 });
 
 // ── Scheduled Tasks ───────────────────────────────────────────

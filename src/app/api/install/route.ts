@@ -237,10 +237,24 @@ export async function POST(req: NextRequest) {
         discord_notify_stop BOOLEAN DEFAULT TRUE,
         discord_notify_restart BOOLEAN DEFAULT TRUE,
         discord_notify_crash BOOLEAN DEFAULT TRUE,
+        discord_channel_id TEXT,
+        discord_status_enabled BOOLEAN DEFAULT FALSE,
+        discord_status_message_id TEXT,
+        discord_status_updated_at TIMESTAMP,
+        discord_status_error TEXT,
         last_started TIMESTAMP,
         last_stopped TIMESTAMP,
         created_at TIMESTAMP DEFAULT NOW() NOT NULL,
         updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+
+      -- Discord GUID verifications (chat bot: !etverify / !etsync / !desync)
+      CREATE TABLE IF NOT EXISTS discord_verifications (
+        discord_id VARCHAR(32) PRIMARY KEY,
+        guid VARCHAR(32) NOT NULL UNIQUE,
+        user_id INTEGER REFERENCES users(id),
+        verified_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        discord_name TEXT
       );
 
       -- Server Metrics

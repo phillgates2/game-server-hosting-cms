@@ -19,6 +19,7 @@ export const DISCORD_KEYS = [
   "discord_category_id",
   "discord_auto_channel",
   "discord_channel_prefix",
+  "discord_status_interval_minutes",
 ] as const;
 
 export interface DiscordSettings {
@@ -31,6 +32,8 @@ export interface DiscordSettings {
   autoChannel: boolean;
   /** Prefix applied to generated channel names, e.g. "gs-". */
   channelPrefix: string;
+  /** How often live status boards refresh (minutes, clamped 1-60). */
+  statusIntervalMinutes: number;
 }
 
 const DEFAULTS: DiscordSettings = {
@@ -40,6 +43,7 @@ const DEFAULTS: DiscordSettings = {
   categoryId: "",
   autoChannel: false,
   channelPrefix: "",
+  statusIntervalMinutes: 3,
 };
 
 /**
@@ -72,6 +76,13 @@ export async function getDiscordSettings(): Promise<DiscordSettings> {
         case "discord_category_id":   result.categoryId = value; break;
         case "discord_auto_channel":  result.autoChannel = value === "true"; break;
         case "discord_channel_prefix": result.channelPrefix = value; break;
+        case "discord_status_interval_minutes": {
+          const n = Number(value);
+          if (Number.isFinite(n)) {
+            result.statusIntervalMinutes = Math.min(60, Math.max(1, Math.round(n)));
+          }
+          break;
+        }
       }
     }
   } catch {

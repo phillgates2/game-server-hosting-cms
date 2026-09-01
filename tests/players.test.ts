@@ -83,10 +83,11 @@ function bedrockPong(players: number, max: number): Buffer {
 function quake3Status(): Buffer {
   const text =
     "\xff\xff\xff\xffstatusResponse\n" +
-    "\\challenge\\-163654063\\clients\\3\\g_needpass\\0\\mapname\\ctf_well\\sv_maxclients\\16\\version\\ioq3 1.36\n" +
-    '0 12 50 "Alice" 12 192.168.1.1:27960 0\n' +
-    '1 8 30 "Bob" 15 192.168.1.2:27960 0\n' +
-    '2 3 25 "Carol" 20 192.168.1.3:27960 0\n';
+    "\\challenge\\-163654063\\clients\\4\\g_needpass\\0\\mapname\\ctf_well\\sv_maxclients\\16\\sv_hostname\\^5OZ^7 Team Server\\version\\ioq3 1.36\n" +
+    '0 12 "^5Alice^7"\n' +
+    '1 8 "Bob"\n' +
+    '2 3 "Carol"\n' +
+    '3 0 "^o[BOT]^7Omni Bot"\n';
   return Buffer.from(text, "latin1");
 }
 
@@ -120,6 +121,7 @@ describe("parseA2sInfo", () => {
     const info = parseA2sInfo(a2sInfoModern({ players: 0, maxPlayers: 20, name: "My Server" }));
     assert.ok(info);
     assert.equal(info.name, "My Server");
+    assert.equal(info.map, "de_dust2");
     assert.equal(info.players, 0, "split protocol reports a placeholder zero");
     assert.equal(info.maxPlayers, 20);
   });
@@ -129,6 +131,7 @@ describe("parseA2sInfo", () => {
     assert.ok(info);
     assert.equal(info.players, 7);
     assert.equal(info.maxPlayers, 24);
+    assert.equal(info.map, "map1");
   });
 
   test("rejects non-A2S bytes", () => {
@@ -196,19 +199,30 @@ describe("parseBedrockPing", () => {
 });
 
 describe("parseQuake3Status", () => {
-  test("reads clients and sv_maxclients from the info string", () => {
+  test("reads players, pings, map, hostname — and filters bots like the original", () => {
     const parsed = parseQuake3Status(quake3Status());
-    assert.deepEqual(parsed, { players: 3, maxPlayers: 16 });
+    assert.ok(parsed);
+    assert.equal(parsed.players, 3, "the ping-0 BOT line is excluded");
+    assert.equal(parsed.maxPlayers, 16);
+    assert.equal(parsed.map, "ctf_well");
+    assert.equal(parsed.hostname, "OZ Team Server", "colour codes stripped from sv_hostname");
+    assert.deepEqual(parsed.names, ["^5Alice^7", "Bob", "Carol"], "raw names; colour codes are stripped when displayed");
+    assert.deepEqual(parsed.pings, [12, 8, 3], "pings ride along with the roster");
   });
 
   test("falls back to counting player lines when clients is absent", () => {
     const text =
       "\xff\xff\xff\xffstatusResponse\n" +
       "\\challenge\\-1\\mapname\\q3dm17\\sv_maxclients\\8\n" +
-      '0 12 50 "Alice" 12 1.2.3.4:27960 0\n' +
-      '1 8 30 "Bob" 15 1.2.3.5:27960 0\n';
+      '0 12 "^5Alice^7"\n' +
+      '1 8 "Bob"\n';
     const parsed = parseQuake3Status(Buffer.from(text, "latin1"));
-    assert.deepEqual(parsed, { players: 2, maxPlayers: 8 });
+    assert.ok(parsed);
+    assert.equal(parsed.players, 2);
+    assert.equal(parsed.maxPlayers, 8);
+    assert.equal(parsed.map, "q3dm17");
+    assert.deepEqual(parsed.names, ["^5Alice^7", "Bob"]);
+    assert.deepEqual(parsed.pings, [12, 8]);
   });
 });
 
@@ -291,6 +305,8 @@ describe("probePlayers — A2S", () => {
       assert.equal(probe.ok, true);
       assert.equal(probe.players, 2);
       assert.equal(probe.maxPlayers, 20);
+      assert.equal(probe.map, "de_dust2", "the status board needs the map");
+      assert.deepEqual(probe.names, ["Alice", "Bob"], "the status board needs the roster");
       assert.equal(probe.protocol, "A2S");
     } finally {
       await fake.close();
@@ -376,6 +392,9 @@ describe("probePlayers — Minecraft and Bedrock", () => {
       assert.equal(probe.ok, true);
       assert.equal(probe.players, 3);
       assert.equal(probe.maxPlayers, 16);
+      assert.equal(probe.map, "ctf_well");
+      assert.equal(probe.hostname, "OZ Team Server");
+      assert.deepEqual(probe.pings, [12, 8, 3]);
       assert.equal(probe.protocol, "Quake3");
     } finally {
       await fake.close();
