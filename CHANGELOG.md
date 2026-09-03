@@ -155,6 +155,43 @@ All notable changes to GameServer Manager are documented here.
   clicker is the owner before replying.
 - **472 tests** (4 new) and **146 security checks** (1 new).
 
+### 🔍 Fidelity pass — difflib matching and rename permission checks
+
+- **`!stats` now matches names exactly like the original.** The bot used Python's
+  `difflib.get_close_matches` (Ratcliff/Obershelp), which scores differently from
+  edit-distance: `"abcd"` vs `"bcde"` is 0.75 (a match) in difflib but 0.5 under
+  Levenshtein — so a name typed one key off could fail in the panel while matching
+  in the old bot. The real `SequenceMatcher` is now ported function-for-function
+  (longest matching block + recursion, `2*M/(len(a)+len(b))`, cutoff 0.6, ties in
+  original order), and 20 ratio values are pinned against output from real Python
+  3.13 difflib. Case sensitivity matches Python too (callers lowercase first,
+  exactly like the original did before calling difflib).
+- **`!etsync` does the original's explicit permission checks with its messages:**
+  refuses when the bot lacks *Manage Nicknames*, refuses when the member's top
+  role is higher than or equal to the bot's, and reports success with the
+  original's `in server: {guild.name}!` wording. It also works from a DM now
+  (falling back to the configured guild, the original's behaviour), and the
+  10-minute XP sync bails early without Manage Nicknames and skips
+  hierarchy-blocked members instead of relying on thrown errors.
+- **`!etverify` without an argument sends the original's GUID guide** (join a
+  server, press `~`, `/n_guid`, copy the 32-character string).
+- **495 tests** (23 new) and **148 security checks** (2 new).
+
+### 🐛 Live Status Boards: "Discord did not return a message id"
+
+- **Posting a board failed on real Discord.** Webhook POSTs default to
+  `wait=false`, and Discord answers that with `204 No Content` — no message
+  body, no `id`. The board code expected the message object back, so every
+  first post ended with *"Discord did not return a message id"* and nothing
+  could ever be updated.
+- **The post now sends `?wait=true`**, which makes Discord return the full
+  message including the `id` the board needs to edit itself. If a proxy still
+  swallows the response, the error says so instead of the bare message.
+- Reproduced with a Discord-accurate test stub (204 without `?wait=true`,
+  full message with it) and a mutation check that fails when any future edit
+  drops the parameter.
+- **496 tests** (1 new) and **149 security checks** (1 new).
+
 ---
 
 ## [1.20.0] — 2026-08-24

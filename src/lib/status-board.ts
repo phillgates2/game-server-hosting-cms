@@ -83,13 +83,24 @@ async function postBoardMessage(
   webhookUrl: string,
   view: BoardView
 ): Promise<{ ok: boolean; messageId?: string; error?: string; status?: number }> {
-  const res = await webhookRequest(webhookUrl, {
+  // Discord webhook POSTs default to wait=false, which answers 204 with NO
+  // body — so without ?wait=true there is no message id to remember, and the
+  // board can never update itself again. wait=true returns the full message.
+  const postUrl = `${webhookUrl.replace(/\/+$/, "")}?wait=true`;
+  const res = await webhookRequest(postUrl, {
     method: "POST",
     body: JSON.stringify(buildStatusBoardPayload(view)),
   });
   if (!res.ok) return { ok: false, error: res.error, status: res.status };
   const id = String(res.data.id ?? "");
-  return id ? { ok: true, messageId: id } : { ok: false, error: "Discord did not return a message id" };
+  if (!id) {
+    return {
+      ok: false,
+      error:
+        "Discord did not return a message id (a webhook proxy or the channel's webhook may be blocking ?wait=true) — check the webhook URL",
+    };
+  }
+  return { ok: true, messageId: id };
 }
 
 async function editBoardMessage(

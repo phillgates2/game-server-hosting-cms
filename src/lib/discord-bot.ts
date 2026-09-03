@@ -55,11 +55,16 @@ interface MemberView {
   displayName: string;
   setNickname: (n: string) => Promise<unknown>;
   roles: { add: (id: string) => Promise<unknown>; remove: (id: string) => Promise<unknown> };
+  /** Highest role this member holds (discord.js `member.topRole`). */
+  topRole?: { position: number };
+  /** This member's permission bitfield in the guild. */
+  permissions?: { bitfield?: bigint };
 }
 interface GuildView {
   id: string;
+  name: string;
   ownerId: string;
-  me: { topRole: { position: number } } | null;
+  me: { topRole: { position: number }; permissions?: { bitfield?: bigint } } | null;
   roles: {
     cache: Map<string, RoleView> | { get: (name: string) => RoleView | undefined };
     create: (o: { name: string; color: number; reason: string }) => Promise<RoleView>;
@@ -90,6 +95,21 @@ function asClient(value: unknown): ClientView {
 }
 
 // ── Cooldowns (per user, per command; single-node like the login throttle) ───
+
+/** Discord's Manage Nicknames permission bit (BOT permissions: 1 << 13). */
+/**
+ * The original bot checked `guild.me.guild_permissions.manage_nicknames`
+ * before renaming anyone. When the bitfield is unavailable (e.g. a partial
+ * fetch), fall through and let Discord decide.
+ *
+ * The bit is compared numerically (Decimal(0x2000)) to stay compatible with
+ * the ES2017 target — discord.js v14 carries permission bitfields as BigInt
+ * at runtime either way.
+ */
+function botCanManageNicks(guild: GuildView): boolean {
+  const bf = guild.me?.permissions?.bitfield;
+  return bf === undefined ? true : (bf & BigInt(0x2000)) !== BigInt(0);
+}
 
 const lastUsed = new Map<string, number>();
 
@@ -533,6 +553,16 @@ async function handleMessage(message: MessageView): Promise<void> {
         return;
       }
       const { isValidGuid } = await import("./et-stats");
+      if (!arg) {
+        const guide =
+          "To find your GUID:\n" +
+          "1. Join any OZ server\n" +
+          "2. Press ~ to open console\n" +
+          "3. Type `/n_guid` and press Enter\n" +
+          "4. Copy the 32-character string shown (example format: AB7F5B25B19CFE79EFFCE6FF788DCECD)";
+        await message.reply({ content: `❌ Please provide your GUID. ${guide}` });
+        return;
+      }
       if (!isValidGuid(arg)) {
         await message.reply({ content: "❌ Invalid GUID format. GUID should be a 32-character string of letters and numbers, e.g. AB7F5B25B19CFE79EFFCE6FF788DCECD" });
         return;
@@ -563,10 +593,6 @@ async function handleMessage(message: MessageView): Promise<void> {
         await message.reply({ content: "❌ You need to verify your account first using `!etverify`" });
         return;
       }
-      if (!message.guild || !message.member) {
-        await message.reply({ content: "❌ Run this command in the server channel." });
-        return;
-      }
       const source = await loadEtStatsData();
       if (!source) {
         await message.reply({ content: "❌ No statistics database found to read XP from." });
@@ -579,43 +605,68 @@ async function handleMessage(message: MessageView): Promise<void> {
       }
       const { decodeXp } = await import("./et-stats");
       const { total } = decodeXp(user.xp);
+
+      // Guild resolution, exactly like the original: the invocation guild
+      // wins; from a DM the configured guild is used (the original scanned
+      // its mutual guilds as a last resort — same effective outcome).
       const cfg = await loadBotConfig();
-      if (client && cfg) {
-        try {
-          const guild = await client.guilds.fetch(cfg.guildId);
-          if (message.guild.id === guild.id) {
-            const member = await guild.members.fetch(message.author.id);
-            if (member.id === guild.ownerId) {
-              // Server owners cannot be renamed by a bot; DM them a button
-              // that shows the nickname to set — the original's exception.
-              try {
-                const dmod = await getGatewayModule();
-                const button = new dmod.ButtonBuilder()
-                  .setCustomId(`etnick:${guild.id}:${Buffer.from(xpNickname(member.displayName, total), "utf8").toString("base64url")}`)
-                  .setLabel("Set This Nickname")
-                  .setStyle(dmod.ButtonStyle.Primary);
-                const row = new dmod.ActionRowBuilder().addComponents(button);
-                await message.author.send({
-                  content: "As the server owner, you'll need to update your nickname manually.\nClick the button to get instructions and the new nickname to copy:",
-                  components: [row],
-                });
-                await message.reply({ content: "✅ I've sent you a DM with instructions to update your nickname!" });
-              } catch {
-                await message.reply({ content: "❌ I couldn't send you a DM. Please enable DMs from server members." });
-              }
-              return;
-            }
-            await member.setNickname(xpNickname(member.displayName, total));
-            await message.reply({ content: `✅ Nickname updated: ${xpNickname(member.displayName, total)}` });
-            return;
-          }
-        } catch (e: unknown) {
-          log.warn("etsync failed", e instanceof Error ? e.message : String(e));
-          await message.reply({ content: "❌ I could not update your nickname (permissions or role hierarchy)." });
-          return;
-        }
+      if (!client || !cfg) {
+        await message.reply({ content: "❌ The bot is not connected right now." });
+        return;
       }
-      await message.reply({ content: "❌ The bot is not connected to that server right now." });
+      let guild: GuildView;
+      let member: MemberView;
+      try {
+        const guildId = !message.guild || message.guild.id === cfg.guildId ? cfg.guildId : message.guild.id;
+        guild = await client.guilds.fetch(guildId);
+        member = message.guild && message.member
+          ? (message.member as MemberView)
+          : await guild.members.fetch(message.author.id);
+      } catch (e: unknown) {
+        log.warn("etsync guild lookup failed", e instanceof Error ? e.message : String(e));
+        await message.reply({ content: "❌ Could not find a suitable server to update your nickname in." });
+        return;
+      }
+
+      // Server owners cannot be renamed by a bot; DM them the original's
+      // "Set This Nickname" button.
+      if (member.id === guild.ownerId) {
+        try {
+          const dmod = await getGatewayModule();
+          const button = new dmod.ButtonBuilder()
+            .setCustomId(`etnick:${guild.id}:${Buffer.from(xpNickname(member.displayName, total), "utf8").toString("base64url")}`)
+            .setLabel("Set This Nickname")
+            .setStyle(dmod.ButtonStyle.Primary);
+          const row = new dmod.ActionRowBuilder().addComponents(button);
+          await message.author.send({
+            content: "As the server owner, you'll need to update your nickname manually.\nClick the button to get instructions and the new nickname to copy:",
+            components: [row],
+          });
+          await message.reply({ content: "✅ I've sent you a DM with instructions to update your nickname!" });
+        } catch {
+          await message.reply({ content: "❌ I couldn't send you a DM. Please enable DMs from server members." });
+        }
+        return;
+      }
+
+      // The original's explicit checks, with the original's messages.
+      if (!botCanManageNicks(guild)) {
+        await message.reply({ content: "❌ I don't have permission to change nicknames. Please give me the 'Manage Nicknames' permission." });
+        return;
+      }
+      if ((guild.me?.topRole?.position ?? 0) <= (member.topRole?.position ?? 0)) {
+        await message.reply({ content: "❌ I cannot modify your nickname because your role is higher than or equal to mine." });
+        return;
+      }
+
+      try {
+        await member.setNickname(xpNickname(member.displayName, total));
+      } catch (e: unknown) {
+        log.warn("etsync setNickname failed", e instanceof Error ? e.message : String(e));
+        await message.reply({ content: "❌ An error occurred while updating your nickname." });
+        return;
+      }
+      await message.reply({ content: `✅ Nickname updated with current XP in server: ${guild.name}!` });
       return;
     }
     case "desync": {
@@ -706,6 +757,12 @@ export async function syncVerifiedUsersXp(): Promise<void> {
     if (!client || !cfg) return;
 
     const guild = await client.guilds.fetch(cfg.guildId);
+    // Original behaviour: without Manage Nicknames the whole run is pointless.
+    if (!botCanManageNicks(guild)) {
+      log.warn("XP sync skipped — bot lacks the Manage Nicknames permission");
+      return;
+    }
+    const botTop = guild.me?.topRole?.position ?? 0;
     let updated = 0;
     let skipped = 0;
 
@@ -717,6 +774,8 @@ export async function syncVerifiedUsersXp(): Promise<void> {
         const { total } = decodeXp(user.xp);
         const member = await guild.members.fetch(v.discordId);
         if (member.id === guild.ownerId) { skipped++; continue; }
+        // Same hierarchy guard the original applied before renaming.
+        if ((member.topRole?.position ?? 0) >= botTop) { skipped++; continue; }
         const next = xpNickname(member.displayName, total);
         if (member.displayName === next) continue;
         await member.setNickname(next);

@@ -740,6 +740,10 @@ console.log("\nH2/H3 auth enforcement wiring");
       /editBoardMessage/.test(statusBoard) && /re-post/.test(statusBoard)
   );
   check(
+    "board posts ask Discord for the message id (?wait=true)",
+    /\?wait=true/.test(read("../src/lib/status-board.ts"))
+  );
+  check(
     "status boards are bounded (interval clamp, roster cap, field cap)",
     /clampInterval/.test(statusEmbed) && /MAX_LISTED_PLAYERS/.test(statusEmbed) &&
       /MAX_EMBED_FIELD_LENGTH/.test(statusEmbed)
@@ -780,6 +784,19 @@ console.log("\nH2/H3 auth enforcement wiring");
     /discordVerifications/.test(botMod) &&
       /discord_verifications/.test(read("../src/db/schema.ts")) &&
       /discord_verifications/.test(read("../src/app/api/install/route.ts"))
+  );
+  check(
+    "the fuzzy matcher ports difflib faithfully, not an edit-distance guess",
+    /matchingBlocks/.test(read("../src/lib/et-stats.ts")) &&
+      /getCloseMatches/.test(read("../src/lib/et-stats.ts")) &&
+      !/sequenceMatcherRatio\([^)]*\)\.toLowerCase/.test(read("../src/lib/et-stats.ts"))
+  );
+  check(
+    "!etsync performs the original's Manage Nicknames and hierarchy checks",
+    /botCanManageNicks/.test(read("../src/lib/discord-bot.ts")) &&
+      /Manage Nicknames/.test(read("../src/lib/discord-bot.ts")) &&
+      /higher than or equal to mine/.test(read("../src/lib/discord-bot.ts")) &&
+      /guild\.name}!/ .test(read("../src/lib/discord-bot.ts"))
   );
   check(
     "!etwho shares the three-minute cache with the status-board loop",

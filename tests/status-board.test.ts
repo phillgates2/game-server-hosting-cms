@@ -99,6 +99,80 @@ describe("buildStatusBoardEmbed", () => {
   });
 });
 
+describe("webhook wait behaviour (the reported 'no message id' bug)", () => {
+  test("a Discord-accurate stub only returns the id when ?wait=true is sent", async () => {
+    process.env.DATABASE_URL = "postgres://u:p@127.0.0.1:5432/db";
+    const { createServer } = await import("node:http");
+    const { createSocket } = await import("node:dgram");
+    const { refreshServerBoard } = await import("../src/lib/status-board");
+
+    // Fake game server (A2S, split protocol) so the view is live.
+    const fake = createSocket("udp4");
+    fake.on("message", (msg, rinfo) => {
+      if (msg[4] === 0x54) {
+        const buf = Buffer.concat([
+          Buffer.from([0xff, 0xff, 0xff, 0xff, 0x49, 0x11]),
+          Buffer.from("ET Board\0"), Buffer.from("et_beach\0"),
+          Buffer.from("etmain\0"), Buffer.from("Wolf ET\0"),
+          Buffer.from([0x0a, 0x00]), Buffer.from([0, 24, 0, 0x64, 0x6c, 0, 1]),
+        ]);
+        fake.send(buf, rinfo.port, rinfo.address);
+      } else if (msg[4] === 0x55 && msg[5] === 0xff) {
+        fake.send(Buffer.from([0xff, 0xff, 0xff, 0xff, 0x41, 0x78, 0x56, 0x34, 0x12]), rinfo.port, rinfo.address);
+      } else if (msg[4] === 0x55) {
+        const name = Buffer.from("^5Rifleman^7\0", "utf8");
+        const score = Buffer.alloc(4); score.writeInt32LE(0, 0);
+        const dur = Buffer.alloc(4); dur.writeFloatLE(10, 0);
+        fake.send(Buffer.concat([
+          Buffer.from([0xff, 0xff, 0xff, 0xff, 0x44, 1, 0]), name, score, dur,
+        ]), rinfo.port, rinfo.address);
+      }
+    });
+    await new Promise<void>((resolve) => fake.bind(0, "127.0.0.1", () => resolve()));
+    const gamePort = (fake.address() as { port: number }).port;
+
+    // Discord-accurate webhook stub: 204 with no body unless ?wait=true.
+    let seenUrl = "";
+    const srv = createServer((req, res) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        seenUrl = req.url || "";
+        if (req.method === "POST" && seenUrl.includes("wait=true")) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ id: "1000000000000000007" }));
+        } else {
+          res.writeHead(204);
+          res.end("");
+        }
+      });
+    });
+    await new Promise<void>((resolve) => srv.listen(0, "127.0.0.1", () => resolve()));
+    const hookPort = (srv.address() as { port: number }).port;
+
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((url: string, init: RequestInit) =>
+      realFetch(`http://127.0.0.1:${hookPort}/${String(url).split("/").slice(-2).join("/")}`, init)) as typeof fetch;
+
+    try {
+      const server = {
+        id: 1, name: "ET Server", ipv4: "127.0.0.1", ipv6: null,
+        port: gamePort, queryPort: gamePort, variables: null, config: null,
+        status: "running", gameName: "Wolfenstein: Enemy Territory", gameSlug: "cs2",
+        discordWebhook: "https://discord.com/api/webhooks/12345/abc-xyz",
+        discordStatusEnabled: true, discordStatusMessageId: null,
+      };
+      const result = await refreshServerBoard(server);
+      assert.equal(result.ok, true, `board must post with wait=true: ${result.error}`);
+      assert.equal(result.messageId, "1000000000000000007");
+    } finally {
+      globalThis.fetch = realFetch;
+      await new Promise<void>((r) => srv.close(() => r()));
+      fake.close();
+    }
+  });
+});
+
 describe("messageEndpoint", () => {
   const HOOK = "https://discord.com/api/webhooks/12345/abcDEF-_xyz";
 
@@ -195,11 +269,13 @@ describe("refreshServerBoard — webhook round trip", () => {
         discordWebhook: hook, discordStatusEnabled: true, discordStatusMessageId: null,
       };
 
-      // First refresh: POST the board.
+      // First refresh: POST the board. Discord answers 204 (no body) unless
+      // the request carries ?wait=true; the board has to ask for the message.
       const first = await refreshServerBoard(server);
-      assert.equal(first.ok, true);
+      assert.equal(first.ok, true, `first post failed: ${first.error}`);
       assert.ok(first.messageId);
       assert.equal(seen[0].method, "POST");
+      assert.match(seen[0].url, /wait=true/, "webhook POST must include ?wait=true");
       assert.match(seen[0].body, /et_beach/);
       assert.match(seen[0].body, /Rifleman/);
 

@@ -17,6 +17,8 @@ import {
   sanitizeInput,
   isValidGuid,
   similarity,
+  sequenceMatcherRatio,
+  getCloseMatches,
   findClosestPlayer,
   rankByXp,
   queryEtUsers,
@@ -88,6 +90,72 @@ const FIXTURE_USERS = [
   { name: "Medic", level: 2, xp: xpFor([0, 0, 10, 0, 0, 0, 0]), guid: "BBBB", timestamp: 1700000000 },
   { name: "^o[BOT]^7Botter", level: 1, xp: xpFor([99, 99, 99, 99, 99, 99, 99]), guid: "CCCC", timestamp: 0 },
 ];
+
+describe("sequenceMatcherRatio — pinned against real difflib", () => {
+  // Every value below was generated with Python 3.13's
+  // difflib.SequenceMatcher.ratio(); the port must match each one.
+  const GROUND_TRUTH: Array<[string, string, number]> = [
+    ["medic", "medik", 0.8],
+    ["medic", "meidc", 0.8],
+    ["medik", "meidc", 0.6],
+    ["rifleman", "Rifleman", 0.875],
+    ["rifleman", "riflman", 0.9333],
+    ["striker", "strike", 0.9231],
+    ["striker", "sriker", 0.9231],
+    ["oz sniper", "ozsniper", 0.9412],
+    ["player", "player 99", 0.8],
+    ["player 99", "player", 0.8],
+    ["abcde", "abxde", 0.8],
+    ["kitten", "sitting", 0.6154],
+    ["abcd", "dcba", 0.25],
+    ["the quick", "the quik", 0.9412],
+    ["12345", "12346", 0.8],
+    ["mapcycle", "map_cycle", 0.9412],
+    ["abcd", "bcde", 0.75],
+    ["a", "b", 0.0],
+    ["", "x", 0.0],
+    ["same", "same", 1.0],
+  ];
+
+  for (const [a, b, expected] of GROUND_TRUTH) {
+    test(`matches difflib for ${JSON.stringify(a)} vs ${JSON.stringify(b)}`, () => {
+      assert.ok(
+        Math.abs(sequenceMatcherRatio(a, b) - expected) < 0.0005,
+        `${sequenceMatcherRatio(a, b)} !== ${expected}`
+      );
+    });
+  }
+
+  test("difflib scores differently from edit distance — on purpose", () => {
+    // "abcd" vs "bcde": difflib sees the block "bcd" (0.75) and matches the
+    // fuzzy step; an edit-distance approximation scores 0.5 and misses it.
+    assert.equal(sequenceMatcherRatio("abcd", "bcde"), 0.75);
+    assert.ok(similarity("abcd", "bcde") < 0.6, "Levenshtein would miss this match");
+  });
+
+  test("is case-sensitive like Python; callers lowercase first like the original", () => {
+    assert.equal(sequenceMatcherRatio("rifleman", "Rifleman"), 0.875, "difflib counts case");
+    // The original bot lowercased before difflib; findClosestPlayer does too.
+    const users = [{ name: "Rifleman", level: 1, xp: "", guid: "AAAA", timestamp: 0 }];
+    assert.equal(findClosestPlayer(users, "rifleman")?.guid, "AAAA");
+  });
+});
+
+describe("getCloseMatches", () => {
+  test("filters by cutoff and keeps original order on ties (Python <=3.12)", () => {
+    assert.deepEqual(getCloseMatches("abcd", ["bcde"], 1, 0.6), ["bcde"], "0.75 >= 0.6");
+    assert.deepEqual(getCloseMatches("abcd", ["wxyz"], 1, 0.6), [], "below cutoff");
+    assert.deepEqual(
+      getCloseMatches("abc", ["abc", "xyz", "abc"], 3, 0.6),
+      ["abc", "abc"],
+      "ties stay in original order"
+    );
+    assert.deepEqual(getCloseMatches("abc", [], 1, 0.6), []);
+    // Python 3.13 switched to heapq.nlargest (lexicographic tie-break); we
+    // keep the classic stable behaviour the bot was written against.
+    assert.deepEqual(getCloseMatches("medic", ["medik", "meidc"], 1, 0.6), ["medik"]);
+  });
+});
 
 describe("similarity / findClosestPlayer", () => {
   const users = FIXTURE_USERS;

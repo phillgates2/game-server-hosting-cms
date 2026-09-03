@@ -128,6 +128,103 @@ export function similarity(a: string, b: string): number {
  * fuzzy at ≥0.6), mirroring the original bot. Bots are excluded by their
  * `^o[BOT]^7` marker.
  */
+/**
+ * Python difflib's SequenceMatcher, ported faithfully (Ratcliff/Obershelp).
+ *
+ * The original bot relied on `difflib.get_close_matches(cutoff=0.6)`, and its
+ * scoring differs from edit-distance metrics: "abcd" vs "bcde" scores 0.75
+ * here (longest common block "bcd"), while Levenshtein gives 0.5 — so a name
+ * typed one key off can match in the original and miss in an edit-distance
+ * approximation. This is the real algorithm: recursively find the longest
+ * matching block, then match the left and right of it.
+ */
+function findLongestMatch(
+  a: string,
+  b: string,
+  aLo: number,
+  aHi: number,
+  bLo: number,
+  bHi: number
+): { a: number; b: number; size: number } {
+  let bestI = aLo;
+  let bestJ = bLo;
+  let bestSize = 0;
+  let j2len = new Map<number, number>();
+  for (let i = aLo; i < aHi; i++) {
+    const next = new Map<number, number>();
+    for (let j = bLo; j < bHi; j++) {
+      if (a[i] === b[j]) {
+        const k = (j2len.get(j - 1) ?? 0) + 1;
+        next.set(j, k);
+        if (k > bestSize) {
+          bestI = i - k + 1;
+          bestJ = j - k + 1;
+          bestSize = k;
+        }
+      }
+    }
+    j2len = next;
+  }
+  return { a: bestI, b: bestJ, size: bestSize };
+}
+
+interface MatchBlock {
+  a: number;
+  b: number;
+  size: number;
+}
+
+/** All non-overlapping matching blocks, ascending, like difflib. */
+function matchingBlocks(a: string, b: string): MatchBlock[] {
+  const queue: Array<[number, number, number, number]> = [[0, a.length, 0, b.length]];
+  const blocks: MatchBlock[] = [];
+  while (queue.length > 0) {
+    const [aLo, aHi, bLo, bHi] = queue.pop() as [number, number, number, number];
+    const m = findLongestMatch(a, b, aLo, aHi, bLo, bHi);
+    if (m.size > 0) {
+      // Match the region before and after the longest block.
+      if (m.b > bLo) queue.push([aLo, m.a, bLo, m.b]);
+      if (m.b + m.size < bHi) queue.push([m.a + m.size, aHi, m.b + m.size, bHi]);
+      blocks.push(m);
+    }
+  }
+  blocks.sort((x, y) => x.a - y.a || x.b - y.b);
+  return blocks;
+}
+
+/**
+ * difflib SequenceMatcher.ratio(): 2*M / (len(a)+len(b)).
+ *
+ * Case-sensitive, exactly like Python — the original bot lowercased the names
+ * before calling difflib, and findClosestPlayer does the same, so callers
+ * decide whether the match is case-insensitive.
+ */
+export function sequenceMatcherRatio(a: string, b: string): number {
+  const aa = String(a);
+  const bb = String(b);
+  if (aa === bb) return 1;
+  if (aa.length === 0 || bb.length === 0) return 0;
+  const total = matchingBlocks(aa, bb).reduce((n, bl) => n + bl.size, 0);
+  return (2 * total) / (aa.length + bb.length);
+}
+
+/** difflib.get_close_matches(word, possibilities, n, cutoff) — same rules. */
+export function getCloseMatches(
+  word: string,
+  possibilities: string[],
+  n = 1,
+  cutoff = 0.6
+): string[] {
+  const scored: Array<{ value: string; score: number; index: number }> = [];
+  possibilities.forEach((value, index) => {
+    const score = sequenceMatcherRatio(word, value);
+    if (score >= cutoff) scored.push({ value, score, index });
+  });
+  // Highest score first; ties keep original order (Python's stable sort).
+  scored.sort((x, y) => y.score - x.score || x.index - y.index);
+  return scored.slice(0, n).map((k) => k.value);
+}
+
 export function findClosestPlayer(users: EtUser[], searchName: string): EtUser | null {
   const searchClean = cleanName(searchName).toLowerCase();
   if (!searchClean) return null;
@@ -151,17 +248,9 @@ export function findClosestPlayer(users: EtUser[], searchName: string): EtUser |
     if (cleaned.includes(searchClean)) return user;
   }
 
-  // Fuzzy, like difflib.get_close_matches(cutoff=0.6).
-  let best: EtUser | null = null;
-  let bestScore = 0.6;
-  for (const [cleaned, user] of byClean) {
-    const score = similarity(searchClean, cleaned);
-    if (score >= bestScore) {
-      bestScore = score;
-      best = user;
-    }
-  }
-  return best;
+  // Fuzzy, exactly like the original's difflib.get_close_matches(cutoff=0.6).
+  const [fuzzy] = getCloseMatches(searchClean, [...byClean.keys()], 1, 0.6);
+  return fuzzy ? (byClean.get(fuzzy) ?? null) : null;
 }
 
 /** Rank users by total XP (top 10 by default), bots excluded. */
