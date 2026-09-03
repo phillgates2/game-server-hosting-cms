@@ -192,6 +192,21 @@ All notable changes to GameServer Manager are documented here.
   drops the parameter.
 - **496 tests** (1 new) and **149 security checks** (1 new).
 
+### 🟢 Green Dot Is Green (and a color name generator)
+
+- **The status dot is now green whenever the server is up, red only when it
+  is down.** The WolfET port had kept the old bot's amber state
+  (🟠 = online but empty), which read as "something is wrong" — the count is
+  shown right next to the dot, so the dot carries only up/down. An unknown
+  count now shows `(?)` instead of a misleading `(0)`.
+- **New color name generator.** Every hex color gets a stable human name —
+  `#3b82f6` is *Vivid Azurite*, `#ef4444` is *Bright Scarlet*, grays are
+  *Slate*, *Ash*, *Silver* — and the Roles editor has a 🎲 button that rolls
+  a pleasant random color with its name shown live underneath. Names are
+  deterministic (same color, same name) and 13 tests pin the hue buckets,
+  modifiers and the random generator against a seeded RNG.
+- **510 tests** (14 new) and **151 security checks** (2 new).
+
 ---
 
 ## [1.20.0] — 2026-08-24

@@ -135,19 +135,22 @@ describe("desyncEmbeds", () => {
   });
 });
 
-describe("statusChannelName (WolfET channel rename)", () => {
-  test("green with players, orange when empty, red when offline (original format)", () => {
+describe("statusChannelName (channel rename)", () => {
+  test("green whenever the server is up, red when down — never amber", () => {
     assert.equal(statusChannelName({ online: true, players: 5, map: "et_beach" }), "🟢 ET: (5) - et_beach");
-    assert.equal(statusChannelName({ online: true, players: 0, map: "et_beach" }), "🟠 ET: (0) - et_beach");
-    assert.equal(statusChannelName({ online: true, players: 0 }), "🟠 ET: (0) - unknown-map");
+    assert.equal(statusChannelName({ online: true, players: 0, map: "et_beach" }), "🟢 ET: (0) - et_beach", "0 players is still up → green");
+    assert.equal(statusChannelName({ online: true, players: 0 }), "🟢 ET: (0) - unknown-map");
     assert.equal(statusChannelName({ online: false }), "🔴 ET: Server Offline");
     assert.equal(statusChannelName({ online: true, players: 3, map: "goldrush" }, "oz"), "🟢 oz: (3) - goldrush");
+    assert.ok(!statusChannelName({ online: true, players: 0 }).includes("🟠"), "the amber state is gone");
+  });
+
+  test("an unknown player count shows (?) instead of a misleading (0)", () => {
+    assert.equal(statusChannelName({ online: true, map: "et_beach" }), "🟢 ET: (?) - et_beach");
   });
 
   test("the channel name never exceeds Discord's 100 characters", () => {
-    const name = `🟢 et: (${"9".repeat(32)}) - ${"x".repeat(200)}`;
-    // The helper itself slices in renameChannel; here we assert the emoji+
-    // label part is stable and that the final name fits after normalisation.
+    const name = `🟢 ET: (${"9".repeat(32)}) - ${"x".repeat(200)}`;
     const label = name.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 100);
     assert.ok(label.length <= 100);
   });

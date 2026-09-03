@@ -806,6 +806,17 @@ console.log("\nH2/H3 auth enforcement wiring");
       /STATUS_CACHE_MS/.test(read("../src/lib/status-cache.ts"))
   );
   check(
+    "the channel dot is green whenever the server is up (no amber state)",
+    /return `🟢/.test(read("../src/lib/discord.ts")) &&
+      !/🟠/.test(read("../src/lib/discord.ts"))
+  );
+  check(
+    "the color name generator is deterministic and used by the roles editor",
+    /nameForHsv/.test(read("../src/lib/color-names.ts")) &&
+      /randomColorName/.test(read("../src/lib/color-names.ts")) &&
+      /randomColorName/.test(read("../src/components/panels/RolesPanel.tsx"))
+  );
+  check(
     "WolfET channel renames use PATCH /channels and the three-state name",
     /renameChannel/.test(read("../src/lib/discord.ts")) &&
       /statusChannelName/.test(read("../src/lib/discord.ts")) &&

@@ -531,8 +531,10 @@ export async function renameChannel(
 }
 
 /**
- * WolfET-style channel name for a server: `🟢 et: (5) - et_beach`,
- * `🟠 et: (0) - et_beach` when up but empty, `🔴 et: server offline`.
+ * Channel name status: 🟢 whenever the server is up (any player count),
+ * 🔴 when it is down. The original WolfET bot turned the dot orange when
+ * the server was online but empty; operators found that ambiguous, so the
+ * dot means *up* or *down* — the player count is right next to it.
  */
 export function statusChannelName(view: {
   online: boolean;
@@ -540,10 +542,11 @@ export function statusChannelName(view: {
   map?: string;
 }, label = "ET"): string {
   if (!view.online) return `🔴 ${label}: Server Offline`;
-  const count = view.players ?? 0;
-  const emoji = count > 0 ? "🟢" : "🟠";
+  // Unknown count (query port unreachable) is shown as "?" rather than the
+  // misleading "(0)".
+  const count = view.players !== undefined ? `(${view.players})` : "(?)";
   const map = view.map?.trim() ? view.map.trim() : "unknown-map";
-  return `${emoji} ${label}: (${count}) - ${map}`;
+  return `🟢 ${label}: ${count} - ${map}`;
 }
 
 /**

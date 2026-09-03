@@ -311,7 +311,7 @@ export default function DiscordSettings() {
             <code className="text-accent">!stats &lt;player&gt;</code>, <code className="text-accent">!ettop10</code>,{" "}
             <code className="text-accent">!etverify &lt;GUID&gt;</code>, <code className="text-accent">!etsync</code> and{" "}
             <code className="text-accent">!desync</code> — plus the status in the channel name
-            (🟢/🟠/🔴) and a 10-minute XP nickname sync for verified users.
+            (🟢 up / 🔴 down, never amber) and a 10-minute XP nickname sync for verified users.
           </p>
           <p className="mt-2 leading-relaxed">
             Enable the <strong>Server Members Intent</strong> and <strong>Message Content Intent</strong> in the{" "}

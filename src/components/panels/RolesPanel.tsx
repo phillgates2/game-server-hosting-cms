@@ -2,6 +2,33 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { colorNameFor, randomColorName } from "@/lib/color-names";
+
+/**
+ * Color picker with the name generator attached: a dice button rolls a
+ * pleasant color and the human-readable name is shown live underneath.
+ */
+function ColorField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const name = colorNameFor(value);
+  return (
+    <div>
+      <label className="block text-xs text-text-muted mb-1">Color</label>
+      <div className="flex gap-2 items-center">
+        <input type="color" value={value} onChange={(e) => onChange(e.target.value)} className="w-10 h-10 rounded cursor-pointer bg-transparent border-0" />
+        <input value={value} onChange={(e) => onChange(e.target.value)} className="flex-1 px-3 py-2 gaming-chip rounded-lg text-sm font-mono" />
+        <button
+          type="button"
+          title="Generate a color name"
+          onClick={() => { const c = randomColorName(); onChange(c.hex); }}
+          className="w-10 h-10 rounded-lg bg-bg-secondary border border-border hover:border-accent/40 text-lg leading-none"
+        >
+          🎲
+        </button>
+      </div>
+      <p className="text-[10px] text-text-muted mt-1">{name ? `✨ ${name}` : "Invalid hex"}</p>
+    </div>
+  );
+}
 
 interface Role {
   id: number; name: string; displayName: string; color: string | null; icon: string | null;
@@ -141,7 +168,7 @@ export default function RolesPanel() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div><label className="block text-xs text-text-muted mb-1">Internal Name *</label><input value={createForm.name} onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" required placeholder="vip" /></div>
             <div><label className="block text-xs text-text-muted mb-1">Display Name *</label><input value={createForm.displayName} onChange={(e) => setCreateForm({ ...createForm, displayName: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" required placeholder="VIP Member" /></div>
-            <div><label className="block text-xs text-text-muted mb-1">Color</label><div className="flex gap-2"><input type="color" value={createForm.color} onChange={(e) => setCreateForm({ ...createForm, color: e.target.value })} className="w-10 h-10 rounded cursor-pointer bg-transparent border-0" /><input value={createForm.color} onChange={(e) => setCreateForm({ ...createForm, color: e.target.value })} className="flex-1 px-3 py-2 gaming-chip rounded-lg text-sm font-mono" /></div></div>
+            <ColorField value={createForm.color} onChange={(v) => setCreateForm({ ...createForm, color: v })} />
             <div><label className="block text-xs text-text-muted mb-1">Priority</label><input type="number" value={createForm.priority} onChange={(e) => setCreateForm({ ...createForm, priority: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" /></div>
           </div>
           <h4 className="font-medium text-sm pt-2">Permissions</h4>
@@ -159,7 +186,7 @@ export default function RolesPanel() {
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div><label className="block text-xs text-text-muted mb-1">Display Name</label><input value={editFields.displayName} onChange={(e) => setEditFields({ ...editFields, displayName: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" /></div>
-            <div><label className="block text-xs text-text-muted mb-1">Color</label><div className="flex gap-2"><input type="color" value={editFields.color} onChange={(e) => setEditFields({ ...editFields, color: e.target.value })} className="w-10 h-10 rounded cursor-pointer bg-transparent border-0" /><input value={editFields.color} onChange={(e) => setEditFields({ ...editFields, color: e.target.value })} className="flex-1 px-3 py-2 gaming-chip rounded-lg text-sm font-mono" /></div></div>
+            <ColorField value={editFields.color} onChange={(v) => setEditFields({ ...editFields, color: v })} />
             <div><label className="block text-xs text-text-muted mb-1">Icon</label><input value={editFields.icon} onChange={(e) => setEditFields({ ...editFields, icon: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" /></div>
             <div><label className="block text-xs text-text-muted mb-1">Priority</label><input type="number" value={editFields.priority} onChange={(e) => setEditFields({ ...editFields, priority: e.target.value })} className="w-full px-3 py-2 gaming-chip rounded-lg text-sm" /></div>
           </div>

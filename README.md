@@ -16,7 +16,7 @@ Deploy, configure, and monitor game servers across multiple machines from one da
 
 <br>
 
-<samp>**27** games · **1,551** config options · **67** API routes · **496** tests · **149** security checks</samp>
+<samp>**27** games · **1,551** config options · **67** API routes · **510** tests · **151** security checks</samp>
 
 <br>
 
@@ -183,7 +183,7 @@ Then visit `http://your-server:3000` to finish setup in the install wizard.
 
 **Security & access** — TOTP two-factor auth · CSRF protection · granular role-based permissions · **scoped API keys** *(a read-only key really is read-only)* · per-user server quotas · login throttling · full audit trail
 
-**Notifications** — Discord on start, stop, restart, crash, auto-restart, update and delete, **each with a 🟢/🔴 status dot and the live player count** *(probed straight from the game: Steam A2S, Minecraft ping, Bedrock RakNet, Quake3)* · **a channel per server**, created automatically · **live status boards** — a message per server that keeps itself updated with status, map and the roster · **a WolfET-style chat bot** matching the community bot 1:1 — `!etwho` (with a 3-minute status cache and Python-identical difflib name matching), `!etallofoz`, `!stats`, `!ettop10`, `!etverify` (DM-only, message deleted, ET Verified role), `!etsync` (owner gets a DM button), `!desync`, `⌛` progress-and-edit messages, pings in the roster and `sv_hostname` in the output, plus 🟢/🟠/🔴 channel-name status and a 10-minute XP nickname sync · SMTP email via Nodemailer
+**Notifications** — Discord on start, stop, restart, crash, auto-restart, update and delete, **each with a 🟢/🔴 status dot and the live player count** *(probed straight from the game: Steam A2S, Minecraft ping, Bedrock RakNet, Quake3)* · **a channel per server**, created automatically · **live status boards** — a message per server that keeps itself updated with status, map and the roster · **a WolfET-style chat bot** matching the community bot 1:1 — `!etwho` (with a 3-minute status cache and Python-identical difflib name matching), `!etallofoz`, `!stats`, `!ettop10`, `!etverify` (DM-only, message deleted, ET Verified role), `!etsync` (owner gets a DM button), `!desync`, `⌛` progress-and-edit messages, pings in the roster and `sv_hostname` in the output, plus 🟢/🔴 channel-name status and a 10-minute XP nickname sync · SMTP email via Nodemailer
 
 **Appearance** — 4 built-in themes plus a custom theme editor · 3 layout densities *(compact, cozy, spacious)*
 
@@ -641,12 +641,12 @@ One command chains every check, exiting non-zero on the first failure — drop i
 
 | Script | Checks |
 |:--|:--|
-| `npm test` | 496 tests over the config renderer, path guard, auth, pagination, API key scopes, server lifecycle rules, and **database integrity, end-to-end installer round-trips, and multi-write atomicity against a real PostgreSQL** *(see below)* |
+| `npm test` | 510 tests over the config renderer, path guard, auth, pagination, API key scopes, server lifecycle rules, and **database integrity, end-to-end installer round-trips, and multi-write atomicity against a real PostgreSQL** *(see below)* |
 | `npm run typecheck` | `tsc --noEmit` across the project |
 | `npm run lint` | ESLint, including React hooks rules |
 | `npm run verify:templates` | All 1,551 template options — types, enums, defaults, and that every declared variable is actually consumed |
 | `npm run verify:installers` | Renders every game's install script, runs `bash -n` + shellcheck, then **executes** it in a sandbox with SteamCMD/curl/apt mocked, and asserts the artifacts the panel needs were produced |
-| `npm run verify:security` | 149 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, and a sweep for leaked exception messages |
+| `npm run verify:security` | 151 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, and a sweep for leaked exception messages |
 
 All of these run automatically in CI on every push and pull request, along
 with a production build and a high-severity dependency audit.
