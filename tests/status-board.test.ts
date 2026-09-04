@@ -16,6 +16,7 @@ import {
   messageEndpoint,
   clampInterval,
   stripColorCodes,
+  rosterKey,
   MAX_LISTED_PLAYERS,
   MAX_EMBED_FIELD_LENGTH,
   STATUS_DEFAULT_INTERVAL_MINUTES,
@@ -73,6 +74,30 @@ describe("buildStatusBoardEmbed", () => {
     assert.equal(roster.value.split("\n")[0], "• Rifleman");
     assert.match(roster.value, /Medic/);
     assert.match(roster.value, /Engineer/);
+  });
+
+  test("verified players get their Discord role color name appended", () => {
+    const embed = buildStatusBoardEmbed({
+      ...VIEW,
+      names: ["^5Rifleman^7", "Medic", "Unknown"],
+      pings: [12, 8, 55],
+      roleColors: { rifleman: "#3b82f6", medic: "#22c55e" },
+    });
+    const roster = embed.fields.find((f) => f.name === "👤 Players online");
+    assert.ok(roster);
+    assert.equal(roster.value.split("\n")[0], "• Rifleman [12ms] 🎨 Vivid Azurite", "name + ping + color name");
+    assert.equal(roster.value.split("\n")[1], "• Medic [8ms] 🎨 Vivid Jade");
+    assert.equal(roster.value.split("\n")[2], "• Unknown [55ms]", "no annotation without a color");
+  });
+
+  test("the annotated roster still fits the field cap", () => {
+    const names = Array.from({ length: 20 }, (_, i) => `Player${i}`);
+    const roleColors: Record<string, string> = {};
+    for (const n of names) roleColors[rosterKey(n)] = "#ef4444";
+    const embed = buildStatusBoardEmbed({ ...VIEW, names, roleColors });
+    const roster = embed.fields.find((f) => f.name === "👤 Players online");
+    assert.ok(roster && roster.value.length <= MAX_EMBED_FIELD_LENGTH);
+    assert.match(roster.value, /🎨 Bright Scarlet/);
   });
 
   test("a big roster is summarised, never a field Discord rejects", () => {

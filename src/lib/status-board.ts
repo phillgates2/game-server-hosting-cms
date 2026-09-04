@@ -163,6 +163,16 @@ export async function refreshServerBoard(server: ServerForBoard): Promise<{
     return { ok: false, error: "No Discord webhook on this server — run ‘Create missing channels’ first" };
   }
   const view = await boardViewFor(server);
+  // Annotate verified players with their Discord role color name. Optional:
+  // without a gateway connection the map stays empty and nothing changes.
+  try {
+    if (view.online && view.names && view.names.length > 0) {
+      const { rosterRoleColors } = await import("./discord-bot");
+      view.roleColors = await rosterRoleColors(view.names);
+    }
+  } catch {
+    // never let annotation break a board refresh
+  }
 
   if (server.discordStatusMessageId) {
     const edit = await editBoardMessage(server.discordWebhook, server.discordStatusMessageId, view);

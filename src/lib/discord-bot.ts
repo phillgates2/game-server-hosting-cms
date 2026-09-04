@@ -49,12 +49,26 @@ const RETRY_DELAY_MS = 60_000;
 
 // ── Structural view of the discord.js APIs this module touches ───────────────
 
-interface RoleView { id: string; name: string }
+interface RoleView {
+  id: string;
+  name: string;
+  /** #rrggbb hex (discord.js exposes role.hexColor). */
+  hexColor: string;
+  position: number;
+}
 interface MemberView {
   id: string;
+  username?: string;
   displayName: string;
   setNickname: (n: string) => Promise<unknown>;
-  roles: { add: (id: string) => Promise<unknown>; remove: (id: string) => Promise<unknown> };
+  roles: {
+    add: (id: string) => Promise<unknown>;
+    remove: (id: string) => Promise<unknown>;
+    /** Guild roles as a collection (Map-like: .get(id), .size). */
+    cache?: Map<string, RoleView> | { get: (id: string) => RoleView | undefined };
+    /** Ids of the roles this member holds. */
+    ids?: string[];
+  };
   /** Highest role this member holds (discord.js `member.topRole`). */
   topRole?: { position: number };
   /** This member's permission bitfield in the guild. */
@@ -191,11 +205,25 @@ export async function loadEtStatsData() {
 
 // ── Embed payloads (pure builders live in discord-commands.ts) ────────────────
 
+/** Fill `view.roleColors` from the gateway; never throws, never blocks. */
+async function attachRosterColors(view: BoardView): Promise<void> {
+  try {
+    if (view.online && view.names && view.names.length > 0) {
+      view.roleColors = await rosterRoleColors(view.names);
+    }
+  } catch {
+    // annotation is best-effort
+  }
+}
+
 async function whoReply(server: EtServerRow, cached?: BoardView): Promise<unknown> {
   const { boardViewFor } = await import("./status-board");
   const { whoEmbeds } = await import("./discord-commands");
   const view = cached ?? (await boardViewFor(server as never));
-  if (!cached) setCachedView(server.id, view);
+  if (!cached) {
+    setCachedView(server.id, view);
+    await attachRosterColors(view);
+  }
   return { embeds: whoEmbeds(view).embeds };
 }
 
@@ -231,6 +259,7 @@ async function allServersReply(): Promise<unknown> {
       probeFailed: !probe.ok && s.status === "running",
     };
     setCachedView(s.id, view);
+    await attachRosterColors(view);
     views.push(view);
   }
   return { embeds: allServersEmbeds(views, "ET Servers").embeds };
@@ -701,6 +730,87 @@ async function loadBotConfig(): Promise<{ botToken: string; guildId: string } | 
   const { getDiscordSettings } = await import("./discord-settings");
   const cfg = await getDiscordSettings();
   return cfg.botToken && cfg.guildId ? { botToken: cfg.botToken, guildId: cfg.guildId } : null;
+}
+
+// ── Roster role colors (board annotation) ────────────────────────────────────
+
+/** Cleaned name -> hex, cached so board refreshes do not refetch members. */
+const roleColorCache = new Map<string, { hex: string | null; at: number }>();
+const ROLE_COLOR_TTL_MS = 10 * 60_000;
+
+/**
+ * Resolve the role color (highest non-@everyone role) for each verified
+ * guild member whose display name matches an in-game player name.
+ *
+ * Best-effort and bounded: without a gateway connection nothing is
+ * annotated; members are fetched at most once per 10-minute window; a
+ * failure returns an empty map instead of breaking the board.
+ */
+export async function rosterRoleColors(names: string[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  if (!client || !names || names.length === 0) return out;
+  try {
+    const { matchRoleColors, rosterKey } = await import("./discord-roster");
+    const cfg = await loadBotConfig();
+    if (!cfg) return out;
+
+    // Only members whose stored name is plausibly on the roster get fetched:
+    // the gateway is rate-limited, and a 200-player board must not fetch 200
+    // members. Exact-or-partial key match first.
+    const wanted = new Set(names.map(rosterKey).filter(Boolean));
+    const verifications = await db.select().from(discordVerifications).limit(200);
+    const candidates = verifications.filter((v) => {
+      const key = rosterKey(v.discordName ?? "");
+      if (!key) return false;
+      for (const w of wanted) {
+        if (key === w || key.includes(w) || w.includes(key)) return true;
+      }
+      return false;
+    });
+    if (candidates.length === 0) return out;
+
+    const members: Array<{ discordName: string; colorHex: string | null }> = [];
+    const now = Date.now();
+    for (const v of candidates) {
+      const cached = roleColorCache.get(v.discordId);
+      let hex: string | null = cached && now - cached.at < ROLE_COLOR_TTL_MS
+        ? cached.hex
+        : null;
+      if (!cached || now - cached.at >= ROLE_COLOR_TTL_MS) {
+        try {
+          const guild = await client.guilds.fetch(cfg.guildId);
+          const member = await guild.members.fetch(v.discordId);
+          hex = memberTopRoleHex(member);
+        } catch {
+          hex = null;
+        }
+        roleColorCache.set(v.discordId, { hex, at: now });
+      }
+      if (hex) {
+        members.push({ discordName: v.discordName ?? "", colorHex: hex });
+      }
+    }
+
+    return matchRoleColors(names, members);
+  } catch (e: unknown) {
+    log.warn("roster role colors failed", e instanceof Error ? e.message : String(e));
+    return out;
+  }
+}
+
+/** Highest role's hex color, skipping @everyone (position 0). */
+function memberTopRoleHex(member: MemberView): string | null {
+  const cache = member.roles.cache;
+  if (!cache) return null;
+  let best: RoleView | null = null;
+  for (const role of cache instanceof Map ? cache.values() : []) {
+    if (role.name === "@everyone") continue;
+    if (!best || role.position > best.position) best = role;
+  }
+  // discord.js gives roles a default color of the @everyone gray; treat that
+  // as "no distinguishing color" rather than annotating everyone gray.
+  if (!best || best.hexColor === "#000000" || best.hexColor === "#99aab5") return null;
+  return best.hexColor;
 }
 
 /**

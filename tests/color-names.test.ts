@@ -17,6 +17,7 @@ import {
   colorNameFor,
   nameForHsv,
   describeColor,
+  cssColorName,
   randomColorName,
   toHex,
 } from "../src/lib/color-names";
@@ -82,6 +83,19 @@ describe("describeColor", () => {
 
   test("unknown hex returns null", () => {
     assert.equal(describeColor("oops"), null);
+  });
+});
+
+describe("cssColorName", () => {
+  test("names rgba colors used by the theme editor's aurora fields", () => {
+    const c = cssColorName("rgba(34, 211, 238, 0.14)");
+    assert.equal(c?.hex, "#22d3ee");
+    assert.equal(c?.name, "Vivid Teal");
+  });
+
+  test("falls back for anything unnameable", () => {
+    assert.equal(cssColorName("oops"), null);
+    assert.equal(cssColorName(""), null);
   });
 });
 

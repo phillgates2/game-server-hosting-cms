@@ -6,6 +6,7 @@
  */
 
 import { isValidWebhookUrl } from "@/lib/discord";
+import { colorNameFor } from "./color-names";
 
 /** How often boards refresh, and the clamp for the operator setting. */
 export const STATUS_DEFAULT_INTERVAL_MINUTES = 3;
@@ -70,6 +71,11 @@ export interface BoardView {
   pings?: number[];
   /** Server hostname (sv_hostname) when reported. */
   hostname?: string;
+  /**
+   * Discord role colors (hex) keyed by a cleaned player name for members who
+   * verified — rendered as `• Name [12ms] 🎨 Vivid Azurite`.
+   */
+  roleColors?: Record<string, string>;
   /** Probe failure while the panel thinks the server is up. */
   probeFailed?: boolean;
 }
@@ -89,6 +95,25 @@ export interface BoardMessagePayload {
 
 const ONLINE_COLOR = 0x22c55e; // green
 const OFFLINE_COLOR = 0xef4444; // red
+
+/** Normalized lookup key for a player/member name: cleaned + lowercased. */
+export function rosterKey(name: string): string {
+  const clean = stripColorCodes(name).trim().replace(/\^[0-9a-zA-Z]/g, "");
+  return clean.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/** One roster line with the optional 🎨 role-color annotation. */
+export function rosterLine(
+  rawName: string,
+  ping?: number,
+  roleColorHex?: string | null
+): string {
+  const clean = stripColorCodes(rawName).trim() || "Anonymous";
+  const base = `• ${clean}${ping !== undefined ? ` [${ping}ms]` : ""}`;
+  if (!roleColorHex) return base;
+  const name = colorNameFor(roleColorHex);
+  return name ? `${base} 🎨 ${name}` : base;
+}
 
 /**
  * Build the embed for a board message.
@@ -118,7 +143,9 @@ export function buildStatusBoardEmbed(view: BoardView, now: Date = new Date()): 
   if (view.online && view.names && view.names.length > 0) {
     const listed = view.names
       .slice(0, MAX_LISTED_PLAYERS)
-      .map((n) => `• ${stripColorCodes(n).slice(0, 80) || "Anonymous"}`)
+      .map((n, i) =>
+        rosterLine(n, view.pings?.[i], view.roleColors?.[rosterKey(n)] ?? null)
+      )
       .join("\n");
     const rest = view.names.length - MAX_LISTED_PLAYERS;
     const value = rest > 0 ? `${listed}\n… and ${rest} more` : listed;

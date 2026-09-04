@@ -817,6 +817,23 @@ console.log("\nH2/H3 auth enforcement wiring");
       /randomColorName/.test(read("../src/components/panels/RolesPanel.tsx"))
   );
   check(
+    "the theme editor rolls names with the same generator (dice + live name)",
+    /cssColorName/.test(read("../src/lib/color-names.ts")) &&
+      /cssColorName/.test(read("../src/components/panels/ProfilePanel.tsx")) &&
+      /randomColorName/.test(read("../src/components/panels/ProfilePanel.tsx")) &&
+      /🎲/.test(read("../src/components/panels/ProfilePanel.tsx"))
+  );
+  check(
+    "board embeds annotate verified players with their Discord role color name",
+    /rosterLine/.test(read("../src/lib/status-board-embed.ts")) &&
+      /view\.roleColors\?\./.test(read("../src/lib/status-board-embed.ts")) &&
+      /colorNameFor\(roleColorHex\)/.test(read("../src/lib/status-board-embed.ts")) &&
+      /rosterRoleColors/.test(read("../src/lib/discord-bot.ts")) &&
+      /matchRoleColors/.test(read("../src/lib/discord-bot.ts")) &&
+      /await attachRosterColors\(view\)/.test(read("../src/lib/discord-bot.ts")) &&
+      /rosterRoleColors\(view\.names\)/.test(read("../src/lib/status-board.ts"))
+  );
+  check(
     "WolfET channel renames use PATCH /channels and the three-state name",
     /renameChannel/.test(read("../src/lib/discord.ts")) &&
       /statusChannelName/.test(read("../src/lib/discord.ts")) &&

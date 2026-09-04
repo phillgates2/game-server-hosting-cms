@@ -4,6 +4,34 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.21.1] — 2026-09-04
+
+### 🎲 Color Names Everywhere (theme editor + status boards)
+
+- **The custom theme editor now uses the same 🎲 generator as the Roles
+  editor.** Every theme color field picks up a random pleasant color and shows
+  its stable human name live underneath (`✨ Vivid Azurite`). The aurora
+  `rgba(...)` fields are handled too — rolling one keeps your alpha while
+  replacing the rgb triple, and the name ignores the alpha and names the
+  color itself.
+- **Status boards now show verified players' Discord role color next to their
+  name.** A roster line for a verified player reads
+  `• Rifleman [12ms] 🎨 Vivid Azurite` — the name of their highest role color
+  in the guild, same naming as the editor. Matching is by cleaned in-game
+  name against the verified account, so `^5Rifleman^7` matches `Rifleman`;
+  bots are never annotated.
+- This is best-effort and optional: no gateway connection means no annotation
+  (the board looks exactly as before), colors are cached for 10 minutes so a
+  busy board does not hammer Discord's API, and only members whose name is
+  plausibly on the roster are fetched at all. The `!etwho` / `!etallofoz`
+  replies show the annotation too.
+- **521 tests** (11 new: matching, embed rendering, rgba naming) and
+  **153 security checks** (2 new, verified with mutations: silencing the
+  annotation, dropping the name lookup and removing the gateway wiring each
+  fail the gate).
+
+---
+
 ## [1.21.0] — 2026-08-26
 
 ### 🟢 Discord Status Dot & Live Player Count

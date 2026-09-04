@@ -148,6 +148,29 @@ export function describeColor(hex: string): NamedColor | null {
   };
 }
 
+const RGBA_RE = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/i;
+
+/**
+ * Name a CSS color value — `#RRGGBB` or `rgb()/rgba()` — ignoring any alpha.
+ * The theme editor stores aurora colors as rgba(...), so the generator has
+ * to read through those as well as hex.
+ */
+export function cssColorName(value: string): { name: string; hex: string } | null {
+  const trimmed = String(value ?? "").trim();
+  const fromHex = parseHex(trimmed);
+  if (fromHex) {
+    const { r, g, b } = hsvToRgb(fromHex.h, fromHex.s, fromHex.v);
+    return { name: nameForHsv(fromHex), hex: toHex(r, g, b) };
+  }
+  const m = RGBA_RE.exec(trimmed);
+  if (m) {
+    const hex = toHex(Number(m[1]) / 255, Number(m[2]) / 255, Number(m[3]) / 255);
+    const hsv = parseHex(hex);
+    return hsv ? { name: nameForHsv(hsv), hex } : null;
+  }
+  return null;
+}
+
 /**
  * A pleasant random color with its name. The palette stays saturated but not
  * neon (s 0.45–0.92, v 0.35–0.85) so generated role badges look intentional.

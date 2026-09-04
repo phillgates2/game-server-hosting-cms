@@ -12,6 +12,7 @@ import {
   type LayoutMode,
   type ThemeName,
 } from "@/lib/theme";
+import { cssColorName, randomColorName } from "@/lib/color-names";
 
 interface Profile {
   id: number;
@@ -474,10 +475,25 @@ function ColorField({
   allowRgba?: boolean;
 }) {
   const fallbackHex = /^#[0-9A-F]{6}$/i.test(value) ? value : "#000000";
+  const named = cssColorName(value);
+
+  /** Roll a pleasant color; rgba fields keep their alpha. */
+  function roll() {
+    const c = randomColorName();
+    if (!allowRgba) {
+      onChange(c.hex);
+      return;
+    }
+    const match = /^rgba?\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*(?:,\s*([\d.]+)\s*)?\)$/i.exec(value.trim());
+    const alpha = match?.[1] ?? "0.14";
+    const rgb = c.css.replace(/^rgb\(|\)$/g, "");
+    onChange(`rgba(${rgb}, ${alpha})`);
+  }
+
   return (
     <div className="space-y-1">
       <label className="block text-xs text-text-muted">{label}</label>
-      <div className="flex gap-2">
+      <div className="flex gap-2 items-center">
         <input
           type="color"
           value={fallbackHex}
@@ -490,7 +506,18 @@ function ColorField({
           className="flex-1 px-2 py-1.5 gaming-chip rounded-lg text-xs font-mono"
           placeholder={allowRgba ? "#RRGGBB or rgba(...)" : "#RRGGBB"}
         />
+        <button
+          type="button"
+          title="Generate a color name"
+          onClick={roll}
+          className="h-9 w-9 rounded-lg bg-bg-secondary border border-border hover:border-accent/40 text-sm leading-none shrink-0"
+        >
+          🎲
+        </button>
       </div>
+      {named && (
+        <p className="text-[10px] text-text-muted mt-0.5">✨ {named.name}</p>
+      )}
     </div>
   );
 }
