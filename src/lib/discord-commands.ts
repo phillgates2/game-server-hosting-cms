@@ -106,7 +106,8 @@ export function allServersEmbeds(views: BoardView[], label: string, now: Date = 
   } else {
     for (const v of withPlayers) {
       const players = roster(v, 14);
-      const display = v.hostname?.trim() || v.serverName;
+      const base = v.hostname?.trim() || v.serverName;
+      const display = v.external ? `🌐 ${base}` : base;
       fields.push({
         name: `${display} — ${v.players} players`,
         value: (

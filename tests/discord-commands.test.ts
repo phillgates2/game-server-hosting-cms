@@ -82,6 +82,25 @@ describe("allServersEmbeds", () => {
     assert.ok(embeds[0].fields.some((f) => f.name === "No Players Online"));
     assert.equal(embeds[0].footer?.text, "Active Servers: 0/1");
   });
+
+  test("external servers are labeled and counted in the same embed", () => {
+    const { embeds } = allServersEmbeds([
+      { serverName: "Main OZ", gameName: "ET", address: "`a:1`", online: true, players: 2, names: ["A", "B"], pings: [10, 12], hostname: "OZ Main", map: "et_beach" },
+      { serverName: "203.44.23.44:27960", gameName: "ET", address: "`203.44.23.44:27960`", online: true, players: 3, names: ["C", "D", "E"], pings: [4, 6, 8], hostname: "Pubsie", map: "et_morocco", external: true },
+      { serverName: "198.51.100.7:27960", gameName: "ET", address: "`198.51.100.7:27960`", online: false, external: true },
+    ], "ET Servers");
+    const e = embeds[0];
+    assert.ok(String(e.description).includes("Total Real Players: **5**"), "extras count toward the total");
+    assert.ok(e.fields.some((f) => f.name === "👍 Servers online" && f.value === "2/3"));
+    assert.ok(e.fields.some((f) => f.name === "👥 Total real players" && f.value === "5"));
+    const ext = e.fields.find((f) => f.name === "🌐 Pubsie — 3 players");
+    assert.ok(ext, "external server is labeled with a globe in the field name");
+    assert.ok(ext.value.startsWith("**🌐 Pubsie**"), "the field value carries the globe label too");
+    assert.ok(ext.value.includes("IP: `203.44.23.44:27960`"));
+    const panel = e.fields.find((f) => f.name === "OZ Main — 2 players");
+    assert.ok(panel, "panel server field is present");
+    assert.ok(!panel.name.startsWith("🌐"), "panel servers keep their plain label");
+  });
 });
 
 describe("statsEmbeds", () => {

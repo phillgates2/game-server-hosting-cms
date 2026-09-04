@@ -78,6 +78,8 @@ export interface BoardView {
   roleColors?: Record<string, string>;
   /** Probe failure while the panel thinks the server is up. */
   probeFailed?: boolean;
+  /** External servers checked by `!etallofoz` but not installed in the panel. */
+  external?: boolean;
 }
 
 export interface BoardEmbed {

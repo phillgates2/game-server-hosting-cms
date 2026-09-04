@@ -840,6 +840,33 @@ console.log("\nH2/H3 auth enforcement wiring");
       /updateChannelName/.test(read("../src/lib/status-board.ts")) &&
       /🟢/.test(read("../src/lib/discord.ts")) && /🔴/.test(read("../src/lib/discord.ts"))
   );
+  check(
+    "!etallofoz also probes ET servers configured outside the panel",
+    /GSM_ET_EXTRA_SERVERS/.test(read("../src/lib/discord-settings.ts")) &&
+      /GSM_ET_MASTER_URLS/.test(read("../src/lib/discord-settings.ts")) &&
+      /"et_extra_servers"/.test(read("../src/lib/discord-settings.ts")) &&
+      /loadExternalEtServers/.test(read("../src/lib/et-extra-servers.ts")) &&
+      /parseExtraServerList/.test(read("../src/lib/et-extra-servers.ts")) &&
+      /loadExternalEtServers\(\{/.test(read("../src/lib/discord-bot.ts")) &&
+      /configText: settings\.extraServers/.test(read("../src/lib/discord-bot.ts")) &&
+      /panelServers: servers\.map/.test(read("../src/lib/discord-bot.ts")) &&
+      /external: true/.test(read("../src/lib/discord-bot.ts"))
+  );
+  check(
+    "master-server discovery parses replies and is capped",
+    /export function parseMasterChunk/.test(read("../src/lib/et-extra-servers.ts")) &&
+      /getservers 69/.test(read("../src/lib/et-extra-servers.ts")) &&
+      /MAX_DISCOVERED_SERVERS = 25/.test(read("../src/lib/et-extra-servers.ts")) &&
+      /const cap = Math\.max\(0, input\.maxDiscovered \?\? MAX_DISCOVERED_SERVERS\)/.test(read("../src/lib/et-extra-servers.ts")) &&
+      /export const DEFAULT_MASTER_URLS = \[/.test(read("../src/lib/et-extra-servers.ts")) &&
+      /"etmaster\.idsoftware\.com",/.test(read("../src/lib/et-extra-servers.ts")) &&
+      /"master0\.etmaster\.net",/.test(read("../src/lib/et-extra-servers.ts")) &&
+      /"master3\.idsoftware\.com:27900",/.test(read("../src/lib/et-extra-servers.ts")) &&
+      /"master\.etlegacy\.com",/.test(read("../src/lib/et-extra-servers.ts")) &&
+      /masterUrls: DEFAULT_MASTER_URLS,/.test(read("../src/lib/discord-settings.ts")) &&
+      /EXTRA_PROBE_BATCH = \d+/.test(read("../src/lib/discord-bot.ts")) &&
+      !/EXTRA_PROBE_BATCH = 1\b/.test(read("../src/lib/discord-bot.ts"))
+  );
 
 }
 

@@ -35,6 +35,8 @@ const log = {
 };
 
 const PREFIX = "!";
+/** External servers are probed in batches of this many (parallel UDP). */
+const EXTRA_PROBE_BATCH = 8;
 const COOLDOWNS: Record<string, number> = {
   etwho: 5,
   etallofoz: 5,
@@ -230,6 +232,8 @@ async function whoReply(server: EtServerRow, cached?: BoardView): Promise<unknow
 async function allServersReply(): Promise<unknown> {
   const { probePlayers } = await import("./players");
   const { allServersEmbeds } = await import("./discord-commands");
+  const { getDiscordSettings } = await import("./discord-settings");
+  const { loadExternalEtServers } = await import("./et-extra-servers");
   const servers = await etServers();
   const views = [];
   for (const s of servers) {
@@ -261,6 +265,66 @@ async function allServersReply(): Promise<unknown> {
     setCachedView(s.id, view);
     await attachRosterColors(view);
     views.push(view);
+  }
+
+  // Outside-the-panel ET servers: the configured list plus optional
+  // master-server discovery, probed alongside the panel and shown in the
+  // same embed with a 🌐 label. Cached under negative keys so panel ids
+  // (always positive) can never collide; best-effort — bad config or a dead
+  // master can never break the command, they only shrink the list.
+  const settings = await getDiscordSettings();
+  const extras = await loadExternalEtServers({
+    configText: settings.extraServers,
+    mastersText: settings.masterUrls,
+    panelServers: servers.map((s) => ({ host: s.ipv4 ?? "127.0.0.1", port: s.port })),
+  });
+  if (extras.errors.length > 0) {
+    log.info("etallofoz extras", extras.errors.join("; "));
+  }
+  // External servers are probed in small parallel batches: a master can
+  // return the full cap and a sequential scan would take far too long. The
+  // 3-minute status cache still shortcuts anything probed recently.
+  const pending: Array<{ index: number; ex: (typeof extras.servers)[number] }> = [];
+  for (let i = 0; i < extras.servers.length; i++) {
+    const cacheKey = -(i + 1);
+    const cached = getCachedView(cacheKey);
+    if (cached) {
+      views.push(cached);
+    } else {
+      pending.push({ index: i, ex: extras.servers[i] });
+    }
+  }
+  for (let b = 0; b < pending.length; b += EXTRA_PROBE_BATCH) {
+    const batch = pending.slice(b, b + EXTRA_PROBE_BATCH);
+    const probed = await Promise.all(
+      batch.map(async ({ index, ex }) => {
+        const probe = await probePlayers({
+          gameSlug: "wolfenstein-et",
+          host: ex.host,
+          port: ex.port,
+          queryPort: ex.queryPort,
+          attempts: 1,
+        });
+        const view = {
+          serverName: `${ex.host}:${ex.port}`,
+          gameName: "Wolfenstein: Enemy Territory",
+          address: `\`${ex.host}:${ex.port}\``,
+          online: probe.ok,
+          map: probe.map,
+          players: probe.players,
+          maxPlayers: probe.maxPlayers,
+          names: probe.names,
+          pings: probe.pings,
+          hostname: probe.hostname,
+          probeFailed: !probe.ok,
+          external: true,
+        };
+        setCachedView(-(index + 1), view);
+        await attachRosterColors(view);
+        return view;
+      })
+    );
+    views.push(...probed);
   }
   return { embeds: allServersEmbeds(views, "ET Servers").embeds };
 }

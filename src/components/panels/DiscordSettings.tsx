@@ -26,6 +26,8 @@ interface DiscordConfig {
   categoryId: string;
   autoChannel: boolean;
   channelPrefix: string;
+  extraServers: string;
+  masterUrls: string;
   botReady: boolean;
 }
 
@@ -52,6 +54,8 @@ export default function DiscordSettings() {
   const [categoryId, setCategoryId] = useState("");
   const [channelPrefix, setChannelPrefix] = useState("");
   const [autoChannel, setAutoChannel] = useState(false);
+  const [extraServers, setExtraServers] = useState("");
+  const [masterUrls, setMasterUrls] = useState("");
   const [busy, setBusy] = useState<"" | "save" | "test" | "verify">("");
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [boards, setBoards] = useState<BoardServer[] | null>(null);
@@ -70,6 +74,8 @@ export default function DiscordSettings() {
       setCategoryId(data.categoryId || "");
       setChannelPrefix(data.channelPrefix || "");
       setAutoChannel(Boolean(data.autoChannel));
+      setExtraServers(data.extraServers || "");
+      setMasterUrls(data.masterUrls || "");
     } catch {
       /* leave the form empty; the save call will surface any real problem */
     }
@@ -163,6 +169,8 @@ export default function DiscordSettings() {
       categoryId,
       channelPrefix,
       autoChannel,
+      extraServers,
+      masterUrls,
     };
     // Only send the token when the admin actually typed one, so saving other
     // fields does not wipe the stored credential.
@@ -321,6 +329,47 @@ export default function DiscordSettings() {
             (override with <code className="text-accent">GSM_ET_USER_SQLITE</code>); disable the whole bot with{" "}
             <code className="text-accent">GSM_DISABLE_DISCORD_BOT=true</code>.
           </p>
+
+          <div className="mt-3 space-y-3 border-t border-border pt-3">
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1">
+                Extra ET servers for <code className="text-accent">!etallofoz</code>
+              </label>
+              <textarea
+                value={extraServers}
+                onChange={(e) => setExtraServers(e.target.value)}
+                rows={3}
+                spellCheck={false}
+                placeholder={"203.44.23.44:27960\nfriends-server.duckdns.org:27960:27961"}
+                className={`${inputCls} font-mono text-xs`}
+              />
+              <p className="text-[11px] text-text-muted mt-1">
+                ET servers that are <em>not</em> installed in the panel — one per line as{" "}
+                <code className="text-accent">host:port</code>, add <code className="text-accent">:queryPort</code>{" "}
+                if getstatus is answered elsewhere. <code className="text-accent">#</code> starts a comment.
+                Also settable via <code className="text-accent">GSM_ET_EXTRA_SERVERS</code>.
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1">
+                Master server(s) for automatic discovery
+              </label>
+              <input
+                value={masterUrls}
+                onChange={(e) => setMasterUrls(e.target.value)}
+                spellCheck={false}
+                placeholder={"master0.etmaster.net, master.etlegacy.com"}
+                className={inputCls}
+              />
+              <p className="text-[11px] text-text-muted mt-1">
+                Optional — queried for the community server list when <code className="text-accent">!etallofoz</code> runs;
+                discovered servers are probed in parallel and shown with a <span className="text-accent">🌐</span> label,
+                capped at 25, and never duplicated against panel servers. Also settable via{" "}
+                <code className="text-accent">GSM_ET_MASTER_URLS</code>. Prefilled with the classic community masters
+                (id Software, etmaster.net, ETLegacy); clear it to disable discovery.
+              </p>
+            </div>
+          </div>
         </details>
       </div>
 

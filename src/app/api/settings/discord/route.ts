@@ -36,6 +36,8 @@ export async function GET(req: NextRequest) {
       categoryId: s.categoryId,
       autoChannel: s.autoChannel,
       channelPrefix: s.channelPrefix,
+      extraServers: s.extraServers,
+      masterUrls: s.masterUrls,
       botReady: Boolean(s.botToken && s.guildId),
     });
   } catch (e: unknown) {
@@ -138,6 +140,8 @@ export async function POST(req: NextRequest) {
       ["guildId", "discord_guild_id"],
       ["categoryId", "discord_category_id"],
       ["channelPrefix", "discord_channel_prefix"],
+      ["extraServers", "et_extra_servers"],
+      ["masterUrls", "et_master_urls"],
     ] as const) {
       if (typeof body[field] === "string") {
         const v = (body[field] as string).trim();

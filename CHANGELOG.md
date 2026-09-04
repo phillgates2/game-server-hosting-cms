@@ -4,6 +4,46 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.21.2] — 2026-09-04
+
+### 🌐 `!etallofoz` Can Check Servers Outside the Panel
+
+- **The WolfET bot only knew its own fleet; now the command can also report
+  servers that are not installed in the panel, from two sources at once:**
+  1. **A configured list** — the Discord settings field (or
+     `GSM_ET_EXTRA_SERVERS`), one `host:port[:queryPort]` per line with `#`
+     comments, so a friend's server or an old reserve box can be watched
+     without creating a panel server for it.
+  2. **Master-server discovery** — an optional master list
+     (`GSM_ET_MASTER_URLS` / settings field) is queried with the classic
+     `getservers` protocol for the community's servers. Both wire formats are
+     parsed tolerantly (the old binary 6-byte records and the Q3 ASCII CSV),
+     replies are deduplicated, and discovery is capped at 25 servers and
+     best-effort: a dead master or an invalid config can never break the
+     command, it only shrinks the list.
+- **Everything appears in the same embed** — panel and external servers mixed,
+  external ones labeled `🌐` and counted in the `Servers online` / `Total real
+  players` totals. External probes reuse the 3-minute status cache (under
+  negative keys, so panel IDs can never collide) and the Discord role-color
+  annotation works for them too.
+- **Master discovery comes preconfigured** with the classic community list,
+  in the games' own `sv_master` order: `etmaster.idsoftware.com`,
+  `master0.etmaster.net`, `master3.idsoftware.com`, `wolfmaster.idsoftware.com`,
+  `master3.idsoftware.com:27900` and `master.etlegacy.com` — the odd port on
+  the second master3 entry is preserved exactly. Dead masters are skipped;
+  clear the field to disable discovery.
+- External servers are probed in parallel batches of 8 (each probe still
+  bounded and single-attempt), so a full 25-server discovery answers quickly
+  instead of serial timeouts.
+- Malformed config lines are reported instead of silently dropped; duplicate
+  entries and servers that are already in the panel are skipped.
+- **536 tests** (15 new: list parsing, both master wire formats, dedupe/cap,
+  embed labeling) and **155 security checks** (2 new, mutation-verified:
+  removing the extras wiring, the env override, the dedupe, the cap or the
+  parser each fail the gate).
+
+---
+
 ## [1.21.1] — 2026-09-04
 
 ### 🎲 Color Names Everywhere (theme editor + status boards)

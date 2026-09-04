@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { settings } from "@/db/schema";
 import { inArray } from "drizzle-orm";
 import type { BotConfig } from "@/lib/discord";
+import { DEFAULT_MASTER_URLS } from "./et-extra-servers";
 
 /**
  * Panel-wide Discord configuration.
@@ -20,6 +21,8 @@ export const DISCORD_KEYS = [
   "discord_auto_channel",
   "discord_channel_prefix",
   "discord_status_interval_minutes",
+  "et_extra_servers",
+  "et_master_urls",
 ] as const;
 
 export interface DiscordSettings {
@@ -34,6 +37,16 @@ export interface DiscordSettings {
   channelPrefix: string;
   /** How often live status boards refresh (minutes, clamped 1-60). */
   statusIntervalMinutes: number;
+  /**
+   * Extra ET servers for `!etallofoz` that are not installed in the panel —
+   * one `host:port[:queryPort]` per line, '#' comments allowed.
+   */
+  extraServers: string;
+  /**
+   * ET master servers for `!etallofoz` discovery — `host[:port]` entries,
+   * comma or space separated (default port 27950). Empty = no discovery.
+   */
+  masterUrls: string;
 }
 
 const DEFAULTS: DiscordSettings = {
@@ -44,6 +57,8 @@ const DEFAULTS: DiscordSettings = {
   autoChannel: false,
   channelPrefix: "",
   statusIntervalMinutes: 3,
+  extraServers: "",
+  masterUrls: DEFAULT_MASTER_URLS,
 };
 
 /**
@@ -58,6 +73,8 @@ export async function getDiscordSettings(): Promise<DiscordSettings> {
     panelWebhook: process.env.DISCORD_WEBHOOK_URL?.trim() || "",
     botToken: process.env.DISCORD_BOT_TOKEN?.trim() || "",
     guildId: process.env.DISCORD_GUILD_ID?.trim() || "",
+    extraServers: process.env.GSM_ET_EXTRA_SERVERS?.trim() || "",
+    masterUrls: process.env.GSM_ET_MASTER_URLS?.trim() || "",
   };
 
   try {
@@ -83,6 +100,8 @@ export async function getDiscordSettings(): Promise<DiscordSettings> {
           }
           break;
         }
+        case "et_extra_servers": result.extraServers = value; break;
+        case "et_master_urls":   result.masterUrls = value; break;
       }
     }
   } catch {
