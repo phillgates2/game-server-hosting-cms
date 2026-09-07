@@ -1,4 +1,4 @@
-import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate } from "./types";
+import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate, STEAMCMD_VAR } from "./types";
 import { steamInstallScript } from "./steamcmd";
 
 // Squad reads a set of plain-text config files from SquadGame/ServerConfig/.
@@ -17,6 +17,7 @@ export const squad: GameTemplate = {
   estimatedSize: "~40 GB",
   variables: [
     ...STEAM_VARS,
+    STEAMCMD_VAR,
 
     ...group("Server Identity", [
       V("Should Advertise", "SHOULD_ADVERTISE", "List the server in the in-game browser", "true", { required: false, type: "boolean" }),

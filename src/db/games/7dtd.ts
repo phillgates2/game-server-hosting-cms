@@ -1,4 +1,4 @@
-import { V, group, STEAM_VARS, type GameTemplate } from "./types";
+import { V, group, STEAM_VARS, type GameTemplate, STEAMCMD_VAR } from "./types";
 import { steamInstallScript } from "./steamcmd";
 
 // 7 Days to Die reads serverconfig.xml, a flat list of
@@ -16,6 +16,7 @@ export const sevenDaysToDie: GameTemplate = {
   estimatedSize: "~15 GB",
   variables: [
     ...STEAM_VARS,
+    STEAMCMD_VAR,
 
     ...group("Server Listing", [
       V("Server Description", "SERVER_DESCRIPTION", "Short description shown in the browser", "A 7 Days to Die server", { required: false }),

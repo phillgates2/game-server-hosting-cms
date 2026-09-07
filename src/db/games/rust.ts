@@ -1,4 +1,4 @@
-import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate } from "./types";
+import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate, STEAMCMD_VAR } from "./types";
 import { steamInstallScript } from "./steamcmd";
 
 // Rust dedicated server. Convars are written to server/<identity>/cfg/server.cfg
@@ -16,6 +16,7 @@ export const rust: GameTemplate = {
   estimatedSize: "~10 GB",
   variables: [
     ...STEAM_VARS,
+    STEAMCMD_VAR,
     ...RCON_VARS,
 
     ...group("World", [

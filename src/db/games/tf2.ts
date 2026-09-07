@@ -1,4 +1,4 @@
-import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate } from "./types";
+import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate, STEAMCMD_VAR } from "./types";
 import { steamInstallScript } from "./steamcmd";
 
 // Team Fortress 2 dedicated server (srcds). server.cfg is executed on map load.
@@ -15,6 +15,7 @@ export const tf2: GameTemplate = {
   estimatedSize: "~15 GB",
   variables: [
     ...STEAM_VARS,
+    STEAMCMD_VAR,
     ...RCON_VARS,
 
     ...group("Match Setup", [

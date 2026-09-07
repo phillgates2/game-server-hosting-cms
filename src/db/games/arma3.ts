@@ -1,4 +1,4 @@
-import { V, group, csv, STEAM_VARS, type GameTemplate } from "./types";
+import { V, group, csv, STEAM_VARS, type GameTemplate, STEAMCMD_VAR } from "./types";
 import { steamInstallScript } from "./steamcmd";
 
 // Arma 3 uses a C-style config syntax: `key = value;` with quoted strings and
@@ -16,6 +16,7 @@ export const arma3: GameTemplate = {
   estimatedSize: "~30 GB",
   variables: [
     ...STEAM_VARS,
+    STEAMCMD_VAR,
 
     ...group("Server Identity", [
       V("Server Password", "SERVER_PASSWORD", "Password required to join, empty = public", "", { required: false, type: "password" }),

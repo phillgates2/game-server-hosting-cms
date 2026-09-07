@@ -1,4 +1,4 @@
-import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate } from "./types";
+import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate, STEAMCMD_VAR } from "./types";
 import { steamInstallScript } from "./steamcmd";
 
 // Project Zomboid: server rules live in Server/<name>.ini as flat Key=Value
@@ -16,6 +16,7 @@ export const projectZomboid: GameTemplate = {
   estimatedSize: "~5 GB",
   variables: [
     ...STEAM_VARS,
+    STEAMCMD_VAR,
     ...RCON_VARS,
 
     ...group("Server Identity", [

@@ -81,11 +81,22 @@ curl -fL -o OpenRA.AppImage "$APPIMAGE_URL"
 chmod +x OpenRA.AppImage
 
 # Keep the AppImage itself — it can run the dedicated server directly with --server.
-# Also extract a fallback runtime tree for environments without FUSE.
-echo "Extracting AppImage fallback..."
-./OpenRA.AppImage --appimage-extract >/dev/null 2>&1 || true
-if [ -d "squashfs-root" ]; then
+# Also extract a runtime tree: the AppImage needs FUSE to mount, which many
+# containers do not provide. Extraction works without FUSE, and the start
+# command prefers the extracted tree so the server runs anywhere.
+echo "Extracting AppImage runtime tree..."
+EXTRACT_OK=0
+if ./OpenRA.AppImage --appimage-extract >/dev/null 2>&1 && [ -f squashfs-root/AppRun ]; then
+  EXTRACT_OK=1
+elif [ -f squashfs-root/AppRun ]; then
+  EXTRACT_OK=1
+fi
+if [ "$EXTRACT_OK" = "1" ]; then
   mv squashfs-root openra-extracted
+  echo "Extracted runtime tree: openra-extracted/"
+else
+  echo "WARNING: AppImage self-extraction failed - the server will need FUSE (or a runtime that honours APPIMAGE_EXTRACT_AND_RUN)" >&2
+  rm -rf squashfs-root
 fi
 
 # Validate that we have something runnable.
@@ -96,7 +107,7 @@ fi
 
 echo "OpenRA installed successfully"`,
 
-  startCommand: `cd {{INSTALL_PATH}} && if [ -x ./OpenRA.AppImage ]; then RUNNER=./OpenRA.AppImage; elif [ -x ./openra-extracted/AppRun ]; then RUNNER=./openra-extracted/AppRun; else echo "OpenRA runtime missing" >&2; exit 1; fi && exec "$RUNNER" --server Game.Mod={{GAME_MOD}} Server.Name="{{SERVER_NAME}}" Server.ListenPort={{PORT}} Server.AdvertiseOnline={{ADVERTISE_ONLINE}} Server.Password="{{PASSWORD}}" Server.Map="{{MAP}}" Server.EnableSingleplayer={{ENABLE_SINGLE_PLAYER}} Server.RecordReplays={{RECORD_REPLAYS}} Server.EnableGeoIP={{ENABLE_GEOIP}} Server.ShareAnonymizedIPs={{SHARE_ANONYMIZED_IPS}} Server.RequireAuthentication={{REQUIRE_AUTHENTICATION}} Server.ProfileIDWhitelist="{{PROFILE_ID_WHITELIST}}" Server.ProfileIDBlacklist="{{PROFILE_ID_BLACKLIST}}" Server.Timestep={{TIMESTEP}} Server.OrderLatency={{ORDER_LATENCY}} Server.FloatingPointCheck={{FLOATING_POINT_CHECK}} Server.TimeOut={{TIMEOUT}} Server.BanDuration={{BAN_DURATION}} Server.DedicatedLoop={{DEDICATED_LOOP}}`,
+  startCommand: `cd {{INSTALL_PATH}} && if [ -x ./openra-extracted/AppRun ]; then RUNNER=./openra-extracted/AppRun; elif [ -x ./OpenRA.AppImage ]; then export APPIMAGE_EXTRACT_AND_RUN=1; RUNNER=./OpenRA.AppImage; else echo "OpenRA runtime missing" >&2; exit 1; fi && exec "$RUNNER" --server Game.Mod={{GAME_MOD}} Server.Name="{{SERVER_NAME}}" Server.ListenPort={{PORT}} Server.AdvertiseOnline={{ADVERTISE_ONLINE}} Server.Password="{{PASSWORD}}" Server.Map="{{MAP}}" Server.EnableSingleplayer={{ENABLE_SINGLE_PLAYER}} Server.RecordReplays={{RECORD_REPLAYS}} Server.EnableGeoIP={{ENABLE_GEOIP}} Server.ShareAnonymizedIPs={{SHARE_ANONYMIZED_IPS}} Server.RequireAuthentication={{REQUIRE_AUTHENTICATION}} Server.ProfileIDWhitelist="{{PROFILE_ID_WHITELIST}}" Server.ProfileIDBlacklist="{{PROFILE_ID_BLACKLIST}}" Server.Timestep={{TIMESTEP}} Server.OrderLatency={{ORDER_LATENCY}} Server.FloatingPointCheck={{FLOATING_POINT_CHECK}} Server.TimeOut={{TIMEOUT}} Server.BanDuration={{BAN_DURATION}} Server.DedicatedLoop={{DEDICATED_LOOP}}`,
   stopCommand: null,
   // OpenRA is configured entirely through launch arguments — there is no server
   // config file to generate.

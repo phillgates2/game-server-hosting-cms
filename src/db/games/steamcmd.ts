@@ -49,9 +49,13 @@ INSTALL_DIR="{{INSTALL_PATH}}"
 STEAM_APPID="${opts.appId}"
 ${opts.pre ? `\n${opts.pre}\n` : ""}
 ## Use system SteamCMD install (shared across servers)
-STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+## {{STEAMCMD_PATH}} is substituted by the install route from the node's
+## steamcmd_path; without it (custom flows, tests) the classic default holds.
+STEAMCMD_PATH="{{STEAMCMD_PATH}}"
+[ -z "$STEAMCMD_PATH" ] && STEAMCMD_PATH="/opt/steamcmd"
+STEAMCMD_BIN="$STEAMCMD_PATH/steamcmd.sh"
 if [ ! -x "$STEAMCMD_BIN" ]; then
-  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  echo "SteamCMD is not installed at $STEAMCMD_BIN (set the node's SteamCMD path or put SteamCMD at /opt/steamcmd)" >&2
   exit 1
 fi
 
@@ -77,8 +81,8 @@ until "$STEAMCMD_BIN" +force_install_dir "$INSTALL_DIR" +login anonymous${platfo
 done
 
 ## Set up Steam SDK libraries
-cp -v "/opt/steamcmd/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
-cp -v "/opt/steamcmd/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+cp -v "$STEAMCMD_PATH/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
+cp -v "$STEAMCMD_PATH/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
 ${opts.post ? `\n${opts.post}\n` : ""}
 echo "${opts.name} server installed successfully"`;
 }

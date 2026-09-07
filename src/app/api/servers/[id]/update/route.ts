@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { gameServers, gameDefinitions } from "@/db/schema";
+import { gameServers, gameDefinitions, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
@@ -28,9 +28,11 @@ export async function POST(
         id: gameServers.id, userId: gameServers.userId, name: gameServers.name,
         installPath: gameServers.installPath, status: gameServers.status,
         steamAppId: gameDefinitions.steamAppId, gameName: gameDefinitions.name,
+        steamcmdPath: nodes.steamcmdPath,
       })
       .from(gameServers)
       .leftJoin(gameDefinitions, eq(gameServers.gameId, gameDefinitions.id))
+      .leftJoin(nodes, eq(gameServers.nodeId, nodes.id))
       .where(eq(gameServers.id, Number(id)))
       .limit(1);
 
@@ -38,8 +40,9 @@ export async function POST(
     if (auth.role !== "admin" && server.userId !== auth.userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     if (server.status === "running") return NextResponse.json({ error: "Stop the server before updating" }, { status: 400 });
 
-    // Check for the shared system SteamCMD install
-    const steamcmdPath = "/opt/steamcmd/steamcmd.sh";
+    // Check for the shared system SteamCMD install (path from the node config)
+    const steamcmdDir = (server.steamcmdPath ?? "").trim() || "/opt/steamcmd";
+    const steamcmdPath = `${steamcmdDir}/steamcmd.sh`;
     const hasSteamcmd = await access(steamcmdPath, constants.X_OK).then(() => true).catch(() => false);
 
     if (!hasSteamcmd || !server.steamAppId) {
@@ -53,6 +56,7 @@ export async function POST(
       installPath: server.installPath,
       gameName: server.gameName || "game",
       steamAppId: String(server.steamAppId),
+      steamcmdDir,
     });
 
     await db.update(gameServers).set({ status: "stopped", updatedAt: new Date() }).where(eq(gameServers.id, server.id));

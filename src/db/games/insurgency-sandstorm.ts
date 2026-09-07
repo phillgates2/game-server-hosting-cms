@@ -1,4 +1,4 @@
-import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate } from "./types";
+import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate, STEAMCMD_VAR } from "./types";
 import { steamInstallScript } from "./steamcmd";
 
 // Insurgency: Sandstorm. Gameplay options live in Game.ini, engine/RCON options
@@ -16,6 +16,7 @@ export const insurgencySandstorm: GameTemplate = {
   estimatedSize: "~25 GB",
   variables: [
     ...STEAM_VARS,
+    STEAMCMD_VAR,
     ...RCON_VARS,
 
     ...group("Match Setup", [

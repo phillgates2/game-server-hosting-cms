@@ -1,4 +1,4 @@
-import { V, group, COMMON_VARS, type GameTemplate } from "./types";
+import { V, group, COMMON_VARS, STEAMCMD_VAR, type GameTemplate } from "./types";
 import { steamInstallScript } from "./steamcmd";
 
 // Don't Starve Together uses a cluster.ini for shared settings plus a
@@ -16,6 +16,7 @@ export const dontStarveTogether: GameTemplate = {
   estimatedSize: "~3 GB",
   variables: [
     ...COMMON_VARS,
+    STEAMCMD_VAR,
 
     ...group("Cluster", [
       V("Cluster Name", "CLUSTER_NAME", "Folder name for this cluster's saves", "Cluster_1"),

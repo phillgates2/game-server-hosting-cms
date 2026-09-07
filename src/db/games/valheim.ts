@@ -1,4 +1,4 @@
-import { V, group, COMMON_VARS, type GameTemplate } from "./types";
+import { V, group, COMMON_VARS, STEAMCMD_VAR, type GameTemplate } from "./types";
 import { steamInstallScript } from "./steamcmd";
 
 // Valheim dedicated server. Most options are command-line flags; the world
@@ -16,6 +16,7 @@ export const valheim: GameTemplate = {
   estimatedSize: "~1 GB",
   variables: [
     ...COMMON_VARS,
+    STEAMCMD_VAR,
 
     ...group("World", [
       V("World Name", "WORLD_NAME", "Name of the world save file", "Dedicated"),

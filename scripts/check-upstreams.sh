@@ -21,6 +21,7 @@ while IFS='|' read -r name url; do
   if head_ok "$url"; then ok "$name"; else bad "$name -> $url"; fi
 done <<'EOF'
 SteamCMD tarball|https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
+Adoptium Temurin JRE|https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jre/hotspot/normal/eclipse
 Factorio headless|https://factorio.com/get-download/stable/headless/linux64
 Xonotic 0.8.6|https://dl.xonotic.org/xonotic-0.8.6.zip
 ET:Legacy x86_64|https://www.etlegacy.com/download/file/715

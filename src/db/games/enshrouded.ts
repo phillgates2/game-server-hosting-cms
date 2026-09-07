@@ -1,4 +1,4 @@
-import { V, group, csv, COMMON_VARS, type GameTemplate } from "./types";
+import { V, group, csv, COMMON_VARS, STEAMCMD_VAR, type GameTemplate } from "./types";
 import { steamInstallScript } from "./steamcmd";
 
 // Enshrouded reads a single JSON document, enshrouded_server.json.
@@ -16,6 +16,7 @@ export const enshrouded: GameTemplate = {
   estimatedSize: "~5 GB",
   variables: [
     ...COMMON_VARS,
+    STEAMCMD_VAR,
 
     ...group("Server", [
       V("Query Port", "QUERY_PORT", "Steam query port (game port + 1)", "15637", {

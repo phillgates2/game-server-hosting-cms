@@ -4,6 +4,121 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.21.6] — 2026-09-06
+
+### 🛡️ OpenRA: start now works on hosts without FUSE
+
+- **OpenRA is shipped as an AppImage, which needs FUSE to mount.** On hosts
+  without it (containers especially), starting the server died with
+  `Error: No suitable fusermount binary found on the $PATH` /
+  `Cannot mount AppImage, please check your FUSE setup`.
+- **The instal script already extracted a FUSE-free runtime tree
+  (`openra-extracted/AppRun`) — but the start command preferred the
+  AppImage, so the fallback was never used.**
+- The start command now tries `openra-extracted/AppRun` **first**; the
+  AppImage remains only as a fallback, and it runs with
+  `APPIMAGE_EXTRACT_AND_RUN=1` so even that path self-extracts instead of
+  mounting. Best of both: extraction needs no FUSE, and if extraction ever
+  fails the AppImage still works on modern runtimes.
+- The install script also stops swallowing extraction failures silently —
+  a warning tells the log which path the server will take — and is verified
+  against the real `release-20250330` asset (41.9 MB) in a FUSE-less
+  sandbox: both `OpenRA.AppImage` and `openra-extracted/AppRun` land.
+- **546 tests** (4 new: runner precedence, FUSE-free env var, extraction,
+  launch arguments) and **158 security checks** (1 new, mutation-verified:
+  re-preferring the AppImage, dropping the env var or the extraction each
+  fail the gate).
+
+---
+
+## [1.21.5] — 2026-09-06
+
+### 🔎 Full install audit (all games except Wolfenstein: ET)
+
+- **Every non-ET direct-download game was verified against the real
+  internet, not the mocks** — real installs in the sandbox:
+  - Terraria/TShock ✅ (real 6.1.0 asset, zip-wrapped tar extracted)
+  - Minecraft Java ✅ (live chain: manifest → 26.2 → server.jar, Java 25)
+  - Minecraft Paper ✅ (live fill.papermc API → jar)
+  - Factorio ✅ (stable headless 2.0.77, `bin/x64/factorio`)
+  - OpenRA ✅ (AppImage layout) · Assetto Corsa ✅ (AssettoServer)
+  - Xonotic + Bedrock ✅ (zip central directories listed remotely: the
+    dedicated binaries the scripts expect are inside)
+- **All 19 upstream checks pass** (Adoptium Temurin API added — it is the
+  Minecraft templates' Java fallback and was previously unchecked).
+- **SteamCMD games (17 app ids):** Steam's Web API hides depot-only server
+  apps, and steamcmd itself can't run in this sandbox (32-bit loader needs
+  root), so ids could only be spot-verified from here (CS2 730, L4D2
+  Dedicated 222860, Enshrouded Dedicated 2278520 all live). New
+  `scripts/check-steam-appids.sh` validates every template app id against
+  the real Steam network from any node — run it where steamcmd exists.
+- New audit tools kept in the repo: `scripts/real-run-installs.ts`
+  (real network installs, no mocks) and `scripts/zip-tail.py` (list a big
+  remote zip's contents by central directory). ET itself is untouched.
+
+---
+
+## [1.21.4] — 2026-09-05
+
+### 🧱 Terraria/TShock: "Script exited with code 1" after the download
+
+- **TShock 6.x repackaged its releases.** The GitHub asset is now a zip that
+  wraps a *single tar*
+  (`TShock-…-linux-x64-Release.zip` → `TShock-Beta-linux-x64-Release.tar` →
+  `TShock.Server`, `bin/`, `ServerPlugins/`, `i18n/`, `GeoIP.dat`).
+- **The install script never extracted that inner tar.** It unzipped, then
+  looked for `TShock.Server` in the revealed file list — found only a `.tar`
+  — and died with `TShock.Server not found inside the downloaded archive`
+  (stderr) / `Script exited with code 1`. Reproduced against the real
+  v6.1.0 asset: same error, same point.
+- **The script now extracts the inner archive first** (any `*.tar` found in
+  the unzip target), then proceeds exactly as before. Verified end-to-end
+  against the real 6.1.0 asset layout: extraction succeeds, `TShock.Server`
+  is a self-contained ELF (no .NET runtime needed on the host).
+- **The installer sandbox now models the real layout**: the TShock fixture
+  archive is built as a zip-wrapping-a-tar, and reverting the fix makes the
+  harness fail with the same `not found` error — so a future packaging
+  change (or regression) is caught by `npm run verify` instead of by a
+  user's server.
+- All 18 upstream checks still pass (`check-upstreams.sh`: every direct-
+  download URL alive, every API pattern still matching) — no other direct-
+  download game is broken this way.
+- **542 tests** (unchanged; the regression net for this one is the installer
+  harness + security checks) and **157 security checks** (1 new,
+  mutation-verified: removing the inner-tar extraction fails the gate).
+
+---
+
+## [1.21.3] — 2026-09-05
+
+### 📦 The Node's SteamCMD Path Is Finally Honoured
+
+- **Every install script, update script and the update route hardcoded
+  `/opt/steamcmd/steamcmd.sh`** while each node has a configurable
+  `steamcmd_path` (UI + DB + env). A SteamCMD install anywhere else — the
+  apt `steamcmd` package's `/usr/games/steamcmd`, a custom root, a home
+  directory — silently failed with "SteamCMD is not installed at
+  /opt/steamcmd/steamcmd.sh" for every SteamCMD game, while tarball games
+  kept working.
+- Install scripts now reference `{{STEAMCMD_PATH}}` and fall back to
+  `/opt/steamcmd` when it is absent; the install route substitutes the
+  node's `steamcmd_path` per install, and the SDK shim copies follow the
+  same directory. The update flow (`POST /api/servers/[id]/update`) reads
+  the node's path for both its pre-check and the actual `app_update`.
+- `STEAMCMD_PATH` is declared as a **hidden** template variable on the
+  18 SteamCMD games (all declared-var consistency checks still pass; the
+  wizard never shows or stores it, so the node value always wins).
+- Not the empty-folder bug itself — download/`force_install_dir` behaviour
+  is unchanged. If a game still ends up empty after this, the install
+  output names the real cause.
+- **542 tests** (4 new: template output pins `$STEAMCMD_PATH` in the
+  executable lines, SDK copies, retry/beta flags) and **156 security
+  checks** (1 new, mutation-verified: reverting the template, the SDK
+  copies, the install-route wiring or the update-route wiring each fail
+  the gate).
+
+---
+
 ## [1.21.2] — 2026-09-04
 
 ### 🌐 `!etallofoz` Can Check Servers Outside the Panel

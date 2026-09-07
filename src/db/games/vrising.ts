@@ -1,4 +1,4 @@
-import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate } from "./types";
+import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate, STEAMCMD_VAR } from "./types";
 import { steamInstallScript } from "./steamcmd";
 
 // V Rising splits configuration into two JSON files under save-data/Settings:
@@ -17,6 +17,7 @@ export const vrising: GameTemplate = {
   estimatedSize: "~5 GB",
   variables: [
     ...STEAM_VARS,
+    STEAMCMD_VAR,
     ...RCON_VARS,
 
     ...group("Hosting", [

@@ -867,6 +867,30 @@ console.log("\nH2/H3 auth enforcement wiring");
       /EXTRA_PROBE_BATCH = \d+/.test(read("../src/lib/discord-bot.ts")) &&
       !/EXTRA_PROBE_BATCH = 1\b/.test(read("../src/lib/discord-bot.ts"))
   );
+  check(
+    "TShock install extracts the zip-wrapped tar (TShock 6.x layout)",
+    /INNER_TAR=\$\(find tshock-extract/.test(read("../src/db/games/terraria.ts")) &&
+      /tar xf "\$INNER_TAR" -C "\$\(dirname "\$INNER_TAR"\)"/.test(read("../src/db/games/terraria.ts")) &&
+      /MOCK_INNER_TAR/.test(read("../scripts/verify-installers.ts")) &&
+      /inner\.tar/.test(read("../scripts/verify-installers.ts"))
+  );
+  check(
+    "OpenRA starts FUSE-free (extracted runtime preferred, AppImage fallback self-extracts)",
+    /if \[ -x \.\/openra-extracted\/AppRun \]; then RUNNER=\.\/openra-extracted\/AppRun/.test(read("../src/db/games/openra.ts")) &&
+      /APPIMAGE_EXTRACT_AND_RUN=1/.test(read("../src/db/games/openra.ts")) &&
+      /--appimage-extract/.test(read("../src/db/games/openra.ts")) &&
+      /mv squashfs-root openra-extracted/.test(read("../src/db/games/openra.ts"))
+  );
+  check(
+    "the node's SteamCMD path reaches install and update scripts",
+    /STEAMCMD_PATH="\{\{STEAMCMD_PATH\}\}"/.test(read("../src/db/games/steamcmd.ts")) &&
+      /\$STEAMCMD_PATH\/steamcmd\.sh/.test(read("../src/db/games/steamcmd.ts")) &&
+      /\$STEAMCMD_PATH\/linux32\/steamclient\.so/.test(read("../src/db/games/steamcmd.ts")) &&
+      /STEAMCMD_PATH: server\.nodeSteamcmdPath/.test(read("../src/app/api/servers/\[id\]/install/route.ts")) &&
+      /nodeSteamcmdPath: nodes\.steamcmdPath/.test(read("../src/app/api/servers/\[id\]/install/route.ts")) &&
+      /steamcmdDir/.test(read("../src/lib/server-update-runner.ts")) &&
+      /server\.steamcmdPath/.test(read("../src/app/api/servers/\[id\]/update/route.ts"))
+  );
 
 }
 

@@ -1,4 +1,4 @@
-import { V, group, STEAM_VARS, type GameTemplate } from "./types";
+import { V, group, STEAM_VARS, type GameTemplate, STEAMCMD_VAR } from "./types";
 import { steamInstallScript } from "./steamcmd";
 
 // Palworld packs every gameplay option into a single line:
@@ -18,6 +18,7 @@ export const palworld: GameTemplate = {
   estimatedSize: "~8 GB",
   variables: [
     ...STEAM_VARS,
+    STEAMCMD_VAR,
 
     ...group("Server", [
       V("Server Description", "SERVER_DESCRIPTION", "Description shown in the community server browser", "", { required: false }),

@@ -181,6 +181,16 @@ mkdir -p tshock-extract
 unzip -o tshock.zip -d tshock-extract
 rm -f tshock.zip
 
+## TShock 6.x ships the release as a zip wrapped around a tar
+## (e.g. TShock-...-linux-x64-Release.zip -> TShock-Beta-linux-x64-Release.tar).
+## Extract the inner archive before looking for binaries.
+INNER_TAR=$(find tshock-extract -type f -iname "*.tar" | head -1)
+if [ -n "$INNER_TAR" ]; then
+  echo "Extracting inner archive: $(basename "$INNER_TAR")"
+  tar xf "$INNER_TAR" -C "$(dirname "$INNER_TAR")"
+  rm -f "$INNER_TAR"
+fi
+
 ## TShock ships the binary either at the archive root or one folder down — normalize
 TSHOCK_BIN=$(find tshock-extract -type f -name "TShock.Server" | head -1)
 if [ -z "$TSHOCK_BIN" ]; then

@@ -154,21 +154,25 @@ function replaceTemplateVariables(input: string, variables: Record<string, unkno
   });
 }
 
-function buildVariables(server: {
-  name: string;
-  installPath: string;
-  port: number;
-  queryPort: number | null;
-  rconPort: number | null;
-  variables: unknown;
-  config: unknown;
-}) {
+function buildVariables(
+  server: {
+    name: string;
+    installPath: string;
+    port: number;
+    queryPort: number | null;
+    rconPort: number | null;
+    variables: unknown;
+    config: unknown;
+  },
+  extra: Record<string, unknown> = {}
+) {
   const storedVariables = asRecord(server.variables);
   const config = asRecord(server.config);
 
   return {
     ...config,
     ...storedVariables,
+    ...extra,
     SERVER_NAME: storedVariables.SERVER_NAME ?? server.name,
     INSTALL_PATH: storedVariables.INSTALL_PATH ?? server.installPath,
     PORT: storedVariables.PORT ?? server.port,
@@ -408,6 +412,7 @@ export async function POST(
         nodeIsLocal: nodes.isLocal,
         nodeApiUrl: nodes.apiUrl,
         nodeApiKey: nodes.apiKey,
+        nodeSteamcmdPath: nodes.steamcmdPath,
       })
       .from(gameServers)
       .leftJoin(gameDefinitions, eq(gameServers.gameId, gameDefinitions.id))
@@ -485,7 +490,13 @@ export async function POST(
     }
 
     // Build variables and script
-    const variables = buildVariables({ ...server, installPath: effectiveInstallPath });
+    // Where SteamCMD lives is a node property, not a game property. The
+    // templates reference {{STEAMCMD_PATH}}; without it the classic
+    // /opt/steamcmd default is used inside the script itself.
+    const variables = buildVariables(
+      { ...server, installPath: effectiveInstallPath },
+      { STEAMCMD_PATH: server.nodeSteamcmdPath?.trim() || "/opt/steamcmd" }
+    );
     normalizeTemplateBooleans(variables, latestTemplate?.variables);
     const script = replaceTemplateVariables(installScriptSource, variables);
 

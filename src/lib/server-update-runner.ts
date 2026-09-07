@@ -19,16 +19,19 @@ export async function runSteamUpdate(options: {
   installPath: string;
   gameName: string;
   steamAppId: string;
+  /** SteamCMD directory (node configuration); defaults to /opt/steamcmd. */
+  steamcmdDir?: string;
   timeoutMs?: number;
 }): Promise<{ stdout: string; stderr: string }> {
   const bashPath = await findBash();
   const timeoutMs = options.timeoutMs ?? 1000 * 60 * 30;
+  const steamcmdDir = (options.steamcmdDir ?? "").trim() || "/opt/steamcmd";
 
   const script = `#!/usr/bin/env bash
 set -e
-STEAMCMD_BIN="/opt/steamcmd/steamcmd.sh"
+STEAMCMD_BIN="${steamcmdDir}/steamcmd.sh"
 if [ ! -x "$STEAMCMD_BIN" ]; then
-  echo "SteamCMD is not installed at $STEAMCMD_BIN" >&2
+  echo "SteamCMD is not installed at $STEAMCMD_BIN (set the node's SteamCMD path or put SteamCMD at /opt/steamcmd)" >&2
   exit 1
 fi
 export HOME="${options.installPath}"

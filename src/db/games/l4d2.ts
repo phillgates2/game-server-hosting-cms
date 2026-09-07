@@ -1,4 +1,4 @@
-import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate } from "./types";
+import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate, STEAMCMD_VAR } from "./types";
 import { steamInstallScript } from "./steamcmd";
 
 // Left 4 Dead 2 dedicated server (srcds). Reads left4dead2/cfg/server.cfg.
@@ -15,6 +15,7 @@ export const l4d2: GameTemplate = {
   estimatedSize: "~12 GB",
   variables: [
     ...STEAM_VARS,
+    STEAMCMD_VAR,
     ...RCON_VARS,
 
     ...group("Match Setup", [

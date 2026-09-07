@@ -1,4 +1,4 @@
-import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate } from "./types";
+import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate, STEAMCMD_VAR } from "./types";
 import { steamInstallScript } from "./steamcmd";
 
 // Garry's Mod dedicated server (srcds). Reads garrysmod/cfg/server.cfg.
@@ -15,6 +15,7 @@ export const gmod: GameTemplate = {
   estimatedSize: "~8 GB",
   variables: [
     ...STEAM_VARS,
+    STEAMCMD_VAR,
     ...RCON_VARS,
 
     ...group("Match Setup", [

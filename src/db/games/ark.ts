@@ -1,4 +1,4 @@
-import { V, group, STEAM_VARS, type GameTemplate } from "./types";
+import { V, group, STEAM_VARS, type GameTemplate, STEAMCMD_VAR } from "./types";
 import { steamInstallScript } from "./steamcmd";
 
 // ARK: Survival Evolved. Settings are split across two ini files:
@@ -17,6 +17,7 @@ export const ark: GameTemplate = {
   estimatedSize: "~20 GB",
   variables: [
     ...STEAM_VARS,
+    STEAMCMD_VAR,
 
     ...group("Session", [
       V("Map", "MAP", "Map loaded on start", "TheIsland", {

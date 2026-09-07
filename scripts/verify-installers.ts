@@ -199,7 +199,14 @@ make_archive() {
   local stage="$d/out.bin"
   case "$dest" in
     *.zip)
-      if command -v zip >/dev/null 2>&1; then (cd "$d/payload" && zip -qr "$stage" .)
+      # TShock ships a zip that wraps a single tar (the tar holds the server
+      # files). When MOCK_INNER_TAR=1, mirror that real layout — a script that
+      # forgets to extract the inner archive must fail the sandbox run, not
+      # silently pass on a flat mock zip.
+      if [ "$MOCK_INNER_TAR" = "1" ] && command -v zip >/dev/null 2>&1; then
+        (cd "$d/payload" && tar -cf "$d/inner.tar" .)
+        (cd "$d" && zip -qj "$stage" "inner.tar")
+      elif command -v zip >/dev/null 2>&1; then (cd "$d/payload" && zip -qr "$stage" .)
       else (cd "$d/payload" && tar -czf "$stage" .); fi ;;
     *.tar.xz)  (cd "$d/payload" && tar -cJf "$stage" .) 2>/dev/null || (cd "$d/payload" && tar -czf "$stage" .) ;;
     *.tar.bz2) (cd "$d/payload" && tar -cjf "$stage" .) ;;
@@ -390,6 +397,8 @@ for (const t of templates) {
       MOCK_LOG: mockLog,
       MOCK_JAR_SHA: join(root, "jar.sha"),
       MOCK_ARTIFACTS: (getExpectedArtifactsBySlug(t.slug) ?? []).join(";"),
+      // TShock's real asset is a zip around a tar (see make_archive).
+      MOCK_INNER_TAR: t.slug === "terraria" ? "1" : "",
       INSTALL_DIR: installDir,
       TMPDIR: root,
       DEBIAN_FRONTEND: "noninteractive",

@@ -1,4 +1,4 @@
-import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate } from "./types";
+import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate, STEAMCMD_VAR } from "./types";
 import { steamInstallScript } from "./steamcmd";
 
 // CS2 dedicated server. Config lives in game/csgo/cfg/server.cfg and is executed
@@ -16,6 +16,7 @@ export const cs2: GameTemplate = {
   estimatedSize: "~35 GB",
   variables: [
     ...STEAM_VARS,
+    STEAMCMD_VAR,
     ...RCON_VARS,
 
     ...group("Match Setup", [

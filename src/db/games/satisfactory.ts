@@ -1,4 +1,4 @@
-import { V, group, STEAM_VARS, type GameTemplate } from "./types";
+import { V, group, STEAM_VARS, type GameTemplate, STEAMCMD_VAR } from "./types";
 import { steamInstallScript } from "./steamcmd";
 
 // Satisfactory splits server options between ServerSettings.ini (subsystem
@@ -17,6 +17,7 @@ export const satisfactory: GameTemplate = {
   estimatedSize: "~15 GB",
   variables: [
     ...STEAM_VARS,
+    STEAMCMD_VAR,
 
     ...group("Session", [
       V("Beacon Port", "BEACON_PORT", "UE beacon port used during initial connection", "15000", {

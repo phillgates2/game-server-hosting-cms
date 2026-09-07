@@ -266,6 +266,22 @@ export const COMMON_VARS: TemplateVariable[] = [
   }),
 ];
 
+/**
+ * Declared placeholder for the SteamCMD install directory.
+ *
+ * Where SteamCMD lives is a node property (nodes.steamcmd_path), but the
+ * install routes need a declared variable so every {{STEAMCMD_PATH}} reference
+ * has a backing declaration and install scripts stay legible without it. The
+ * install route substitutes the node's value per install; this default only
+ * applies to flows that do not (custom templates, offline harnesses).
+ */
+export const STEAMCMD_VAR: TemplateVariable = V(
+  "SteamCMD Directory", "STEAMCMD_PATH",
+  "System SteamCMD directory (the node's SteamCMD path overrides this per install)",
+  "/opt/steamcmd",
+  { type: "hidden", viewable: false, editable: false, category: CATEGORY_GENERAL }
+);
+
 /** COMMON_VARS plus the Steam query port used by every SteamCMD game. */
 export const STEAM_VARS: TemplateVariable[] = [
   ...COMMON_VARS,
