@@ -123,6 +123,7 @@ export const l4d2: GameTemplate = {
   installScript: steamInstallScript({
     appId: "222860",
     name: "Left 4 Dead 2",
+  i386: true,
     post: `## srcds reads cfg files from left4dead2/cfg — the panel writes server.cfg there
 mkdir -p "$INSTALL_DIR/left4dead2/cfg"`,
   }),

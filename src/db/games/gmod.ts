@@ -129,6 +129,7 @@ export const gmod: GameTemplate = {
   installScript: steamInstallScript({
     appId: "4020",
     name: "Garry's Mod",
+  i386: true,
     post: `## srcds reads cfg files from garrysmod/cfg — the panel writes server.cfg there
 mkdir -p "$INSTALL_DIR/garrysmod/cfg"`,
   }),

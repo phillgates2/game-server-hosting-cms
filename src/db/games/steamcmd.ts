@@ -18,6 +18,12 @@ export interface SteamInstallOptions {
   betaPassword?: string;
   /** Extra directories (relative to the install dir) created before install. */
   makeDirs?: string[];
+  /**
+   * 32-bit server (e.g. the Source srcds_run family). On x86_64 hosts the
+   * i386 multiarch libs must be installed or the server dies at start with
+   * a missing-lib error; when set, the script warns loudly instead.
+   */
+  i386?: boolean;
   /** Bash appended after the install + SDK steps, before the success message. */
   post?: string;
   /** Bash inserted before SteamCMD runs — dependency checks and the like. */
@@ -83,6 +89,16 @@ done
 ## Set up Steam SDK libraries
 cp -v "$STEAMCMD_PATH/linux32/steamclient.so" "$INSTALL_DIR/.steam/sdk32/steamclient.so" 2>/dev/null || true
 cp -v "$STEAMCMD_PATH/linux64/steamclient.so" "$INSTALL_DIR/.steam/sdk64/steamclient.so" 2>/dev/null || true
+${opts.i386 ? `## 32-bit servers (srcds_run) need the i386 multiarch libs on x86_64 hosts
+if [ "$(uname -m)" = "x86_64" ] && [ "$(getconf LONG_BIT)" = "64" ]; then
+  if command -v dpkg >/dev/null 2>&1 && ! dpkg --print-foreign-architectures 2>/dev/null | grep -qx i386; then
+    echo "WARNING: this server is 32-bit but the i386 architecture is not enabled." >&2
+    echo "         On Debian/Ubuntu run:  sudo dpkg --add-architecture i386 && sudo apt-get update && sudo apt-get install -y lib32gcc-s1 lib32stdc++6" >&2
+    echo "         The server may fail to start until these 32-bit libraries exist." >&2
+  elif command -v dnf >/dev/null 2>&1 && ! dnf list installed glibc.i686 >/dev/null 2>&1; then
+    echo "WARNING: this server is 32-bit - install the i686 userspace (dnf install glibc.i686 libstdc++.i686) or the server will not start." >&2
+  fi
+fi` : ""}
 ${opts.post ? `\n${opts.post}\n` : ""}
 echo "${opts.name} server installed successfully"`;
 }

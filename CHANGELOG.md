@@ -4,6 +4,77 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.21.8] — 2026-09-07
+
+### 🔍 Dependency audit of every game (post-TShock .NET find)
+
+After TShock turned out to be a framework-dependent .NET app, every other
+game's actual runtime needs were checked — real binaries, not mocks:
+
+- **Assetto Corsa (AssettoServer v0.0.54):** the shipped `AssettoServer` is a
+  99 MB **self-contained** single-file .NET build — it ran on a host with no
+  .NET at all (started to config parsing). No runtime needed. The libhostfxr
+  strings are apphost residue, and the template's asset pattern matches the
+  new `assetto-server-linux-x64.tar.gz` naming.
+- **OpenRA:** the AppImage bundles its own .NET runtime in the extracted tree
+  (`usr/lib/openra/libhostfxr.so`, `mscorlib.dll`, …) — the dedicated server
+  booted fully (master-server communication) on a host **without** .NET. No
+  runtime needed, and the FUSE-free extracted path from 1.21.6 is also
+  runtime-complete.
+- **Minecraft Java/Paper:** already install a server-local Temurin JRE when
+  the host lacks Java (`ensure_java`).
+- **Minecraft Bedrock / Factorio:** plain native ELF binaries — `ldd`
+  resolves everything on stock Debian, zero .NET/mono markers (Factorio's
+  string hits were `monolith`/`monotonic` false positives).
+- **Terraria/TShock:** framework-dependent .NET 9 — fixed in 1.21.7
+  (`ensure_dotnet`).
+- **V Rising:** already installs wine + xvfb itself; **SteamCMD games**: SDK
+  shims covered; **TF2 / Garry's Mod / L4D2** run Valve's 32-bit `srcds_run`
+  — new: the shared install script now **warns with the exact fix command**
+  when the x86_64 host lacks the i386 multiarch libs (`dpkg
+  --add-architecture i386 … lib32gcc-s1 lib32stdc++6`, dnf variant too).
+- `check-upstreams.sh` now also probes the .NET install script endpoint
+  (20/20 pass) and the full direct-download suite real-installs green.
+- **552 tests** (1 new: the i386 warning, with a negative case) and
+  **160 security checks** (1 new, mutation-verified 2/2: dropping the i386
+  flag from TF2 or removing the warning each fail the gate).
+
+---
+
+## [1.21.7] — 2026-09-07
+
+### ☁️ Terraria/TShock: server now installs its own .NET runtime
+
+- **Correction to 1.21.4:** it claimed the shipped `TShock.Server` was
+  self-contained and needed no .NET runtime. That was wrong — the binary is
+  a **framework-dependent .NET 9 apphost** (19 MB apphost with the runtime
+  config embedded, no `runtimeconfig.json` in the package). Without the
+  runtime, starting the server failed with
+  *"You must install .NET to run this application … Failed to resolve
+  libhostfxr.so [not found]"* — reproduced verbatim against the real
+  v6.1.0 asset in a .NET-less sandbox.
+- **The template now ensures a .NET runtime**, mirroring the Minecraft
+  template's `ensure_java`: a system **.NET 9** runtime is used when
+  present; otherwise the official `dotnet-install.sh` fetches the
+  **ASP.NET Core 9.0 runtime** (a superset that also provides
+  `Microsoft.NETCore.App`) into the server's `.dotnet/` directory — no root
+  needed, nothing installed system-wide.
+- **The start command exports `DOTNET_ROOT`/`PATH`** to that local runtime
+  when it exists, so the apphost finds `libhostfxr.so`. Failure to fetch
+  the runtime is a warning, not an install failure: a manually-installed
+  system .NET 9 still works.
+- **End-to-end verified on the real asset:** install fetched .NET 9.0.19,
+  then `TShock.Server` booted — `TShock 6.1.0.0 now running`, plugins
+  initiated, still alive at the probe timeout. ("still running at the 15s
+  timeout" = the desired outcome, exit 124.)
+- **551 tests** (5 new: runtime detection, official installer URL, channel
+  and superset runtime, start-command wiring, launch args) and
+  **159 security checks** (1 new, mutation-verified 4/4: removing the
+  `ensure_dotnet` call, the `DOTNET_ROOT` wiring, the aspnetcore superset
+  or the official URL each fail the gate).
+
+---
+
 ## [1.21.6] — 2026-09-06
 
 ### 🛡️ OpenRA: start now works on hosts without FUSE

@@ -253,9 +253,11 @@ exit 0
     mock(n, n === "sudo" ? `exec "$@"` : "exit 0");
   }
 
-  // Java / dotnet / mono / python stand-ins.
+  // Java / dotnet / mono / python stand-ins. dotnet reports a .NET 9
+  // runtime list so TShock's ensure_dotnet short-circuits instead of trying
+  // to fetch one through the mocked network.
   mock("java", `echo 'openjdk version "21.0.1"'; exit 0`);
-  mock("dotnet", "exit 0");
+  mock("dotnet", `echo 'Microsoft.NETCore.App 9.0.12 [/usr/share/dotnet/shared/Microsoft.NETCore.App]'; exit 0`);
   mock("mono", "exit 0");
   mock("screen", "exit 0");
   mock("box64", "exit 0");

@@ -22,6 +22,7 @@ while IFS='|' read -r name url; do
 done <<'EOF'
 SteamCMD tarball|https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
 Adoptium Temurin JRE|https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jre/hotspot/normal/eclipse
+.NET install script (TShock)|https://dot.net/v1/dotnet-install.sh
 Factorio headless|https://factorio.com/get-download/stable/headless/linux64
 Xonotic 0.8.6|https://dl.xonotic.org/xonotic-0.8.6.zip
 ET:Legacy x86_64|https://www.etlegacy.com/download/file/715

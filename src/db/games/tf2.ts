@@ -140,6 +140,7 @@ export const tf2: GameTemplate = {
   installScript: steamInstallScript({
     appId: "232250",
     name: "Team Fortress 2",
+  i386: true,
     post: `## srcds reads cfg files from tf/cfg — the panel writes server.cfg there
 mkdir -p "$INSTALL_DIR/tf/cfg"`,
   }),

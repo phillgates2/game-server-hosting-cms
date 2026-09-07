@@ -43,6 +43,14 @@ describe("steamInstallScript", () => {
     assert.equal(hint.length, 1, "only the error hint may mention /opt/steamcmd in prose");
   });
 
+  test("32-bit servers warn when the i386 multiarch libs are missing", () => {
+    const script32 = steamInstallScript({ ...LAYOUT, i386: true });
+    assert.match(script32, /dpkg --add-architecture i386/, "warns with the fix command");
+    assert.match(script32, /lib32gcc-s1 lib32stdc\+\+6/);
+    const script64 = steamInstallScript(LAYOUT);
+    assert.ok(!script64.includes("i386 architecture"), "64-bit games do not warn");
+  });
+
   test("retains the retry loop, beta flags and platform forcing", () => {
     const full = steamInstallScript({ ...LAYOUT, beta: "latest_experimental", platform: "windows" });
     assert.match(full, /STEAMCMD_ATTEMPT=1/);

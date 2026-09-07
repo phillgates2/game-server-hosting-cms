@@ -868,6 +868,24 @@ console.log("\nH2/H3 auth enforcement wiring");
       !/EXTRA_PROBE_BATCH = 1\b/.test(read("../src/lib/discord-bot.ts"))
   );
   check(
+    "the 32-bit Source servers warn when the i386 libs are missing",
+    /dpkg --add-architecture i386/.test(read("../src/db/games/steamcmd.ts")) &&
+      /i386\?: boolean/.test(read("../src/db/games/steamcmd.ts")) &&
+      /i386: true/.test(read("../src/db/games/tf2.ts")) &&
+      /i386: true/.test(read("../src/db/games/gmod.ts")) &&
+      /i386: true/.test(read("../src/db/games/l4d2.ts"))
+  );
+  check(
+    "TShock installs a server-local .NET runtime and the start uses it",
+    /ensure_dotnet\(\) \{/.test(read("../src/db/games/terraria.ts")) &&
+      /ensure_dotnet \|\| true/.test(read("../src/db/games/terraria.ts")) &&
+      /https:\/\/dot\.net\/v1\/dotnet-install\.sh/.test(read("../src/db/games/terraria.ts")) &&
+      /--channel 9\.0/.test(read("../src/db/games/terraria.ts")) &&
+      /--runtime aspnetcore/.test(read("../src/db/games/terraria.ts")) &&
+      /DOTNET_ROOT="\{\{INSTALL_PATH\}\}\/\.dotnet"/.test(read("../src/db/games/terraria.ts")) &&
+      /exec \.\/TShock\.Server/.test(read("../src/db/games/terraria.ts"))
+  );
+  check(
     "TShock install extracts the zip-wrapped tar (TShock 6.x layout)",
     /INNER_TAR=\$\(find tshock-extract/.test(read("../src/db/games/terraria.ts")) &&
       /tar xf "\$INNER_TAR" -C "\$\(dirname "\$INNER_TAR"\)"/.test(read("../src/db/games/terraria.ts")) &&

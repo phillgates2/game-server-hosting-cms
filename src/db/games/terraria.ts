@@ -202,13 +202,42 @@ cp -a "$(dirname "$TSHOCK_BIN")/." .
 rm -rf tshock-extract
 chmod +x TShock.Server
 
+## TShock 6.x is a framework-dependent .NET app (apphost 9.0.12 in 6.1.0):
+## it needs the .NET runtime to start, even though the package carries no
+## runtimeconfig (the apphost embeds it). Mirror ensure_java from the
+## Minecraft template: use a system runtime when present, otherwise install
+## a server-local one into .dotnet/. Failures are warnings - the server
+## might still be runnable with a manually-installed runtime.
+ensure_dotnet() {
+  if command -v dotnet >/dev/null 2>&1 && dotnet --list-runtimes 2>/dev/null | grep -q "Microsoft.NETCore.App 9"; then
+    echo "System .NET 9 runtime detected - OK"
+    return 0
+  fi
+  echo "Installing server-local .NET runtime..."
+  mkdir -p "$INSTALL_DIR/.dotnet"
+  curl -fsSL --retry 3 -o dotnet-install.sh https://dot.net/v1/dotnet-install.sh || {
+    echo "WARNING: could not fetch dotnet-install.sh - TShock needs the .NET 9 runtime to start" >&2
+    return 1
+  }
+  # aspnetcore runtime is a superset (it includes Microsoft.NETCore.App), so
+  # it covers TShock's REST/websocket features as well as the core runtime.
+  bash dotnet-install.sh --channel 9.0 --runtime aspnetcore --install-dir "$INSTALL_DIR/.dotnet" || {
+    echo "WARNING: server-local .NET install failed - TShock will need a system .NET 9 runtime" >&2
+    rm -f dotnet-install.sh
+    return 1
+  }
+  rm -f dotnet-install.sh
+  echo ".NET runtime installed into $INSTALL_DIR/.dotnet"
+}
+ensure_dotnet || true
+
 ## Create worlds + config directories (the panel writes tshock/config.json)
 mkdir -p worlds tshock
 
 echo "Terraria/TShock server installed successfully"
 `,
 
-  startCommand: `cd {{INSTALL_PATH}} && ./TShock.Server -ip 0.0.0.0 -port {{PORT}} -maxplayers {{MAX_PLAYERS}} -world "{{INSTALL_PATH}}/worlds/{{WORLD_NAME}}.wld" -autocreate {{WORLD_SIZE}} -difficulty {{WORLD_DIFFICULTY}} -worldname "{{WORLD_NAME}}" -seed "{{WORLD_SEED}}"`,
+  startCommand: `cd {{INSTALL_PATH}} && if [ -x "{{INSTALL_PATH}}/.dotnet/dotnet" ]; then export DOTNET_ROOT="{{INSTALL_PATH}}/.dotnet"; export PATH="{{INSTALL_PATH}}/.dotnet:$PATH"; fi && exec ./TShock.Server -ip 0.0.0.0 -port {{PORT}} -maxplayers {{MAX_PLAYERS}} -world "{{INSTALL_PATH}}/worlds/{{WORLD_NAME}}.wld" -autocreate {{WORLD_SIZE}} -difficulty {{WORLD_DIFFICULTY}} -worldname "{{WORLD_NAME}}" -seed "{{WORLD_SEED}}"`,
   stopCommand: "exit",
   configFiles: { "tshock/config.json": "config.json" },
   defaultConfig: {
