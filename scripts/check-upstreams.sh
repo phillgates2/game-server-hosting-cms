@@ -13,7 +13,11 @@ pass=0; fail=0
 ok()   { echo "  [ ok ] $*"; pass=$((pass+1)); }
 bad()  { echo "  [FAIL] $*"; fail=$((fail+1)); }
 
-head_ok() { curl -fsIL --max-time 25 -A "Mozilla/5.0 (GSM-Panel upstream check)" "$1" >/dev/null 2>&1; }
+head_ok() {
+  # A single transient 5xx (maven.neoforged.net's CDN flaps) must not fail the
+  # check; --retry only fires on HTTP errors, so a real outage still fails.
+  curl -fsIL --retry 4 --retry-delay 2 --max-time 25 -A "Mozilla/5.0 (GSM-Panel upstream check)" "$1" >/dev/null 2>&1
+}
 
 echo "── Static download endpoints ──────────────────────────────────────────"
 while IFS='|' read -r name url; do
@@ -23,6 +27,7 @@ done <<'EOF'
 SteamCMD tarball|https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
 Adoptium Temurin JRE|https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jre/hotspot/normal/eclipse
 .NET install script (TShock)|https://dot.net/v1/dotnet-install.sh
+NeoForge maven metadata|https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml
 Factorio headless|https://factorio.com/get-download/stable/headless/linux64
 Xonotic 0.8.6|https://dl.xonotic.org/xonotic-0.8.6.zip
 ET:Legacy x86_64|https://www.etlegacy.com/download/file/715

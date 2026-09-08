@@ -7,6 +7,7 @@
 import type { GameTemplate } from "./types";
 
 import { minecraftJava } from "./minecraft-java";
+import { minecraftNeoForge } from "./minecraft-neoforge";
 import { minecraftPaper } from "./minecraft-paper";
 import { minecraftBedrock } from "./minecraft-bedrock";
 import { cs2 } from "./cs2";
@@ -41,6 +42,7 @@ export { steamInstallScript } from "./steamcmd";
 export const gameTemplates: GameTemplate[] = [
   // Minecraft
   minecraftJava,
+  minecraftNeoForge,
   minecraftPaper,
   minecraftBedrock,
   // Valve / Source engine
@@ -81,6 +83,7 @@ export const gameTemplates: GameTemplate[] = [
  */
 export const EXPECTED_ARTIFACTS_BY_SLUG: Record<string, string[]> = {
   "minecraft-java": ["server.jar"],
+  "minecraft-neoforge": ["run.sh"],
   "minecraft-paper": ["server.jar"],
   "minecraft-bedrock": ["bedrock_server"],
   "cs2": ["game/bin/linuxsteamrt64/cs2"],

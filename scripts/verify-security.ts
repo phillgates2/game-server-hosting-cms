@@ -876,6 +876,17 @@ console.log("\nH2/H3 auth enforcement wiring");
       /i386: true/.test(read("../src/db/games/l4d2.ts"))
   );
   check(
+    "the NeoForge template installs from the official Maven and runs the JRE bootstrap",
+    /maven\.neoforged\.net\/releases\/net\/neoforged\/neoforge\/maven-metadata\.xml/.test(read("../src/db/games/minecraft-neoforge.ts")) &&
+      /--installServer/.test(read("../src/db/games/minecraft-neoforge.ts")) &&
+      /sort -V \| tail -1/.test(read("../src/db/games/minecraft-neoforge.ts")) &&
+      /ensure_java "\$MIN_JAVA"/.test(read("../src/db/games/minecraft-neoforge.ts")) &&
+      /exec bash run\.sh nogui/.test(read("../src/db/games/minecraft-neoforge.ts")) &&
+      /eula=true/.test(read("../src/db/games/minecraft-neoforge.ts")) &&
+      /"minecraft-neoforge": \{ kind: "minecraft"/.test(read("../src/lib/players.ts")) &&
+      /"minecraft-neoforge": \["run\.sh"\]/.test(read("../src/db/games/index.ts"))
+  );
+  check(
     "TShock installs a server-local .NET runtime and the start uses it",
     /ensure_dotnet\(\) \{/.test(read("../src/db/games/terraria.ts")) &&
       /ensure_dotnet \|\| true/.test(read("../src/db/games/terraria.ts")) &&

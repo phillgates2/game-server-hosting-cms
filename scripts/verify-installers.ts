@@ -136,6 +136,8 @@ done
 
 emit_json() {
   case "$url" in
+    *maven.neoforged.net*)
+      echo '<?xml version="1.0" encoding="UTF-8"?><metadata><groupId>net.neoforged</groupId><artifactId>neoforge</artifactId><versioning><latest>26.2.0.82</latest><release>26.2.0.82</release><versions><version>21.1.250</version><version>26.2.0.82</version></versions></versioning></metadata>' ;;
     *piston-meta*|*version_manifest*)
       echo '{"latest":{"release":"1.21.4","snapshot":"1.21.4"},"versions":[{"id":"1.21.4","type":"release","url":"https://piston-meta.mojang.com/v1/packages/abc/1.21.4.json"}]}' ;;
     *packages*|*1.21.4.json*)
@@ -256,7 +258,27 @@ exit 0
   // Java / dotnet / mono / python stand-ins. dotnet reports a .NET 9
   // runtime list so TShock's ensure_dotnet short-circuits instead of trying
   // to fetch one through the mocked network.
-  mock("java", `echo 'openjdk version "21.0.1"'; exit 0`);
+  mock(
+    "java",
+    `echo 'openjdk version "21.0.1"'
+# NeoForge installer emulation: when invoked with -jar <neoforge-...-installer.jar>
+# and --installServer, fabricate the layout run.sh protects (run.sh + the
+# versioned unix_args.txt), so the artifact assertions are meaningful.
+prev=""; inst=""
+for a in "$@"; do
+  if [ "$prev" = "-jar" ]; then inst="$a"; fi
+  prev="$a"
+done
+if [ -n "$inst" ] && echo " $* " | grep -q -- " --installServer "; then
+  ver=$(basename "$inst" | sed 's/^neoforge-\\(.*\\)-installer\\.jar$/\\1/')
+  mkdir -p "libraries/net/neoforged/neoforge/$ver"
+  printf '#!/usr/bin/env sh\nexec java @user_jvm_args.txt @libraries/net/neoforged/neoforge/%s/unix_args.txt "$@"\n' "$ver" > run.sh
+  chmod +x run.sh
+  printf '# mock\n' > "libraries/net/neoforged/neoforge/$ver/unix_args.txt"
+  printf 'mock\n' > "libraries/net/neoforged/neoforge/$ver/neoforge-$ver-universal.jar"
+fi
+exit 0`
+  );
   mock("dotnet", `echo 'Microsoft.NETCore.App 9.0.12 [/usr/share/dotnet/shared/Microsoft.NETCore.App]'; exit 0`);
   mock("mono", "exit 0");
   mock("screen", "exit 0");

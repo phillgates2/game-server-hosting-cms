@@ -4,6 +4,48 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.22.0] — 2026-09-08
+
+### 🧩 New Game: Minecraft: NeoForge
+
+- **New built-in template** for NeoForge (Forge's modern successor, the
+  mod-loader for modern Minecraft versions) — the 4th Minecraft variant
+  after Java, Paper and Bedrock, and the panel's **28th game** (1,625
+  config options).
+- **Install** resolves the latest **stable** release from the official
+  Maven metadata (`maven.neoforged.net`, release channel only — beta/alpha/rc
+  skipped), or installs an exact version via the new **NeoForge Version**
+  wizard field. It downloads the official installer, ensures a Java runtime
+  (Java **25** for the 26.x/Minecraft year-based line, Java 21 for the
+  legacy 21.x line — same `ensure_java` bootstrap as the vanilla template,
+  now shared), runs `--installServer` headless, writes the EULA, and hands
+  the panel a managed `user_jvm_args.txt` (one flag per line, extra JVM flags
+  included). Start goes through the loader's `run.sh` (server-local JRE
+  preferred on PATH), stop = `stop`, and `server.properties` is the same
+  rendered config as vanilla. The server-list ping probe works out of the
+  box (`minecraft-neoforge` → Minecraft protocol).
+- **Verified end-to-end for real** in a FUSE-less sandbox: metadata → latest
+  stable `26.2.0.82` → Java 25 → installer → `run.sh`/`unix_args.txt`, then
+  the server actually started (`Starting minecraft server version 26.2`,
+  still running at the 75s probe). Also proven with the offline installer
+  harness (the Java mock fabricates the run.sh layout, and the metadata
+  mock returns XML) and with test coverage of the version resolution, the
+  Java-requirement heuristic, the EULA and the start wiring.
+- **Refactor:** the vanilla template's Java-runtime groups, server.properties
+  config and `ensure_java` bootstrap moved to a shared
+  `minecraft-shared.ts` (NeoForge consumes the same pieces; a fix now lands
+  on both). The shared script text is byte-identical to what the vanilla
+  template shipped (verified by compiling the pre-refactor template and
+  comparing).
+- **562 tests** (10 new) and **161 security checks** (1 new, mutation-
+  verified 5/5 — dropping the JRE bootstrap call, the installer flag, the
+  probe mapping, the run.sh start or the metadata resolution each fail the
+  gate). 28/28 installer harness, verify:templates 0 errors, build OK.
+- *Note:* maven.neoforged.net's CDN intermittently 502s; both the template
+  and the upstream checks retry (8×3s / 4×2s) to ride it out.
+
+---
+
 ## [1.21.8] — 2026-09-07
 
 ### 🔍 Dependency audit of every game (post-TShock .NET find)

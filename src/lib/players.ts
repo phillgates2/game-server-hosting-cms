@@ -101,6 +101,7 @@ const SPECS: Record<string, ProbeSpec> = {
   "wolfenstein-et": { kind: "quake3", port: "game" },
   // Minecraft family
   "minecraft-java": { kind: "minecraft", port: "game" },
+  "minecraft-neoforge": { kind: "minecraft", port: "game" },
   "minecraft-paper": { kind: "minecraft", port: "game" },
   "minecraft-bedrock": { kind: "bedrock", port: "game" },
 };

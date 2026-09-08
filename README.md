@@ -16,7 +16,7 @@ Deploy, configure, and monitor game servers across multiple machines from one da
 
 <br>
 
-<samp>**27** games · **1,551** config options · **67** API routes · **510** tests · **151** security checks</samp>
+<samp>**28** games · **1,625** config options · **67** API routes · **562** tests · **161** security checks</samp>
 
 <br>
 
@@ -156,7 +156,7 @@ Then visit `http://your-server:3000` to finish setup in the install wizard.
 <td width="33%" valign="top">
 
 #### 🎮 Server Control
-- **27 game templates**, 1,551 options
+- **28 game templates**, 1,625 options
 - **RCON console** in the browser
 - **Auto-restart** crashed servers
 - **Start on boot** after a reboot
@@ -191,13 +191,13 @@ Then visit `http://your-server:3000` to finish setup in the install wizard.
 
 ## 🎯 Supported Games
 
-**27 templates, 1,551 configurable options.** Every option is typed, validated, and genuinely wired into the install script, generated config files, or start command — nothing is decorative.
+**28 templates, 1,625 configurable options.** Every option is typed, validated, and genuinely wired into the install script, generated config files, or start command — nothing is decorative.
 
 <table>
 <tr><th align="left">Category</th><th align="left">Games</th></tr>
 <tr>
   <td><b>⛏️ Minecraft</b></td>
-  <td>Java Edition <sup><code>55</code></sup> · Paper <sup><code>52</code></sup> · Bedrock <sup><code>27</code></sup></td>
+  <td>Java Edition <sup><code>55</code></sup> · NeoForge <sup><code>56</code></sup> · Paper <sup><code>52</code></sup> · Bedrock <sup><code>27</code></sup></td>
 </tr>
 <tr>
   <td><b>🔫 FPS</b></td>
@@ -646,7 +646,7 @@ One command chains every check, exiting non-zero on the first failure — drop i
 | `npm test` | 510 tests over the config renderer, path guard, auth, pagination, API key scopes, server lifecycle rules, and **database integrity, end-to-end installer round-trips, and multi-write atomicity against a real PostgreSQL** *(see below)* |
 | `npm run typecheck` | `tsc --noEmit` across the project |
 | `npm run lint` | ESLint, including React hooks rules |
-| `npm run verify:templates` | All 1,551 template options — types, enums, defaults, and that every declared variable is actually consumed |
+| `npm run verify:templates` | All 1,625 template options — types, enums, defaults, and that every declared variable is actually consumed |
 | `npm run verify:installers` | Renders every game's install script, runs `bash -n` + shellcheck, then **executes** it in a sandbox with SteamCMD/curl/apt mocked, and asserts the artifacts the panel needs were produced |
 | `npm run verify:security` | 151 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, and a sweep for leaked exception messages |
 
@@ -686,7 +686,7 @@ src/
 ├── app/api/              67 API routes
 ├── components/           panels, forms, and the public site
 ├── db/
-│   ├── games/            27 game templates — one module each
+│   ├── games/            28 game templates — one module each
 │   ├── schema.ts         Drizzle schema
 │   └── seeds.ts          re-export shim
 ├── lib/                  auth, permissions, config rendering, file ops
