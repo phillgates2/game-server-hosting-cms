@@ -29,6 +29,8 @@ interface DiscordConfig {
   extraServers: string;
   masterUrls: string;
   botReady: boolean;
+  oauthClientId: string;
+  oauthConfigured: boolean;
 }
 
 interface BoardServer {
@@ -56,6 +58,8 @@ export default function DiscordSettings() {
   const [autoChannel, setAutoChannel] = useState(false);
   const [extraServers, setExtraServers] = useState("");
   const [masterUrls, setMasterUrls] = useState("");
+  const [oauthClientId, setOauthClientId] = useState("");
+  const [oauthClientSecret, setOauthClientSecret] = useState("");
   const [busy, setBusy] = useState<"" | "save" | "test" | "verify">("");
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [boards, setBoards] = useState<BoardServer[] | null>(null);
@@ -76,6 +80,7 @@ export default function DiscordSettings() {
       setAutoChannel(Boolean(data.autoChannel));
       setExtraServers(data.extraServers || "");
       setMasterUrls(data.masterUrls || "");
+      setOauthClientId(data.oauthClientId || "");
     } catch {
       /* leave the form empty; the save call will surface any real problem */
     }
@@ -175,6 +180,9 @@ export default function DiscordSettings() {
     // Only send the token when the admin actually typed one, so saving other
     // fields does not wipe the stored credential.
     if (botToken.trim()) body.botToken = botToken.trim();
+    body.oauthClientId = oauthClientId;
+    // Same write-only rule as the bot token.
+    if (oauthClientSecret.trim()) body.oauthClientSecret = oauthClientSecret.trim();
     void post(body, "save");
   }
 
@@ -212,6 +220,54 @@ export default function DiscordSettings() {
         >
           {busy === "test" ? "Sending…" : "Send Test Message"}
         </button>
+      </div>
+
+      {/* ── Discord login (OAuth) ─────────────────────────────────────── */}
+      <div className="bg-bg-card border border-border rounded-xl p-4 sm:p-6 space-y-4">
+        <div>
+          <h3 className="font-semibold text-lg">Discord Login (OAuth)</h3>
+          <p className="text-xs text-text-muted mt-1">
+            Lets people sign in with Discord instead of a password. Create an
+            application in the <span className="text-text-secondary">Discord Developer Portal</span>,
+            copy its Client ID and Secret here, and add the redirect URL below
+            under <span className="text-text-secondary">OAuth2 → Redirects</span>.{" "}
+            {cfg?.oauthConfigured
+              ? "Sign-in is currently enabled."
+              : "Both fields are needed to enable sign-in."}
+          </p>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="block text-xs text-text-muted mb-1">Client ID</label>
+            <input
+              value={oauthClientId}
+              onChange={(e) => setOauthClientId(e.target.value)}
+              placeholder="123456789012345678"
+              className={inputCls}
+              spellCheck={false}
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-text-muted mb-1">Client Secret</label>
+            <input
+              type="password"
+              value={oauthClientSecret}
+              onChange={(e) => setOauthClientSecret(e.target.value)}
+              placeholder={cfg?.oauthConfigured ? "•••••••• (stored)" : "paste the secret"}
+              className={inputCls}
+              autoComplete="new-password"
+              spellCheck={false}
+            />
+            <p className="text-[11px] text-text-muted mt-1">Write-only: saved secrets are never shown again.</p>
+          </div>
+        </div>
+
+        <div className="text-[11px] text-text-muted space-y-1">
+          <p>Redirect URL: <code className="text-text-secondary">{typeof window !== "undefined" ? `${window.location.origin}/api/auth/discord/callback` : "/api/auth/discord/callback"}</code></p>
+          <p>Scope used: <code className="text-text-secondary">identify email</code>. Sign-in matches accounts by verified email; accounts with 2FA always use password + code.</p>
+          <p>While age verification is on, Discord sign-in works for existing accounts only — new accounts must register with a date of birth (Australian minimum-age law).</p>
+        </div>
       </div>
 
       {/* ── Bot / auto channels ───────────────────────────────────────── */}

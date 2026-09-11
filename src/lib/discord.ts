@@ -16,7 +16,10 @@ export type WebhookEvent =
   | "user_login"
   | "user_registered"
   | "player_joined"
-  | "player_left";
+  | "player_left"
+  | "scheduled_task"
+  | "resource_limit"
+  | "threshold_alert";
 
 interface WebhookPayload {
   serverName: string;
@@ -49,6 +52,9 @@ const EVENT_COLORS: Record<WebhookEvent, number> = {
   user_registered: 0x22d3ee, // Sky
   player_joined: 0x10b981,    // Emerald
   player_left: 0xf97316,      // Orange
+  scheduled_task: 0x0ea5e9,   // Sky-500 — automation, not a human action
+  resource_limit: 0xef4444,   // Red — the watchdog stopping a server
+  threshold_alert: 0xf59e0b,  // Amber — host trending toward trouble
 };
 
 const EVENT_TITLES: Record<WebhookEvent, string> = {
@@ -66,6 +72,9 @@ const EVENT_TITLES: Record<WebhookEvent, string> = {
   user_registered: "📝 User Registered",
   player_joined: "👋 Player Joined",
   player_left: "👋 Player Left",
+  scheduled_task: "⏰ Scheduled Task",
+  resource_limit: "⛔ Resource Limit",
+  threshold_alert: "⚠️ Threshold Alert",
 };
 
 /**
@@ -344,6 +353,54 @@ export async function notifyServerCrashed(
     message: `⚠️ **${serverName}** has crashed unexpectedly!`,
     extra: exitCode !== undefined ? { "Exit Code": exitCode } : undefined,
     ...extras,
+  });
+}
+
+/**
+ * Human-readable one-liner for a scheduled-task result. Pure so the wording
+ * (which travels straight into a public Discord channel) is unit-tested.
+ */
+export function buildScheduledTaskMessage(
+  taskType: string,
+  serverName: string,
+  ok: boolean,
+  detail?: string
+): string {
+  const what = `Scheduled **${taskType}** of **${serverName}**`;
+  if (!ok) {
+    return `⚠️ ${what} failed${detail ? `: ${detail}` : ""}`;
+  }
+  return `⏰ ${what} completed${detail ? ` — ${detail}` : ""}`;
+}
+
+/**
+ * Notify Discord that a scheduled task (restart/backup/update/command) ran.
+ * Routed through the rate-limiting queue: several tasks can fall due in the
+ * same tick, and Discord allows ~30 posts/minute per webhook.
+ */
+export function notifyScheduledTask(
+  webhookUrl: string,
+  opts: {
+    serverName: string;
+    gameName: string;
+    port: number;
+    taskType: string;
+    ok: boolean;
+    detail?: string;
+    serverStatus?: ServerStatus;
+    nextRun?: Date | null;
+  }
+): void {
+  queueDiscordWebhook(webhookUrl, {
+    serverName: opts.serverName,
+    gameName: opts.gameName,
+    port: opts.port,
+    event: "scheduled_task",
+    serverStatus: opts.serverStatus,
+    message: buildScheduledTaskMessage(opts.taskType, opts.serverName, opts.ok, opts.detail),
+    extra: opts.nextRun
+      ? { "Next Run": opts.nextRun.toISOString().replace("T", " ").slice(0, 16) + " UTC" }
+      : undefined,
   });
 }
 

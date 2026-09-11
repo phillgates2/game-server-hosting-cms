@@ -22,10 +22,18 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    // Pre-notes installs lack the column; add it lazily so the select works.
+    try {
+      await db.execute(sql`ALTER TABLE game_servers ADD COLUMN IF NOT EXISTS notes TEXT`);
+      await db.execute(sql`ALTER TABLE game_servers ADD COLUMN IF NOT EXISTS tags JSONB`);
+    } catch { /* best-effort */ }
+
     const query = db
       .select({
         id: gameServers.id,
         name: gameServers.name,
+        userId: gameServers.userId,
+        playerAlertThreshold: gameServers.playerAlertThreshold,
         ipv4: gameServers.ipv4,
         ipv6: gameServers.ipv6,
         port: gameServers.port,
@@ -34,8 +42,13 @@ export async function GET(req: NextRequest) {
         autoRestart: gameServers.autoRestart,
         autoStart: gameServers.autoStart,
         discordWebhook: gameServers.discordWebhook,
+        discordNotifyPlayers: gameServers.discordNotifyPlayers,
+        statusPublic: gameServers.statusPublic,
+        notes: gameServers.notes,
+        tags: gameServers.tags,
         nodeId: gameServers.nodeId,
         pid: gameServers.pid,
+        expiresAt: gameServers.expiresAt,
         lastStarted: gameServers.lastStarted,
         createdAt: gameServers.createdAt,
         gameName: gameDefinitions.name,
@@ -49,12 +62,23 @@ export async function GET(req: NextRequest) {
       .leftJoin(nodes, eq(gameServers.nodeId, nodes.id))
       .$dynamic();
 
+    const sharedSet = new Set<number>();
     if (auth.role !== "admin") {
-      query.where(eq(gameServers.userId, auth.userId));
+      const { sharedServerIdsFor } = await import("@/lib/server-collab");
+      const { or, inArray } = await import("drizzle-orm");
+      const sharedIds = await sharedServerIdsFor(auth.userId);
+      sharedIds.forEach((id) => sharedSet.add(id));
+      query.where(
+        sharedIds.length > 0
+          ? or(eq(gameServers.userId, auth.userId), inArray(gameServers.id, sharedIds))
+          : eq(gameServers.userId, auth.userId)
+      );
     }
 
     const servers = await query;
-    return NextResponse.json({ servers });
+    return NextResponse.json({
+      servers: servers.map((srv) => ({ ...srv, sharedWithMe: sharedSet.has(srv.id) })),
+    });
   } catch (e) {
     log.exception("failed to list servers", e);
     return NextResponse.json({ servers: [] });
@@ -107,12 +131,18 @@ export async function POST(req: NextRequest) {
     }
 
     const [node] = await db
-      .select({ isLocal: nodes.isLocal, gameServerPath: nodes.gameServerPath })
+      .select({ isLocal: nodes.isLocal, gameServerPath: nodes.gameServerPath, maintenanceMode: nodes.maintenanceMode })
       .from(nodes)
       .where(eq(nodes.id, Number(nodeId)))
       .limit(1);
     if (!node) {
       return NextResponse.json({ error: "Selected node not found" }, { status: 404 });
+    }
+    if (node.maintenanceMode) {
+      return NextResponse.json(
+        { error: "That node is in maintenance mode — new servers cannot be placed on it. Pick another node." },
+        { status: 400 }
+      );
     }
 
     // Base path comes from the node. Local non-root installs should avoid /opt.
@@ -197,6 +227,7 @@ export async function POST(req: NextRequest) {
         discordNotifyStop: body.discordNotifyStop ?? true,
         discordNotifyRestart: body.discordNotifyRestart ?? true,
         discordNotifyCrash: body.discordNotifyCrash ?? true,
+        discordNotifyPlayers: body.discordNotifyPlayers ?? true,
       })
       .returning();
 

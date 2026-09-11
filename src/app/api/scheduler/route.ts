@@ -54,6 +54,10 @@ export async function POST(req: NextRequest) {
     if (serverId === undefined || !taskType || !cronExpression) {
       return NextResponse.json({ error: "serverId, taskType, and cronExpression required" }, { status: 400 });
     }
+    // Panel-level tasks deliberately carry no server.
+    if (taskType === "fleet-digest" && (serverId === null || serverId === "")) {
+      // allow null serverId for fleet-digest
+    }
 
     // The taskType maps to a switch in the runner; anything else would be
     // silently skipped at run time, so refuse it now.
@@ -71,20 +75,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const serverIdNum = Number(serverId);
-    if (!Number.isInteger(serverIdNum) || serverIdNum <= 0) {
+    const isPanelTask = taskType === "fleet-digest" && (serverId === null || serverId === "");
+    const serverIdNum = isPanelTask ? null : Number(serverId);
+    if (!isPanelTask && (!Number.isInteger(serverIdNum) || (serverIdNum as number) <= 0)) {
       return NextResponse.json({ error: "Invalid serverId" }, { status: 400 });
     }
-    const [target] = await db
-      .select({ id: gameServers.id, userId: gameServers.userId })
-      .from(gameServers)
-      .where(eq(gameServers.id, serverIdNum))
-      .limit(1);
-    if (!target) return NextResponse.json({ error: "Server not found" }, { status: 404 });
-    // scheduler.create is admin-only today, but a role could grant it: never
-    // let a non-admin schedule commands against someone else's server.
-    if (auth.role !== "admin" && target.userId !== auth.userId) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    // Panel-level tasks (fleet-digest) broadcast fleet-wide data — admin only.
+    if (isPanelTask) {
+      if (auth.role !== "admin") {
+        return NextResponse.json({ error: "Only administrators can schedule panel-level tasks" }, { status: 403 });
+      }
+    } else {
+      const [target] = await db
+        .select({ id: gameServers.id, userId: gameServers.userId })
+        .from(gameServers)
+        .where(eq(gameServers.id, serverIdNum as number))
+        .limit(1);
+      if (!target) return NextResponse.json({ error: "Server not found" }, { status: 404 });
+      // scheduler.create is admin-only today, but a role could grant it: never
+      // let a non-admin schedule commands against someone else's server.
+      if (auth.role !== "admin" && target.userId !== auth.userId) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
     }
 
     const cmd = String(command ?? "").trim();

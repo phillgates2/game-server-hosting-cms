@@ -1,5 +1,6 @@
 import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate, STEAMCMD_VAR } from "./types";
 import { steamInstallScript } from "./steamcmd";
+import { sourceModVariables, sourceModInstallBlock } from "./source-mods";
 
 // Team Fortress 2 dedicated server (srcds). server.cfg is executed on map load.
 export const tf2: GameTemplate = {
@@ -16,6 +17,7 @@ export const tf2: GameTemplate = {
   variables: [
     ...STEAM_VARS,
     STEAMCMD_VAR,
+    ...sourceModVariables(),
     ...RCON_VARS,
 
     ...group("Match Setup", [
@@ -142,7 +144,8 @@ export const tf2: GameTemplate = {
     name: "Team Fortress 2",
   i386: true,
     post: `## srcds reads cfg files from tf/cfg — the panel writes server.cfg there
-mkdir -p "$INSTALL_DIR/tf/cfg"`,
+mkdir -p "$INSTALL_DIR/tf/cfg"\n` +
+      sourceModInstallBlock("tf"),
   }),
 
   startCommand: `cd {{INSTALL_PATH}} && ./srcds_run -game tf -console -port {{PORT}} +maxplayers {{MAX_PLAYERS}} +map {{MAP}} +sv_setsteamaccount {{GSLT_TOKEN}}`,

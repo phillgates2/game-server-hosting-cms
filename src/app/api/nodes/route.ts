@@ -18,6 +18,11 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    // Pre-maintenance installs lack the column; add lazily so the select works.
+    try {
+      await db.execute(sql`ALTER TABLE nodes ADD COLUMN IF NOT EXISTS maintenance_mode BOOLEAN DEFAULT FALSE`);
+    } catch { /* best-effort */ }
+
     const nodeList = await db
       .select({
         id: nodes.id,
@@ -30,6 +35,7 @@ export async function GET(req: NextRequest) {
         status: nodes.status,
         isLocal: nodes.isLocal,
         isDefault: nodes.isDefault,
+        maintenanceMode: nodes.maintenanceMode,
         maxServers: nodes.maxServers,
         maxRamMb: nodes.maxRamMb,
         maxDiskMb: nodes.maxDiskMb,
@@ -60,11 +66,51 @@ export async function GET(req: NextRequest) {
       // Table might not have data yet
     }
 
+    // Latest heartbeat metrics per node (best-effort: a fresh install has no
+    // node_metrics rows yet, and the picker degrades gracefully without them).
+    // Heartbeat history carries the dedicated nodes.view.metrics permission,
+    // so the list only embeds it for callers who hold that permission —
+    // plain nodes.view (moderators) must not leak CPU/RAM/disk readings.
+    const canSeeMetrics = await hasPermission(auth.userId, "nodes.view.metrics");
+    const latestMetrics: Record<number, {
+      cpuPercent: number | null;
+      ramUsedMb: number | null;
+      ramTotalMb: number | null;
+      diskUsedMb: number | null;
+      diskTotalMb: number | null;
+      recordedAt: number | null;
+    }> = {};
+    if (canSeeMetrics) try {
+      const result = await db.execute(sql`
+        SELECT DISTINCT ON (node_id)
+          node_id, cpu_percent, ram_used_mb, ram_total_mb,
+          disk_used_mb, disk_total_mb,
+          EXTRACT(EPOCH FROM recorded_at) * 1000 AS ts
+        FROM node_metrics
+        ORDER BY node_id, recorded_at DESC
+      `);
+      const rawRows: unknown = Array.isArray(result) ? result : (result as { rows?: unknown[] }).rows ?? [];
+      for (const r of rawRows as Array<Record<string, unknown>>) {
+        const nodeId = Number(r.node_id);
+        if (!Number.isFinite(nodeId)) continue;
+        latestMetrics[nodeId] = {
+          cpuPercent: r.cpu_percent == null ? null : Number(r.cpu_percent),
+          ramUsedMb: r.ram_used_mb == null ? null : Number(r.ram_used_mb),
+          ramTotalMb: r.ram_total_mb == null ? null : Number(r.ram_total_mb),
+          diskUsedMb: r.disk_used_mb == null ? null : Number(r.disk_used_mb),
+          diskTotalMb: r.disk_total_mb == null ? null : Number(r.disk_total_mb),
+          recordedAt: r.ts == null ? null : Number(r.ts),
+        };
+      }
+    } catch {
+      // node_metrics may not exist yet — metrics stay null.
+    }
+
     const nodesWithData = nodeList.map((node) => ({
       ...node,
       serverCount: counts[node.id]?.total || 0,
       runningServers: counts[node.id]?.running || 0,
-      metrics: null,
+      metrics: latestMetrics[node.id] ?? null,
     }));
 
     return NextResponse.json({ nodes: nodesWithData });

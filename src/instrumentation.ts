@@ -18,7 +18,7 @@ export async function register() {
   if (process.env.GSM_DISABLE_AUTOSTART === "true") return;
 
   // Deferred so a slow or unreachable database does not delay readiness.
-  const { startBootServers, loadAuthPolicy, startSchedulerTimer, startStatusBoardLoop, startDiscordChatBot } = await import("./instrumentation-node");
+  const { startBootServers, loadAuthPolicy, startSchedulerTimer, startStatusBoardLoop, startDiscordChatBot, startLocalHeartbeatTimer, startUptimeTrackerTimer, startIdleDetectorTimer } = await import("./instrumentation-node");
   // Auth settings are cheap and needed by the first request.
   void loadAuthPolicy();
   // Scheduled tasks, live status boards and the chat bot fire on server-side
@@ -26,6 +26,11 @@ export async function register() {
   void startSchedulerTimer();
   void startStatusBoardLoop();
   void startDiscordChatBot();
+  // The panel's own machine heartbeats like any remote node, so its metrics
+  // history and online state are never empty.
+  void startLocalHeartbeatTimer();
+    startUptimeTrackerTimer();
+    startIdleDetectorTimer();
   setTimeout(() => {
     void startBootServers();
   }, 5_000);

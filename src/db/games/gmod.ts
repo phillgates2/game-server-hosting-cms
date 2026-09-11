@@ -1,5 +1,6 @@
 import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate, STEAMCMD_VAR } from "./types";
 import { steamInstallScript } from "./steamcmd";
+import { sourceModVariables, sourceModInstallBlock } from "./source-mods";
 
 // Garry's Mod dedicated server (srcds). Reads garrysmod/cfg/server.cfg.
 export const gmod: GameTemplate = {
@@ -16,6 +17,7 @@ export const gmod: GameTemplate = {
   variables: [
     ...STEAM_VARS,
     STEAMCMD_VAR,
+    ...sourceModVariables(),
     ...RCON_VARS,
 
     ...group("Match Setup", [
@@ -131,7 +133,8 @@ export const gmod: GameTemplate = {
     name: "Garry's Mod",
   i386: true,
     post: `## srcds reads cfg files from garrysmod/cfg — the panel writes server.cfg there
-mkdir -p "$INSTALL_DIR/garrysmod/cfg"`,
+mkdir -p "$INSTALL_DIR/garrysmod/cfg"\n` +
+      sourceModInstallBlock("garrysmod"),
   }),
 
   startCommand: `cd {{INSTALL_PATH}} && ./srcds_run -game garrysmod -console -port {{PORT}} +maxplayers {{MAX_PLAYERS}} +map {{MAP}} +gamemode {{GAMEMODE}} +host_workshop_collection {{WORKSHOP_COLLECTION}} +sv_setsteamaccount {{GSLT_TOKEN}}`,

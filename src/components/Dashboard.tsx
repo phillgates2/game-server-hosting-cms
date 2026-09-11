@@ -26,6 +26,9 @@ import { NotificationBell } from "./NotificationCenter";
 import { LanguageSelector } from "@/lib/i18n";
 
 import { useRouter } from "next/navigation";
+import { clampPaletteIndex, stepPaletteIndex } from "@/lib/palette";
+
+const PALETTE_TYPE_TAB_MAP: Record<string, Tab> = { server: "servers", user: "users", game: "games", thread: "forum", cms: "cms", node: "nodes" };
 
 interface AuthUser {
   id: number; username: string; role: string;
@@ -91,6 +94,7 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Array<{ type: string; icon: string; id: number; title: string; subtitle: string }>>([]);
+  const [paletteIndex, setPaletteIndex] = useState(0);
 
   const loadPerms = useCallback(async () => {
     try { const res = await fetch("/api/auth/permissions"); if (res.ok) setPerms((await res.json()).permissions || {}); } catch { /**/ }
@@ -137,7 +141,7 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
       // Ctrl/Cmd + K = palette
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPaletteOpen((v) => !v); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPaletteIndex(0); setPaletteOpen((v) => !v); return; }
       if (e.key === "Escape") { setPaletteOpen(false); setOpenGroup(null); return; }
 
       // Single-key shortcuts (only when no modifiers)
@@ -181,6 +185,18 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
     if (!q) return all;
     return all.filter((i) => i.title.toLowerCase().includes(q) || i.subtitle.toLowerCase().includes(q));
   }, [filteredNav, paletteQuery]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Unified keyboard-navigable list: search results first, then pages/actions.
+  const runSearchResult = useCallback((r: { type: string }) => {
+    const t = PALETTE_TYPE_TAB_MAP[r.type];
+    if (t) { setTab(t); setPaletteOpen(false); setPaletteQuery(""); setOpenGroup(null); }
+  }, []);
+  const selectables = [
+    ...searchResults.map((r) => ({ key: `${r.type}-${r.id}`, run: () => runSearchResult(r) })),
+    ...paletteItems.map((i) => ({ key: `item-${i.id}`, run: i.action })),
+  ];
+  const activeIndex = clampPaletteIndex(paletteIndex, selectables.length);
+
 
   function navTo(t: Tab) { setTab(t); setOpenGroup(null); }
 
@@ -294,20 +310,27 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-start justify-center p-4" onClick={() => setPaletteOpen(false)}>
           <div className="w-full max-w-2xl gaming-surface rounded-2xl shadow-2xl overflow-hidden mt-16 lg:mt-20" onClick={(e) => e.stopPropagation()}>
             <div className="p-4 border-b border-border">
-              <input autoFocus value={paletteQuery} onChange={(e) => setPaletteQuery(e.target.value)} placeholder="Search pages and actions..." className="w-full px-4 py-3 bg-bg-secondary border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-accent" />
-              <p className="text-[10px] text-text-muted mt-2">Tip: type a page name or press its shortcut key. Esc to close.</p>
+              <input
+                autoFocus
+                value={paletteQuery}
+                onChange={(e) => { setPaletteQuery(e.target.value); setPaletteIndex(0); }}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowDown") { e.preventDefault(); setPaletteIndex((i) => stepPaletteIndex(i, selectables.length, 1)); }
+                  else if (e.key === "ArrowUp") { e.preventDefault(); setPaletteIndex((i) => stepPaletteIndex(i, selectables.length, -1)); }
+                  else if (e.key === "Enter") { e.preventDefault(); const sel = selectables[activeIndex]; if (sel) sel.run(); }
+                }}
+                placeholder="Search pages and actions..."
+                className="w-full px-4 py-3 bg-bg-secondary border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+              />
+              <p className="text-[10px] text-text-muted mt-2">Tip: ↑↓ to move · Enter to select · type a page name or press its shortcut key · Esc to close.</p>
             </div>
             <div className="max-h-[60vh] overflow-y-auto p-2">
               {/* Search results */}
               {searchResults.length > 0 && (
                 <div className="mb-2">
                   <p className="text-[10px] text-text-muted uppercase tracking-wider px-3 mb-1">Search Results</p>
-                  {searchResults.map((r) => (
-                    <button key={`${r.type}-${r.id}`} onClick={() => {
-                      const typeTabMap: Record<string, Tab> = { server: "servers", user: "users", game: "games", thread: "forum", cms: "cms", node: "nodes" };
-                      const t = typeTabMap[r.type];
-                      if (t) { setTab(t); setPaletteOpen(false); setPaletteQuery(""); setOpenGroup(null); }
-                    }} className="w-full text-left p-3 rounded-xl hover:bg-bg-hover transition-colors flex items-center gap-3">
+                  {searchResults.map((r, idx) => (
+                    <button key={`${r.type}-${r.id}`} onClick={() => runSearchResult(r)} onMouseEnter={() => setPaletteIndex(idx)} className={`w-full text-left p-3 rounded-xl transition-colors flex items-center gap-3 ${idx === activeIndex ? "bg-bg-hover ring-1 ring-accent/40" : "hover:bg-bg-hover"}`}>
                       <span className="text-xl">{r.icon}</span>
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-sm">{r.title}</p>
@@ -321,8 +344,8 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
               {paletteItems.length > 0 && (
                 <div>
                   {searchResults.length > 0 && <p className="text-[10px] text-text-muted uppercase tracking-wider px-3 mb-1 mt-2">Pages & Actions</p>}
-                  {paletteItems.map((item) => (
-                    <button key={item.id} onClick={item.action} className="w-full text-left p-3 rounded-xl hover:bg-bg-hover transition-colors flex items-center gap-3">
+                  {paletteItems.map((item, idx) => (
+                    <button key={item.id} onClick={item.action} onMouseEnter={() => setPaletteIndex(searchResults.length + idx)} className={`w-full text-left p-3 rounded-xl transition-colors flex items-center gap-3 ${searchResults.length + idx === activeIndex ? "bg-bg-hover ring-1 ring-accent/40" : "hover:bg-bg-hover"}`}>
                       {item.icon && <span className="text-xl">{item.icon}</span>}
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-sm">{item.title}</p>

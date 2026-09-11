@@ -56,3 +56,16 @@ export async function sendWelcomeEmail(to: string, username: string) {
       <p style="color:#64748b;font-size:12px;margin-top:20px">— GameServer Manager</p>
     </div>`);
 }
+
+export async function sendPasswordResetEmail(to: string, username: string, link: string) {
+  return sendEmail(to, "Reset your GameServer Manager password",
+    `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;background:#151c2c;color:#e2e8f0;border-radius:12px">
+      <h2 style="color:#3b82f6">🔑 Password Reset</h2>
+      <p>Hi <strong>${username}</strong>,</p>
+      <p>Someone (hopefully you) asked to reset the password for your GameServer Manager account.</p>
+      <p style="margin:24px 0"><a href="${link}" style="display:inline-block;background:#3b82f6;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600">Reset password</a></p>
+      <p style="color:#64748b;font-size:12px">Or paste this link into your browser:<br/>${link}</p>
+      <p style="color:#64748b;font-size:12px">The link works once and expires after one hour. If you did not ask for this, ignore the email — nothing changes until the link is used.</p>
+      <p style="color:#64748b;font-size:12px;margin-top:20px">— GameServer Manager</p>
+    </div>`);
+}

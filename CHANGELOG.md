@@ -4,6 +4,940 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.44.0] — 2026-09-11
+
+### 🔑 Key Hygiene
+Every key now wears its verdict: healthy / expires-in-Nd / never-used /
+unused-Nd / expired. API keys panel + panel access keys (new Health
+column with stale nudges). Expiry enforcement at auth time pinned.
+
+### 🔕 Alert Mute Windows
+Mute host threshold alerts for 1/4/24h during planned work (capped 72h,
+admin-only). The scheduler marks muted episodes handled so breaches
+cannot burst when the window ends; garbage values fail OPEN to alerting.
+
+### 📈 Capacity Forecasting
+Least-squares fit over stride-sampled heartbeat metrics answers "how
+many days until this node's disk/RAM runs out?" — honest by contract
+(no forecast when samples are few, trends flat/shrink, or horizons
+exceed 2 years). Node cards show 💽 headroom chips.
+
+### 🧪 Backup Restore Drills
+🧪 Drill per server: extracts the newest backup into a scratch dir
+(live files untouched), verifies real non-empty files, reports counts +
+duration, always cleans up. Because an untested backup is just a hope.
+
+### ⌨️ Palette Keyboard Navigation
+Ctrl+K palette gains ↑/↓/Enter navigation across search results and
+pages, with clamped selection math that survives results resizing
+between keystrokes.
+
+- **1,003 tests** (was 967; +36 across five stages) · **311 security
+  checks** (was 301; +10), mutation-tested: 14/14 caught (plus one
+  semantically-equivalent mutation replaced by its meaningful variant).
+
+---
+
+## [1.43.0] — 2026-09-11
+
+### 📈 Fleet Stability Tracking
+A 5-minute sampler checks every running server on local nodes (process
+liveness) into `server_uptime_history` (14-day retention). Per-server and
+fleet endpoints (`GET /api/servers/:id/uptime`, `GET /api/servers/uptime`)
+power a 7-day stability board on the Overview.
+
+### 😴 Idle Detection → Auto-Stop
+A 10-minute detector probes queryable servers: activity clears the
+zero-player clock, emptiness stamps it, unreachable changes nothing. The
+Overview calls out servers idle 6h+. New optional policy (Settings → Idle
+Auto-Stop, default OFF): stop servers idle past the threshold — capped at
+5 stops/tick, local-only, each stop recorded as an `idle-stopped` event.
+
+### 🔄 Batch Steam Updates
+"Update stopped" in the batch bar: up to 10 servers updated sequentially
+through the real update handler (pre-update backups apply), running ones
+skipped with reasons.
+
+### 📡 Outbound Webhooks
+Settings → Outbound Webhook pushes every panel event to your endpoint as
+signed JSON (HMAC-SHA256 `X-GSM-Signature`), fire-and-forget, with a full
+SSRF blocklist on the URL and a test-delivery button.
+
+### 📖 API Reference
+`/api-docs` — session-gated curated catalog (48 endpoints across 7
+groups), linked from the API Keys panel.
+
+### 🧯 Disaster Recovery
+Settings → Disaster Recovery exports settings/presets/schedules (+
+reference metadata, never credentials) and restores conservatively:
+whitelisted settings only (never the gate or webhook config), validated
+presets, and schedules re-attached to servers matched by name. Command
+tasks are never imported.
+
+- **967 tests** (was 925; +42 across seven stages) · **301 security
+  checks** (was 284; +17), mutation-tested: every stage's harness caught
+  all of its mutations.
+
+---
+
+## [1.42.0] — 2026-09-11
+
+### 🔑 CD-Key Access Gate
+
+Nobody reaches your panel without a key you hand them:
+
+- Keys look like `GSM-XXXX-XXXX-XXXX-XXXX` (unambiguous alphabet), stored
+  as SHA-256 hashes; mint / label / revoke from the API Keys panel
+  (admin-only, revocation leaves an audit trail).
+- When the gate is on, **login, registration, password reset and Discord
+  OAuth** all demand a valid key on top of normal credentials.
+- Lockout-proof: default OFF, enabling with zero keys bootstraps one
+  (shown once), `GSM_ACCESS_GATE=on|off` env override, and a
+  `GSM_PANEL_MASTER_KEY` (16+ chars) escape hatch that always opens.
+
+### 🔗 Connection Strings
+
+Every server card gains **🔌 Connect** — copies the exact join string for
+that game: Source/id console commands, bare Minecraft addresses with
+default-port elision, IPv6 bracketing, and "no public address" honesty.
+The anonymous status surface stays address-free (new privacy-wall check).
+
+### 💾 One-Click Daily Backups
+
+Same pattern as daily restarts: hour/minute + toggle in each server's
+Notes & Tags view, managing a normal scheduler `backup` task with the
+strict daily cron — custom schedules untouched, disabling never deletes.
+
+- **925 tests** (was 898; +14 access keys, +13 connect) · **284 security
+  checks** (was 272; +12), mutation-tested: 10/10 new mutations caught.
+
+---
+
+## [1.41.0] — 2026-09-11
+
+### ⏰ One-Click Daily Restarts
+
+"Restart this server every day at 04:00" — no cron knowledge required:
+
+- Hour/minute selects and an enable/disable toggle live in each server's
+  Notes & Tags view; `GET/POST /api/servers/[id]/daily-restart` manage a
+  normal restart task with the strict daily shape `M H * * *`.
+- Custom schedules written in the Scheduler panel are never claimed or
+  clobbered by the toggle, and disabling flips `enabled=false` instead of
+  deleting — switching back on is honest.
+
+### 🔧 Node Maintenance Mode
+
+Drain a machine before you reboot or re-image it:
+
+- Nodes panel: **🔧 Maintenance Mode** toggle + badge; maintenance nodes
+  are never recommended by the smart picker (scored `Infinity`), carry a
+  warning in the wizard, and **server creation on them is blocked** with a
+  clear error.
+- `maintenance_mode` column on fresh installs and lazy-upgraded; readable
+  publicly, writable via the node PATCH allowlist (admins).
+
+- **898 tests** (was 883; +12 daily restart, +3 maintenance) · **272
+  security checks** (was 267; +5), mutation-tested: 6/6 new mutations
+  caught.
+
+---
+
+## [1.40.0] — 2026-09-11
+
+### ⚡ Batch Start / Stop / Restart
+
+Act on every server in the current panel view with one click:
+
+- A batch bar appears whenever 2+ servers are shown (tag/status/search
+  filters make it surgical): **Start all / Restart all / Stop all**, each
+  behind a confirm that warns loudly when no filters are active.
+- `POST /api/servers/batch` validates (≤25 ids, deduped, positive ints),
+  pre-checks the same permissions as single-server control, partitions out
+  unknown/foreign servers for non-admins, then **delegates each server to
+  the real per-server process handler** — so crash-loop breakers, remote
+  node dispatch and Discord notifications all apply unchanged.
+- One `server.batch` audit line per operation with ok/failed/skipped counts.
+
+### 🔁 Shareable Presets (export / import)
+
+- **⬆️ Export presets** downloads your presets as a clean JSON file;
+  **⬇️ Import presets** loads one (≤20 per import), validating every item
+  exactly like a manual save — a bad item rejects the batch, presets for
+  games not installed on this panel are skipped and reported.
+- Import requires `servers.create`; imported presets belong to the importer.
+
+- **883 tests** (was 861; +16 batch, +6 import) · **267 security checks**
+  (was 261; +6), mutation-tested: 6/6 new mutations caught.
+
+---
+
+## [1.39.0] — 2026-09-11
+
+### 🏷️ Server Tags
+
+Group servers with short operator labels and slice the panel by them:
+
+- `tags` JSONB column (fresh installs + lazy upgrade), PATCH-allowlisted
+  and validated by `normalizeServerTags` — lower-cased, shell-safe
+  alphabet (`a-z0-9-_`), max **8 tags × 32 chars**, dedupe, blank clears.
+- Panel: comma-separated tag editor inside the Notes & Tags view,
+  clickable `#tag` chips on each server card, and a tag filter row next
+  to the status quick filters.
+
+### 💥 Fleet Incident Feed
+
+The overview dashboard now shows **crashes, watchdog stops and
+auto-restarts across all your servers** over the last 24 hours:
+
+- New `GET /api/servers/events?hours=N` (clamped 1–168h, capped at 200
+  rows) with the same ownership rule as the server list — non-admins
+  only see events for their own servers.
+- Overview widget with per-server labels, game icons and relative times;
+  a quiet fleet gets a "no incidents" note instead of a blank hole.
+- Housekeeping: event display labels moved to a client-safe module
+  (`event-labels.ts`) so the browser bundle never touches db code.
+
+- **861 tests** (was 841; +15 tags, +5 feed) · **261 security checks**
+  (was 255; +6), mutation-tested: 6/6 new mutations caught.
+
+---
+
+## [1.38.0] — 2026-09-11
+
+### 🧭 Smart Node Picker
+
+The create-server wizard now chooses hardware with you:
+
+- `/api/nodes` embeds each node's **latest heartbeat** (CPU / RAM / disk),
+  gated on `nodes.view.metrics` — moderators with plain `nodes.view` see
+  no performance data.
+- New pure lib (`src/lib/node-health.ts`) scores nodes — disk pressure
+  weighs most, then RAM, CPU and existing server count — hard-disqualifies
+  nodes under 2 GB free disk or 512 MB free RAM, and treats stale
+  heartbeats as mediocre instead of great.
+- Wizard: node options carry live load labels, the least-loaded node gets
+  a ✨ and a **one-click "use it" hint**, and the selected node shows
+  warnings (disk nearly full / low RAM / stale metrics).
+
+### 📝 Per-Server Notes
+
+Free-form operator annotations on every server — "map rotation Tuesdays",
+"do not update before the tournament":
+
+- 📝 Notes on the server card opens an inline editor (2,000-char cap,
+  trims, blank clears); servers with notes show a 📝 badge on the card.
+- `notes` column created on install and added lazily to upgrades;
+  PATCH validates through `normalizeServerNotes` under `servers.edit`.
+- The PATCH allowlist regression is pinned: opening it for notes did not
+  reopen `installPath`, `userId`, `nodeId` or `statusToken`.
+
+- **841 tests** (was 809; +24 node-health, +8 notes) · **255 security
+  checks** (was 248; +7), mutation-tested: 6/6 new mutations caught.
+
+---
+
+## [1.37.0] — 2026-09-11
+
+### 📈 Node Resource History
+
+Every node's detail view (Nodes → click a node) now shows **CPU and RAM
+charts over the last 1h / 6h / 24h**, reusing the same metrics pipeline
+the agent already feeds for remote nodes.
+
+- New **local-node heartbeat**: the panel itself samples load, memory and
+  disk every 15 seconds for its own node (`src/lib/local-heartbeat.ts`,
+  started from instrumentation, disable with `GSM_DISABLE_LOCAL_HEARTBEAT=true`).
+  Before this, only remote agents ever wrote `node_metrics`, so the local
+  node's history would have stayed empty.
+- Heartbeats also keep the local node marked `online` with a fresh
+  `lastHeartbeat`, matching agent behaviour.
+
+### 💾 Server Presets (one-click setups)
+
+Save a wizard configuration as a **preset** and apply it instantly next
+time — e.g. "TF2 casual 24-slot":
+
+- Step 1 of the create wizard gains **💾 Save as preset**; presets store
+  the game plus your variable values.
+- Step 0 shows a **Quick start** list of presets; one click selects the
+  game, applies the saved variables, pre-fills name/port from
+  `SERVER_NAME`/`PORT` and jumps straight to configuration.
+- Security: presets can only ever override variables the game template
+  declares (`mergePresetVariables` whitelist) — they cannot smuggle
+  arbitrary keys into a server's environment. Validation caps names
+  (128), descriptions (500), variable count (200) and value size.
+- Permissions: anyone who can create servers can save presets; only the
+  creator (or an admin) can delete one. New table `server_presets`
+  created on install.
+
+- **809 tests** (was 789; +20 preset validation/merge) · **248 security
+  checks** (was 244; +4), mutation-tested: all 3 preset mutations caught.
+
+---
+
+## [1.36.0] — 2026-09-11
+
+### 📦 Server Migration Between Nodes
+
+The last piece of real multi-machine hosting: a stopped server can now
+**move to any node with one button** (📦 Migrate on the server card).
+
+- **How it travels**: the source produces one archive — locally with
+  tar, remotely via the agent's backup builder — and the panel streams
+  it slice-by-slice (download) or chunk-by-chunk (upload, ~8 MB each
+  through the agent's enlarged 32 MB request cap), then unpacks it on
+  the destination and re-points the record (`nodeId` + `installPath`,
+  fresh `stopped` state).
+- **Every combination works**: local↔local, local↔remote, remote↔local
+  and remote↔remote (the panel is the relay; agents never talk to each
+  other, which keeps them simple and the security surface flat).
+- **Safety rails**: only stopped servers may move (installing too is
+  blocked); archives exclude `gsm-backups`/`steamcmd`/`.steam`; the
+  source's migration backup is deleted after it is fetched; the
+  destination path is computed from the node's own `gameServerPath`;
+  **any failure reverts the record to where it was** and cleans up the
+  temp archive — nothing is ever left half-moved.
+- **Proven for real**: the e2e suite drives the actual download-slice →
+  reassemble → chunked-import round trip through a live agent and
+  verifies the file landed intact (gzip magic checked byte-for-byte).
+
+### Verification
+
+- **789 tests** (was 778; +11: 10 pure migration rules + 1 e2e
+  transfer) · **244 security checks** (was 241; +3), mutation-tested:
+  uncleaned staging file, moving a running server and a failure that
+  leaves `installing` behind each fail the suite.
+- Templates, tsc, ESLint (0 errors) and build clean.
+
+---
+
+## [1.35.0] — 2026-09-11
+
+### 📈 Stability History & 🌐 Embeddable Status
+
+**Stability history** — "has this server been stable?" now has data:
+- Every crash (local *and* remote), resource-watchdog stop, and
+  successful auto-restart writes a `server_events` row with an optional
+  detail (the breached limit, the new pid…).
+- The Metrics view shows the **8 most recent events** under the CPU/RAM
+  charts; history rolls on a 14-day window, pruned on write.
+- Best-effort by design: history recording can never break the flow
+  that produces it. Fresh installs get the table; upgrades create it
+  lazily.
+
+**Embeddable status** — the public board reaches community sites:
+- `GET /api/public/status` is now **CORS-open** (both success and
+  fallback responses), so any website can fetch the live list and draw
+  its own widget.
+- Settings → Panel → **Public Status Page** offers copy-paste snippets:
+  a styled `<iframe>` of `/status` and the JSON endpoint for custom
+  widgets. Snippet builders are pure (`status-share.ts`), origin-
+  trimming and XSS-escaping are proven in tests.
+
+### Verification
+
+- **778 tests** (was 770; +8) · **241 security checks** (was 236; +5),
+  mutation-tested: silenced crash events, removed CORS (both response
+  paths) and dropped history pruning each fail the suite.
+- Templates, tsc, ESLint (0 problems) and build clean.
+
+---
+
+## [1.34.0] — 2026-09-11
+
+### 🚀 One-Click Agent Deploy over SSH
+
+Adding a machine used to mean "SCP the agent, write a unit, start it".
+Now the Nodes panel does it with one button:
+
+- **🚀 Deploy Agent** copies `agent/gsm-agent.mjs` to the node, writes
+  its env file and a systemd **user** unit, enables + starts it, and
+  turns on lingering so it survives logout — then pings the agent back
+  to confirm (up to four retries while systemd warms up).
+- Mints the node's API key automatically when it has none, and fills in
+  the API URL from the node's address when empty.
+- **Key-based SSH is the supported path**; password auth works through
+  `sshpass -e`, with the secret carried in an env var — never in argv,
+  never in a log.
+- Injection-hardened: remote values are shell-quoted (single-quote
+  escape proven in tests), and the agent key must match
+  `[A-Za-z0-9_-]{8,128}` so it cannot break out of the quoted heredoc
+  that writes the env file.
+- The command construction is pure (`src/lib/node-deploy.ts`) and
+  unit-tested (11 tests): quoting, transport choice, script contents,
+  key-charset guard and the preflight rules.
+
+### Verification
+
+- **770 tests** (was 759; +11) · **236 security checks** (was 233; +3),
+  mutation-tested 4/4: unescaped quoting, removed key guard, password in
+  argv and a dropped permission gate each fail the suite.
+- Templates, tsc, ESLint (0 errors) and build clean.
+
+---
+
+## [1.33.0] — 2026-09-11
+
+### 📁 Remote File Manager & 💾 Remote Backups
+
+Remote servers can now do the two heaviest panel jobs, executed on the
+agent's machine over the same authenticated RPC:
+
+- **Files**: browse, read/edit, download, create file/dir, rename and
+  delete all route through `/rpc/fs`. Text reads are capped at 2 MB
+  (binary files refuse rather than corrupt), downloads stream up to
+  20 MB as base64, and batch operations decline honestly instead of
+  pretending.
+- **Backups**: create / list / restore route through `/rpc/backup` —
+  the *same archive format and exclusions* as local backups, so a
+  remote archive restores identically. Retention keeps the newest
+  `GSM_BACKUP_KEEP` (default 10); restore validates the archive name
+  against the panel's shape **and** re-checks containment after the
+  join — two independent guards against `../../` restore tricks.
+- The agent refuses to delete the server root itself, and every fs
+  path is re-rooted against `GSM_SERVERS_ROOT`.
+- **Proven end-to-end**: the suite now drives write → list → read →
+  rename → delete, escape refusals, and a full backup → corrupt →
+  restore round-trip against the real agent (11 e2e tests).
+
+### Verification
+
+- **759 tests** (was 755; +4 e2e) · **233 security checks** (was 229;
+  +4), mutation-tested 3/3: root deletion allowed, restore name
+  re-check removed, uncapped reads — each fails the suite.
+- Templates, tsc, ESLint (0 errors) and build clean.
+
+---
+
+## [1.32.0] — 2026-09-11
+
+### 🌐 Remote Node Agent — multi-machine support
+
+Remote servers were second-class citizens: process control answered
+"local nodes only" and the scheduler silently skipped them. Now a
+zero-dependency agent (`agent/gsm-agent.mjs`, Node 18+ only) runs on
+each remote machine and the panel drives it over authenticated RPC:
+
+- **Agent**: `/rpc/ping`, `/rpc/process` (start/stop/status),
+  `/rpc/log`, `/rpc/disk` — plus heartbeats back to the panel for live
+  metrics and online status. systemd unit + deploy recipe in
+  `agent/README.md`.
+- **Security model**: the API key is compared constant-time and checked
+  *before any routing*; every `installPath` is re-rooted against
+  `GSM_SERVERS_ROOT` so a forged request cannot touch anything outside
+  the game-server tree; bodies capped at 1 MB; unknown routes 404.
+- **Panel**: `src/lib/node-client.ts` RPC client (key header, timeout,
+  readable failure mapping). Start/stop/restart/status polls, console
+  log tail and scheduled restarts now work on remote servers; scheduled
+  backup/update/command report an honest failure instead of vanishing.
+- **Operations**: a **Test Connection** button per node, and remote
+  nodes that stop heartbeating flip **offline** after 3 minutes
+  (previously nothing ever un-marked a node online).
+- **PROVEN END-TO-END**: the test suite spawns the real agent and
+  drives it over HTTP — starts a fake game server, confirms it alive,
+  reads its log back, stops it, and verifies bad keys and path escapes
+  are refused (7 e2e tests).
+
+### Verification
+
+- **755 tests** (was 731; +24 incl. 7 agent e2e) · **229 security
+  checks** (was 222; +7), mutation-tested 4/4: keyless access, removed
+  containment, missing key header and silent remote skips each fail the
+  suite. Templates, tsc, ESLint and build clean.
+
+---
+
+## [1.31.1] — 2026-09-11
+
+### 🛟 Throttled Anonymous Surface
+
+Every public status route is anonymous *and* probe-triggering — a visitor
+hammering them turns into a UDP probe storm aimed at the operator's own
+fleet. Now a per-client sliding-window throttle (30 requests/minute,
+pure in-process like the login throttle) gates all four:
+
+- `GET /api/public/status` and `GET /api/public/status/<token>` answer
+  **429** before any probe runs;
+- the `/status` board and `/status/<token>` pages check the window
+  **before** querying the fleet, so a throttled refresh costs nothing;
+- `generateMetadata` no longer probes (it used to double every page load
+  and fire for garbage tokens);
+- blocked requests do not extend the punishment — recovery lands exactly
+  one window after the last allowed hit.
+
+### Verification
+
+- **731 tests** (was 724; +7 over the window boundary, key isolation and
+  non-extension) · **222 security checks** (was 219; +3), mutation-tested:
+  raising the limit and probing before the check both fail the suite.
+
+---
+
+## [1.31.0] — 2026-09-11
+
+### 📋 Public Status Board (`/status`)
+
+The per-server share links get an opt-in directory: flip the new
+**Public listing** chip on any server card and it joins the aggregated
+board — name, game, 🟢/🔴, players and map, server-rendered, noindex,
+60-second auto-refresh, JS-free friendly.
+
+- Anonymous by design; the lookup selects only whitelisted columns and
+  every entry goes through the same seven-field payload as the token
+  links. Hard-capped at 24 servers per page, probes run in parallel.
+- `GET /api/public/status` serves the same board as JSON.
+
+### 🔐 2FA, Actually Usable (+ Recovery Codes)
+
+The 2FA backend existed since the audit but had **no UI** — nobody could
+turn it on. The profile panel now has the whole flow:
+
+- **Set up 2FA** → QR code + secret → confirm with a 6-digit code →
+  **eight single-use recovery codes, shown exactly once** (hash-only
+  storage, unambiguous alphabet, 80 bits each).
+- Login accepts a recovery code wherever a TOTP is due; a spent code is
+  deleted immediately and can never open the account again.
+- Disabling accepts a TOTP *or* a recovery code (a lost phone is
+  precisely when you disable 2FA) and wipes secret + codes.
+
+### 💾 Disk Stats in Metrics
+
+The Metrics view now reports the **server folder size** (walked at most
+every five minutes, cached) alongside **filesystem usage** — answering
+"is this server the one eating the disk?" right next to the CPU/RAM
+charts.
+
+### Verification
+
+- **724 tests** (was 713; +11 over recovery-code generation,
+  single-use consumption and shape detection) · **219 security checks**
+  (was 214; +5), mutation-tested 3/3: ignoring the opt-in flag,
+  reusable recovery codes and a dead login fallback each fail the suite.
+- Templates, tsc + ESLint clean, build OK.
+
+---
+
+## [1.30.0] — 2026-09-11
+
+### 👋 Player Join/Leave Alerts
+
+The `player_joined` / `player_left` webhook events existed since day one
+and were never sent. Now the 15-second status poll diffs each server's
+roster against the previous one and posts the difference:
+
+- `👋 **Alice** joined **My TF2**` — batches multiple joins/leaves into
+  one message per poll, lists up to 10 names then "and N more".
+- **Spam-safe by construction**: the first sighting is a silent baseline
+  (a panel restart does not announce the whole server), a *failed* probe
+  is never read as a mass-leave (only `probe.ok` updates the baseline),
+  and the roster re-baselines silently on every stop/crash/watchdog kill.
+- Per-server **Player alerts** toggle chip (on by default, new
+  `discord_notify_players` column — patchable, cloneable, lazy-migrated).
+  Servers without notifications configured pay no extra probe cost.
+- Pure `roster-diff.ts` decision logic, 13 unit tests.
+
+### ✉️ Emails That Actually Send
+
+`sendWelcomeEmail` and `sendServerCrashEmail` existed and were never
+called. Now: registration sends a best-effort welcome (an SMTP hiccup can
+never fail a signup), and every crash emails the server's owner — Discord
+is where the community watches, email is where the operator gets woken up.
+
+### 🔄 Bulk Restart & Backup
+
+The multi-select bar gains **Restart All** and **Back Up All** alongside
+start/stop/install, with the same per-server progress summary.
+
+### Verification
+
+- **713 tests** (was 700; +13) · **214 security checks** (was 209; +5),
+  mutation-tested 3/3: announcing the baseline, treating a failed probe
+  as a mass-leave, and dropping the crash email each fail the suite.
+- Templates, tsc + ESLint clean.
+
+---
+
+## [1.29.0] — 2026-09-11
+
+### 🔐 Discord OAuth Login
+
+"Sign in with Discord" alongside username + password:
+
+- Configure under **Settings → Discord → Discord Login (OAuth)**:
+  application Client ID + Secret (write-only, never echoed back, not in
+  the public site-settings allowlist). The panel shows the exact redirect
+  URL to register in the Discord portal; scope is `identify email`.
+- Flow: authorize with a random `state` bound to a 10-minute cookie →
+  callback exchanges the code → requires a **verified** email → matches
+  the panel account by email.
+- **The refusal matrix is the point** (pure `oauthLoginDecision`, fully
+  unit-tested): suspended accounts are refused; **2FA accounts must use
+  password + code** — OAuth cannot sidestep TOTP; with self-registration
+  closed, no accounts are created; and while **age verification is on,
+  OAuth can only sign in existing accounts** — creating one would skip
+  the date-of-birth declaration Australian law requires.
+- New-account creation (when allowed) mirrors registration: first account
+  becomes admin, default server quota applies, usernames are de-duplicated.
+- The login screen shows the button only when configured, and every
+  outcome (`ok`, `denied`, `2fa`, `age_gate`, `no_register`, …) lands
+  back with a readable message.
+
+That completes the six-stage plan: hardening bundle, resource limits,
+password reset, threshold alerts, Source modding and Discord login.
+
+### Verification
+
+- **700 tests** (was 691; +9 over the OAuth decision matrix and flow
+  plumbing) · **209 security checks** (was 204; +5), mutation-tested
+  4/4: 2FA bypass, age-gate bypass, unverified-email acceptance and a
+  dropped state check each fail the suite.
+- 1,753 template options verified, tsc + ESLint clean, build OK.
+
+---
+
+## [1.28.0] — 2026-09-11
+
+### 🧩 SourceMod & Metamod:Source for the Source Games
+
+TF2, Counter-Strike: Source, Garry's Mod and Left 4 Dead 2 get a new
+**Modding** option at setup time:
+
+- **None** (default, vanilla) · **Metamod:Source** (plugin loader only) ·
+  **SourceMod + Metamod:Source** (the admin framework and its required
+  loader) — one choice, no dependency confusion.
+- The installer resolves the **latest stable 1.12 Linux build** from
+  AlliedModders' drop mirrors (the `*-latest-linux` filename endpoint,
+  then the archive — the same flow the Pterodactyl Source eggs use),
+  extracts it into the game's own directory (`tf/`, `cstrike/`,
+  `garrysmod/`, `left4dead2/`) and writes the `metamod.vdf` the engine
+  loads, pointing at `addons/metamod/bin/server`.
+- Both live endpoints verified today (`mmsource-1.12.0-git1226`,
+  `sourcemod-1.12.0-git7253`) and added to `check-upstreams.sh` as a
+  two-step flow check.
+
+The installer harness now **executes** the mod installs end-to-end:
+TF2 with Metamod, CS:S with SourceMod, against a mock AlliedModders
+mirror carrying real archive layouts — asserting the loader binary, the
+vdf and the SourceMod config land in the right places.
+
+### Verification
+
+- **691 tests** (was 684; +7 over the modding wiring) · **204 security
+  checks** (was 200; +4), mutation-tested: dropping the empty-filename
+  guard and removing TF2's modding option each fail the suite.
+- 34/34 installer harness (CS:S +3 mod artifacts, TF2 +2), 1,753
+  template options verified, tsc + ESLint clean, build OK.
+
+---
+
+## [1.27.0] — 2026-09-11
+
+### 🚨 Host Threshold Alerts
+
+The resource-limit watchdog guards individual servers; these alerts watch
+the machine itself. When the panel's scheduler tick sees the host over a
+threshold for **three consecutive checks (~3 minutes)** it posts one
+Discord message — amber `threshold_alert`, distinct from a red watchdog
+stop — then stays quiet for the rest of the episode and re-arms once the
+reading recovers.
+
+- Three checks under **Settings → Panel → Host Threshold Alerts**: CPU
+  load-per-core (multi-core bursts may pass 100), RAM usage
+  (MemAvailable-based) and root-disk usage. All default to **90%**;
+  **0 disables** that check.
+- Throttled to one evaluation per minute; readings degrade to "no alert"
+  rather than throwing where procfs/statfs are unavailable. Uses the
+  panel-wide webhook, so no extra configuration is needed.
+
+### Verification
+
+- **684 tests** (was 672; +12 over the breach comparison and the one-
+  alert-per-episode machine) · **200 security checks** (was 196; +4),
+  mutation-tested: letting an episode re-fire (spam) and removing the
+  tick check each fail the suite.
+- tsc + ESLint clean.
+
+---
+
+## [1.26.0] — 2026-09-11
+
+### 🔑 Password Reset
+
+A forgotten password used to mean an administrator hand-editing the
+database. Now there is a proper self-service flow:
+
+- **Forgot your password?** on the sign-in form → enter username *or*
+  email → a one-time link is emailed (SMTP via the existing email
+  settings). The response is identical whether or not the account
+  exists — the endpoint cannot be used to enumerate usernames/emails —
+  and requests are throttled per address like login and registration.
+- The link opens a **new-password form**; the token is 256 random bits,
+  valid for **one hour** and **one use**, and only its SHA-256 hash is
+  ever stored (`password_resets` table — a database leak cannot be spent
+  resetting passwords). Minting a new link retires the old unspent one.
+- Suspended/banned accounts get no link. Reset enforces the same
+  8–200-character password policy as registration.
+- Without SMTP configured the endpoint answers an honest 503 instead of
+  pretending an email was sent.
+
+Note: sessions are stateless JWTs, so already-issued sessions run out
+their term; the reset secures future logins.
+
+### Verification
+
+- **672 tests** (was 665; +7 over token shape, hashing and expiry) ·
+  **196 security checks** (was 191; +5), mutation-tested 3/3:
+  plaintext token storage, ignored expiry and account-existence leaks
+  each fail the suite.
+- tsc + ESLint clean.
+
+---
+
+## [1.25.1] — 2026-09-11
+
+### 🔒 Resource Limits, Enforced
+
+Every server row has carried `maxRamMb` / `maxCpuPercent` (with an edit
+permission for them) since the beginning — and nothing ever read them. One
+runaway server could eat the whole box while the panel politely displayed
+the caps. Now the limits are real:
+
+- The 60-second metric sample doubles as a watchdog: a sample over a set
+  limit is a **strike**; a clean sample resets the count.
+- **Strike 1** warns in Discord ("⚠️ over its limits — will be stopped if
+  this continues"); **4 consecutive strikes (≈4 minutes sustained)** stop
+  the server, set it `stopped`, and announce it (⛔ `resource_limit`
+  event). Sustained, not spiky: a single GC pause won't kill anyone.
+- Unset, zero or negative limits mean "no limit" and can never breach;
+  being exactly *at* a limit is fine; >100% CPU is a normal multi-threaded
+  reading. Strikes are cleared when a server stops or is started manually.
+
+### Verification
+
+- **665 tests** (was 652; +13 over the comparison boundaries and the
+  strike accounting) · **191 security checks** (was 188; +3), mutation-
+  tested: weakening `>` to `>=` and disabling the enforcement gate each
+  fail the suite.
+- tsc + ESLint clean.
+
+---
+
+## [1.25.0] — 2026-09-11
+
+### 🛡️ Hardening Bundle
+
+**1. Scheduled updates now take a pre-update backup.** The safety net only
+covered the Update button — a 4am cron update overwrote files with no
+restore point. The scheduler now honours the same `update_auto_backup`
+toggle: archive first, a failed backup vetoes the update, and the Discord
+report names the archive.
+
+**2. Backup retention + disk-space guard.** Manual, scheduled and pre-update
+archives all land in `gsm-backups/` and used to pile up forever. Now:
+- After every successful archive the newest **N** are kept (new Settings →
+  Panel field *Backup retention*, default 10, 0 = keep all). Pruning only
+  ever deletes names matching the panel's own archive shape — never a file
+  it did not create — and a prune failure can never fail a good backup.
+- Before tar starts, free space must cover the estimated archive size
+  **plus 256 MB**; otherwise the backup refuses with an operator-readable
+  reason instead of dying mid-archive with a torn file.
+
+**3. Crash-loop breaker.** Auto-restart plus a server that dies on boot was
+a restart-spam loop. After **3 crashes inside 10 minutes** the breaker
+trips: the server stays `crashed` for a human to look at, and a manual
+start/restart resets the counter.
+
+### Verification
+
+- **652 tests** (was 632; +20: retention selection, space plan, breaker
+  boundary) · **188 security checks** (was 182; +6), mutation-tested 4/4:
+  removing the prune, bypassing the breaker, skipping the scheduled
+  backup, and raising the breaker threshold each fail the suite.
+- `verify:templates` clean, tsc + ESLint clean.
+
+---
+
+## [1.24.0] — 2026-09-10
+
+### 📈 Metrics Graphs (CPU/RAM History)
+
+The panel always *recorded* per-server samples (`server_metrics`, written by
+the 15-second status poll) and node heartbeat samples (`node_metrics`) — it
+just never let anyone look at them as history. Now it does:
+
+- Every server card gains a **📈 Metrics** section: CPU % and RAM MB line
+  charts over **1h / 6h / 24h / 7d**, rendered as inline SVG (no chart
+  library, nothing external to load).
+- `GET /api/servers/[id]/metrics?hours=N` — owner/admin only, gated on the
+  existing `servers.view.metrics` permission; the window is clamped (1h–14d),
+  the query row-capped (20k), and the series downsampled to ≤360 points so a
+  hostile or careless query string can never pull the whole table.
+- `GET /api/nodes/[id]/metrics?hours=N` — same treatment for node heartbeat
+  history, gated on `nodes.view.metrics`.
+- Charts show the current value, the window peak/min and the time axis; an
+  empty window explains that samples accrue while the server runs.
+
+### 🔗 Public Status Links (No Account Needed)
+
+A share URL that answers "is it up, who's on?" for communities:
+
+- **🔗 Share** on each server creates an unguessable link
+  (`/status/<64-hex>`, 256 random bits). Anyone with it sees the server
+  name, game, 🟢/🔴 state, players/max, map and last-checked time on a
+  server-rendered, noindex page that auto-refreshes every 60s (works with JS
+  off); `GET /api/public/status/<token>` serves the same as JSON.
+- The token *is* the authorisation: the anonymous endpoint has no login, but
+  the lookup query selects only whitelisted columns and the payload builder
+  exposes exactly seven fields — no ids, addresses, paths, configs or
+  webhooks. Bad/malformed tokens get a bare 404.
+- Creating a new link **rotates** the token (a leaked link is replaceable);
+  **Revoke** deletes it. Existing installs need no migration
+  (`ADD COLUMN IF NOT EXISTS status_token`).
+
+### ⏰ Scheduled Tasks → Discord
+
+Cron restarts, backups, updates and commands now report their outcome:
+
+- Every scheduled run posts `⏰ Scheduled **restart** of **Server** completed
+  — back online (pid …)` (or `⚠️ … failed: reason`) to the server's Discord
+  webhook, falling back to the panel-wide one — through the existing
+  rate-limited queue, with the next run time attached.
+- Skipped updates (server running / no Steam App ID) are reported as
+  failures so a silent no-op can't hide in the schedule.
+- A new **Settings → Panel** toggle, *"Discord notification for scheduled
+  tasks"*, silences them wholesale. **On by default.**
+
+### Verification
+
+- **632 tests** (was 607; +25) · **182 security checks** (was 173; +9),
+  mutation-tested: stripping the metrics permission, leaking `installPath`
+  through the public lookup, removing the share-link auth or ownership gate,
+  deleting the scheduler notification and dropping the Discord event each
+  fail the suite.
+- `verify:templates` clean (1,749 options), `tsc --noEmit` clean, ESLint
+  clean, production build succeeds.
+
+---
+
+## [1.23.0] — 2026-09-10
+
+### 🛡️ Automatic Backup Before Every Update
+
+The Update button now archives the server **before** SteamCMD overwrites any
+files — a restore point for the exact moment things go wrong.
+
+- Uses the same `createServerBackup()` the manual Backup button and the
+  scheduled-backup runner use, so the archive format and exclusions can't
+  drift.
+- **Fail-closed:** if the backup fails, the update is aborted and no files
+  are changed. The server stays `stopped` — it is never left half-updated
+  with no restore point.
+- The success toast names the backup it created
+  (`pre-update backup: backup-2026-09-10T…`), so you know what to restore.
+- Controlled by a new **Settings → Panel → "Automatic backup before update"**
+  toggle. **On by default**; turning it off is a deliberate, visible choice.
+
+### 🔞 Age Verification (Australian Law)
+
+Registration now enforces a minimum age, in line with the **Online Safety
+Amendment (Social Media Minimum Age) Act 2024** — in force since 10 December
+2025 — which bars people under 16 from holding accounts on platforms with
+community features (this panel ships a forum and chat).
+
+- The register form collects a **date of birth** (native date picker, can't
+  be in the future). It is stored on the account (`users.date_of_birth`)
+  with an `age_verified_at` timestamp so the declaration is auditable.
+- **Under-16 submissions are refused with a 403** that names the minimum age
+  and cites the Act. Malformed/missing dates are a 400, kept distinct so the
+  UI can tell "fix the field" from "not allowed".
+- Existing installs upgrade without a migration step: the columns are added
+  lazily on first registration (`ADD COLUMN IF NOT EXISTS`).
+- Two new settings under **Settings → Panel**: an **Age verification**
+  on/off switch and a **Minimum account age** field. The field **cannot be
+  saved below 16** (the statutory floor), and the auth policy refuses any
+  hand-edited database value below it too — operators may only raise the bar.
+- The pure decision logic (anniversary-based age, leap-day handling, future/
+  impossible-date rejection) lives in `src/lib/age-verification.ts` and is
+  covered by 12 dedicated unit tests.
+
+### Verification
+
+- **607 tests** (was 590) · **173 security checks** (was 167).
+- The six new security checks are **mutation-tested**: lowering the age floor
+  to 15, removing the registration gate, letting the policy accept any age,
+  and skipping the pre-update backup call each fail the suite.
+- `verify:templates` clean (1,749 options), `tsc --noEmit` clean, production
+  build succeeds.
+
+---
+
+## [1.22.2] — 2026-09-08
+
+### 🎮 Four More Games: Unturned, Core Keeper, Mindustry, Vintage Story
+
+- **Unturned** (AppID 1110390, 13 options) — SteamCMD Unity server,
+  `Unturned_Headless.x86_64` with the panel's Commands.dat (Name/Map/
+  MaxPlayers/Mode/Perspective/Cheats/Password) written into
+  `Servers/<dir>/Server/` and the GSLT in Config.json. The per-server
+  folder is variable-in-path, so the config is written by the install
+  script — the one documented exception to "panel writes configs".
+- **Core Keeper** (AppID **1963720**, 11 options) — the dedicated server is
+  a *hidden* depot app; the commonly-referenced 1005950 is actually a
+  different game entirely (verified on the Steam store). Starts the
+  official `_launch.sh` with `-datapath` back into the install dir, renders
+  ServerConfig.json (gameId, world, worldName, seed, max players, world
+  mode, season override), and exposes the join-code Game ID + password.
+- **Mindustry** (9 options) — the console has no CLI port flag, so the
+  install writes a wrapper that pipes `config port <p>` + `host` into
+  `server-release.jar` (latest GitHub release, PK-magic checked) and then
+  keeps relaying console input — panel console commands still work. Proven
+  live: install + wrapper boot → *"Opened a server on port 7777"*.
+- **Vintage Story** (8 options) — the CDN publishes no version-list API,
+  so the version is a wizard field (default 1.22.7, the latest verified);
+  the 1.22.x server is a framework-dependent **.NET 10** apphost, so the
+  install brings a server-local runtime (channel 10.0) and the start
+  exports DOTNET_ROOT. Proven live: real 1.22.7 download + boot
+  ("Game Version: v1.22.7 (Stable)", ".net 10.0.11").
+- **590 tests** (15 new), **167 security checks** (4 new, mutation-verified
+  4/4: wrong appids, wrapper bypass, dotnet channel). 34/34 installer
+  harness, verify:templates 0 errors (34 games/1,749 options), 25/25
+  upstream checks, build OK. Unturned + Core Keeper are SteamCMD games —
+  validated by the harness + `check-steam-appids.sh` on a node.
+
+---
+
+## [1.22.1] — 2026-09-08
+
+### 🧶 Two More Games: Minecraft: Fabric + Counter-Strike: Source
+
+- **Minecraft: Fabric** (30th game, 57 options) — the lightweight mod loader,
+  installed exactly like the official docs (no extra tooling): the template
+  resolves the latest **stable** loader, Minecraft version and installer from
+  `meta.fabricmc.net`, ensures a Java runtime (25 for the year-based 26.x
+  line, 21 for older ones — same `ensure_java` as NeoForge/vanilla), runs
+  `fabric-installer server -downloadMinecraft`, writes the EULA and starts
+  via `fabric-server-launch.jar`. `Fabric Loader` and `Minecraft Version`
+  wizard fields pin exact versions; empty = latest stable. Verified end to
+  end for real: `Loading Minecraft 26.2 with Fabric Loader 0.19.5`, server
+  booted and still running at the probe timeout.
+- **Counter-Strike: Source** (AppID 740) — `srcds_run -game cstrike` with
+  the full Source server.cfg option set (match setup, server rules, rates),
+  `cstrike/cfg/server.cfg` as the config destination, GSLT token support and
+  the 32-bit i386-libs install warning (from 1.21.8). The A2S player-count
+  probe maps out of the box.
+- **575 tests** (13 new) and **163 security checks** (2 new, mutation-
+  verified 4/4: dropping the JRE bootstrap, flipping the stable filter,
+  dropping the i386 flag or the probe mapping each fail the gate).
+  30/30 installer harness, verify:templates 0 errors, build OK.
+- *Housekeeping:* the audit turned up that two natural "minor" suggestions —
+  port-conflict validation on create and the Clone-a-server action — already
+  exist (validatePorts on the create path; `/api/servers/[id]/clone` with
+  free-port scanning, quota and Discord channel provisioning). No duplicates
+  were added; the server-name search filter already exists too.
+
+---
+
 ## [1.22.0] — 2026-09-08
 
 ### 🧩 New Game: Minecraft: NeoForge

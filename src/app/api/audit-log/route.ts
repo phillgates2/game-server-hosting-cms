@@ -102,6 +102,17 @@ export async function POST(req: NextRequest) {
       ipAddress: ip.slice(0, 45),
     });
 
+    // Outbound webhook: fire-and-forget, best-effort, never blocks the write.
+    try {
+      const { fireWebhookEvent } = await import("@/lib/webhook-dispatch");
+      fireWebhookEvent({
+        action: action.trim(),
+        entityType: normType,
+        entityId: normId,
+        details: normDetails,
+      });
+    } catch { /* delivery is informational only */ }
+
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
     return apiError(e, "Failed", 500);

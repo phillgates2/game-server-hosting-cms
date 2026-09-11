@@ -6,6 +6,7 @@ import {
   integer,
   boolean,
   timestamp,
+  date,
   jsonb,
   real,
   index,
@@ -42,7 +43,14 @@ export const users = pgTable("users", {
   themeConfig: jsonb("theme_config"),
   twoFactorEnabled: boolean("two_factor_enabled").default(false),
   twoFactorSecret: text("two_factor_secret"),
+  /** JSON array of SHA-256 hashes of the single-use recovery codes. */
+  twoFactorRecovery: text("two_factor_recovery"),
   maxServers: integer("max_servers").default(5),
+  // Age verification (Australian Online Safety Amendment Act 2024).
+  // `dateOfBirth` is set at registration when age verification is on;
+  // `ageVerifiedAt` records when the declaration was accepted.
+  dateOfBirth: date("date_of_birth"),
+  ageVerifiedAt: timestamp("age_verified_at"),
   lastLoginAt: timestamp("last_login_at"),
   lastLoginIp: varchar("last_login_ip", { length: 45 }),
   loginCount: integer("login_count").default(0),
@@ -79,6 +87,8 @@ export const nodes = pgTable("nodes", {
   status: varchar("status", { length: 20 }).notNull().default("offline"),
   isLocal: boolean("is_local").default(false),
   isDefault: boolean("is_default").default(false),
+  /** Maintenance: never recommended for new servers; creation is blocked. */
+  maintenanceMode: boolean("maintenance_mode").default(false),
   lastHeartbeat: timestamp("last_heartbeat"),
   // Location/metadata
   location: varchar("location", { length: 128 }),
@@ -160,6 +170,8 @@ export const gameServers = pgTable("game_servers", {
   discordNotifyStop: boolean("discord_notify_stop").default(true),
   discordNotifyRestart: boolean("discord_notify_restart").default(true),
   discordNotifyCrash: boolean("discord_notify_crash").default(true),
+  /** Post join/leave messages as the roster changes between polls. */
+  discordNotifyPlayers: boolean("discord_notify_players").default(true),
   /** Channel the panel provisioned for this server, so it can be cleaned up. */
   discordChannelId: text("discord_channel_id"),
   /**
@@ -171,6 +183,21 @@ export const gameServers = pgTable("game_servers", {
   discordStatusUpdatedAt: timestamp("discord_status_updated_at"),
   /** Last board error, surfaced in the panel so a dead channel is diagnosable. */
   discordStatusError: text("discord_status_error"),
+  /**
+   * Public status share link: an unguessable token that lets anyone without
+   * an account see this server's up/down + player count. NULL = no link.
+   */
+  statusToken: varchar("status_token", { length: 64 }).unique(),
+  /** Opt-in listing on the aggregated public status page (/status). */
+  statusPublic: boolean("status_public").default(false),
+  /** Free-form operator notes shown in the panel ("map rotation Tue", etc). */
+  notes: text("notes"),
+  /** Operator grouping labels ("tf2", "eu") — validated string[]. */
+  tags: jsonb("tags"),
+  /** Ephemeral servers: auto stop+delete when this instant passes. */
+  expiresAt: timestamp("expires_at"),
+  playerAlertThreshold: integer("player_alert_threshold"),
+  playerAlertAbove: boolean("player_alert_above").default(false),
   // Timestamps
   lastStarted: timestamp("last_started"),
   lastStopped: timestamp("last_stopped"),
@@ -287,6 +314,138 @@ export const settings = pgTable("settings", {
   value: text("value"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ── Player-count samples (idle + heatmap history) ───────────
+export const playerSamples = pgTable("player_samples", {
+  id: serial("id").primaryKey(),
+  serverId: integer("server_id").references(() => gameServers.id).notNull(),
+  players: integer("players").notNull(),
+  recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+});
+
+// ── Tracked login sessions (revocable) ──────────────────────
+export const authSessions = pgTable("auth_sessions", {
+  id: serial("id").primaryKey(),
+  tokenHash: text("token_hash").notNull().unique(),
+  userId: integer("user_id").references(() => users.id).notNull(),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: varchar("user_agent", { length: 256 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
+  revokedAt: timestamp("revoked_at"),
+});
+
+// ── Server change history (field-level diffs) ───────────────
+export const serverChanges = pgTable("server_changes", {
+  id: serial("id").primaryKey(),
+  serverId: integer("server_id").references(() => gameServers.id).notNull(),
+  userId: integer("user_id").references(() => users.id),
+  field: varchar("field", { length: 64 }).notNull(),
+  fromValue: text("from_value"),
+  toValue: text("to_value"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ── Idle detection state (zero-player streaks) ──────────────
+export const serverIdleState = pgTable("server_idle_state", {
+  serverId: integer("server_id").primaryKey().references(() => gameServers.id),
+  zeroPlayersSince: timestamp("zero_players_since"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ── Server stability history (uptime samples) ───────────────
+export const serverUptimeHistory = pgTable("server_uptime_history", {
+  id: serial("id").primaryKey(),
+  serverId: integer("server_id").references(() => gameServers.id).notNull(),
+  online: boolean("online").notNull(),
+  checkedAt: timestamp("checked_at").defaultNow().notNull(),
+});
+
+// ── Panel access keys (CD-key gate) ─────────────────────────
+export const accessKeys = pgTable("access_keys", {
+  id: serial("id").primaryKey(),
+  keyHash: text("key_hash").notNull().unique(),
+  keyPrefix: varchar("key_prefix", { length: 16 }).notNull(),
+  label: varchar("label", { length: 128 }),
+  createdBy: integer("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  lastUsedAt: timestamp("last_used_at"),
+  revokedAt: timestamp("revoked_at"),
+});
+
+// ── Server presets (one-click setups) ────────────────────────
+export const serverPresets = pgTable("server_presets", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id),
+  name: varchar("name", { length: 128 }).notNull(),
+  description: text("description"),
+  gameId: integer("game_id").references(() => gameDefinitions.id).notNull(),
+  variables: jsonb("variables"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ── Server lifecycle events (crash/restart history) ──────────
+export const serverEvents = pgTable("server_events", {
+  id: serial("id").primaryKey(),
+  serverId: integer("server_id").references(() => gameServers.id).notNull(),
+  kind: varchar("kind", { length: 32 }).notNull(),
+  detail: text("detail"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ── Scheduled maintenance windows ──────────────────────────────
+// Drain a node automatically at startsAt and release it at endsAt.
+// appliedAt/completedAt let the scheduler know what it already did.
+export const maintenanceWindows = pgTable("maintenance_windows", {
+  id: serial("id").primaryKey(),
+  nodeId: integer("node_id").references(() => nodes.id, { onDelete: "cascade" }).notNull(),
+  startsAt: timestamp("starts_at").notNull(),
+  endsAt: timestamp("ends_at").notNull(),
+  reason: text("reason"),
+  createdBy: integer("created_by").references(() => users.id),
+  appliedAt: timestamp("applied_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ── Blueprints (multi-server deploy definitions) ───────────────
+// A blueprint bundles preset deployments: "event night = 2x TF2 casual + 1x MvM".
+// entries: Array<{ presetId: number; count: number; namePattern: string | null }>
+export const serverBlueprints = pgTable("server_blueprints", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id),
+  name: varchar("name", { length: 128 }).notNull(),
+  description: text("description"),
+  entries: jsonb("entries").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ── Server collaborators (sharing) ───────────────────────────
+// Owner/admin grants other users access to a single server.
+//   viewer   — read-only: sees the server, may not control it
+//   operator — may start/stop/restart, but not reconfigure or delete
+export const serverCollaborators = pgTable("server_collaborators", {
+  id: serial("id").primaryKey(),
+  serverId: integer("server_id").references(() => gameServers.id, { onDelete: "cascade" }).notNull(),
+  userId: integer("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  role: varchar("role", { length: 16 }).notNull().default("viewer"),
+  grantedBy: integer("granted_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ── Password reset links ─────────────────────────────────────
+// The raw token lives only in the emailed link; the row stores its SHA-256
+// hash, one unspent link per user, and a one-hour expiry.
+export const passwordResets = pgTable("password_resets", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id).notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 // ── Discord GUID verifications ──────────────────────────────────

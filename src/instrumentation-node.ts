@@ -61,6 +61,43 @@ export async function startDiscordChatBot() {
   }
 }
 
+/**
+ * Start the local-node heartbeat so the panel's own machine reports metrics
+ * and online state exactly like a remote one does through its agent.
+ */
+export async function startIdleDetectorTimer() {
+  if (process.env.GSM_DISABLE_IDLE_DETECTOR === "true") return;
+  try {
+    const { startIdleDetector } = await import("./lib/idle-detection");
+    startIdleDetector();
+    console.log("[idle] detector started (10m tick)");
+  } catch (e: unknown) {
+    console.warn("[idle] detector unavailable:", e instanceof Error ? e.message : e);
+  }
+}
+
+export async function startUptimeTrackerTimer() {
+  if (process.env.GSM_DISABLE_UPTIME_TRACKER === "true") return;
+  try {
+    const { startUptimeTracker } = await import("./lib/uptime-tracker");
+    startUptimeTracker();
+    console.log("[uptime] stability tracker started (5m tick, 14d retention)");
+  } catch (e: unknown) {
+    console.warn("[uptime] tracker unavailable:", e instanceof Error ? e.message : e);
+  }
+}
+
+export async function startLocalHeartbeatTimer() {
+  if (process.env.GSM_DISABLE_LOCAL_HEARTBEAT === "true") return;
+  try {
+    const { startLocalHeartbeat } = await import("./lib/local-heartbeat");
+    startLocalHeartbeat();
+    console.log("[local-heartbeat] started (15s tick)");
+  } catch (e: unknown) {
+    console.error("[local-heartbeat] could not start:", e instanceof Error ? e.message : e);
+  }
+}
+
 /** Load operator settings so auth.ts has them before the first request. */
 export async function loadAuthPolicy() {
   try {

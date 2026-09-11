@@ -25,7 +25,7 @@
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readdirSync, statSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gameTemplates, getExpectedArtifactsBySlug, type GameTemplate } from "../src/db/games";
@@ -136,6 +136,12 @@ done
 
 emit_json() {
   case "$url" in
+    *meta.fabricmc.net*versions/loader*)
+      echo '[{"separator":".","build":6,"maven":"net.fabricmc:fabric-loader:0.19.6","version":"0.19.6","stable":false},{"separator":".","build":5,"maven":"net.fabricmc:fabric-loader:0.19.5","version":"0.19.5","stable":true}]' ;;
+    *meta.fabricmc.net*versions/game*)
+      echo '[{"version":"26.3-pre-1","stable":false},{"version":"26.2","stable":true}]' ;;
+    *meta.fabricmc.net*versions/installer*)
+      echo '[{"url":"https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.3/fabric-installer-1.1.3.jar","version":"1.1.3","stable":false},{"url":"https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.2/fabric-installer-1.1.2.jar","version":"1.1.2","stable":true}]' ;;
     *maven.neoforged.net*)
       echo '<?xml version="1.0" encoding="UTF-8"?><metadata><groupId>net.neoforged</groupId><artifactId>neoforge</artifactId><versioning><latest>26.2.0.82</latest><release>26.2.0.82</release><versions><version>21.1.250</version><version>26.2.0.82</version></versions></versioning></metadata>' ;;
     *piston-meta*|*version_manifest*)
@@ -165,6 +171,11 @@ emit_json() {
       ]}' ;;
     *minecraft-services*|*minecraft.net*)
       echo '{"result":{"links":[{"downloadType":"serverBedrockLinux","downloadUrl":"https://www.minecraft.net/bedrockdedicatedserver/bin-linux/bedrock-server-1.21.44.01.zip"}]}}' ;;
+    *mms.alliedmods.net*)
+      # Metamod "latest" endpoint answers with the bare filename.
+      echo 'mmsource-1.12.0-git1000-linux.tar.gz' ;;
+    *sm.alliedmods.net*)
+      echo 'sourcemod-1.12.0-git7200-linux.tar.gz' ;;
     *) echo '{"ok":true,"version":"1.0.0","tag_name":"v1.0.0"}' ;;
   esac
 }
@@ -277,6 +288,12 @@ if [ -n "$inst" ] && echo " $* " | grep -q -- " --installServer "; then
   printf '# mock\n' > "libraries/net/neoforged/neoforge/$ver/unix_args.txt"
   printf 'mock\n' > "libraries/net/neoforged/neoforge/$ver/neoforge-$ver-universal.jar"
 fi
+if [ -n "$inst" ] && echo "$inst" | grep -q "fabric-installer"; then
+  mkdir -p libraries
+  printf 'PK\\003\\004\\n' > server.jar
+  printf '#!/bin/sh\\nexec java -Xmx2G -jar fabric-server-launch.jar "$@"\\n' > fabric-server-launch.jar
+  chmod +x fabric-server-launch.jar
+fi
 exit 0`
   );
   mock("dotnet", `echo 'Microsoft.NETCore.App 9.0.12 [/usr/share/dotnet/shared/Microsoft.NETCore.App]'; exit 0`);
@@ -343,6 +360,34 @@ interface Row {
  */
 const MOCK_UNSUPPORTED = new Set(["minecraft-java", "minecraft-paper"]);
 
+// Source-mod installs pull real-shape archives from the mock curl, so give
+// those archives the AlliedModders layout (addons/metamod, addons/sourcemod).
+// Kept OUT of expectedArtifacts: the mock steamcmd must not pre-create them,
+// so the artifact assertion really tests the mod install block.
+const EXTRA_MOCK_ARTIFACTS: Record<string, string[]> = {
+  tf2: ["addons/metamod/bin/server.so"],
+  "counter-strike-source": [
+    "addons/metamod/bin/server.so",
+    "addons/sourcemod/configs/core.cfg",
+  ],
+};
+
+// Source games exercised with a mod platform chosen at install time.
+const MOD_PLATFORM_OVERRIDES: Record<string, string> = {
+  tf2: "metamod",
+  "counter-strike-source": "sourcemod",
+};
+
+// Extra post-run assertions for the mod installs (paths + the vdf content).
+const MOD_ARTIFACT_CHECKS: Record<string, string[]> = {
+  tf2: ["tf/addons/metamod/bin/server.so", "tf/addons/metamod.vdf"],
+  "counter-strike-source": [
+    "cstrike/addons/metamod/bin/server.so",
+    "cstrike/addons/metamod.vdf",
+    "cstrike/addons/sourcemod/configs/core.cfg",
+  ],
+};
+
 const rows: Row[] = [];
 
 const templates = gameTemplates.filter((t) => (only.length ? only.includes(t.slug) : true));
@@ -373,6 +418,7 @@ for (const t of templates) {
   );
 
   const vars = fillVariables(t);
+  if (MOD_PLATFORM_OVERRIDES[t.slug]) vars.MOD_PLATFORM = MOD_PLATFORM_OVERRIDES[t.slug];
   vars.INSTALL_PATH = installDir;
   const script = render(t.installScript, vars);
   const startCmd = render(t.startCommand, vars);
@@ -420,7 +466,7 @@ for (const t of templates) {
       HOME: root,
       MOCK_LOG: mockLog,
       MOCK_JAR_SHA: join(root, "jar.sha"),
-      MOCK_ARTIFACTS: (getExpectedArtifactsBySlug(t.slug) ?? []).join(";"),
+      MOCK_ARTIFACTS: [...(getExpectedArtifactsBySlug(t.slug) ?? []), ...(EXTRA_MOCK_ARTIFACTS[t.slug] ?? [])].join(";"),
       // TShock's real asset is a zip around a tar (see make_archive).
       MOCK_INNER_TAR: t.slug === "terraria" ? "1" : "",
       INSTALL_DIR: installDir,
@@ -503,6 +549,28 @@ for (const t of templates) {
       const produced = listFiles(installDir);
       row.artifacts = produced.length ? `${produced.length} files` : "none";
       if (!produced.length) warn(t.slug, "artifacts", "install produced no files at all");
+    }
+
+    // ── 4b. Source mod artifacts (Metamod / SourceMod) ──────────────────────
+    // Only meaningful when the run itself succeeded; a failed install already
+    // reported, and these files cannot exist without it.
+    const modChecks = MOD_ARTIFACT_CHECKS[t.slug];
+    if (modChecks && row.run === "ok") {
+      const missingMod = modChecks.filter((rel) => !existsSync(join(installDir, rel)));
+      if (missingMod.length) {
+        row.artifacts = `missing ${missingMod.length} mod file(s)`;
+        fail(t.slug, "mod-artifacts", `not created: ${missingMod.join(", ")}`);
+      } else {
+        // The vdf must point the engine at the loader inside THIS game dir.
+        const vdfRel = modChecks.find((r) => r.endsWith("metamod.vdf"));
+        if (vdfRel) {
+          const vdf = readFileSync(join(installDir, vdfRel), "utf8");
+          if (!vdf.includes("addons/metamod/bin/server")) {
+            fail(t.slug, "mod-artifacts", "metamod.vdf does not reference addons/metamod/bin/server");
+          }
+        }
+        row.artifacts = `${row.artifacts} +${modChecks.length} mod`;
+      }
     }
 
     // ── 5. start command sanity ──────────────────────────────────────────────

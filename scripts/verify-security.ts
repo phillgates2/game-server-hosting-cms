@@ -10,6 +10,32 @@
 
 import { resolve, sep, join } from "node:path";
 import { safePath } from "../src/lib/server-file-ops";
+import { validatePresetInput, mergePresetVariables } from "../src/lib/server-presets";
+import { scoreNode, recommendNodeId, type NodeCandidate } from "../src/lib/node-health";
+import { normalizeServerNotes, SERVER_PATCH_FIELDS } from "../src/lib/server-lifecycle";
+import { normalizeServerTags } from "../src/lib/server-tags";
+import { clampFeedHours, FEED_MAX_HOURS } from "../src/lib/event-feed";
+import { validateBatchRequest, validateBatchServerIds, partitionBatch, BATCH_MAX_SIZE } from "../src/lib/batch-ops";
+import { validatePresetImport } from "../src/lib/server-presets";
+import { parseDailyRestartCron, buildDailyRestartCron } from "../src/lib/daily-restart";
+import { normalizeAccessKey, isValidAccessKeyFormat, hashAccessKey } from "../src/lib/access-keys";
+import { connectInfoFor, pickHost } from "../src/lib/connect-info";
+import { summarizeUptime, clampUptimeHours, uptimeGrade } from "../src/lib/uptime";
+import { nextIdleStamp, idleDurationMs, isServerIdle, shouldIdleStop } from "../src/lib/idle-math";
+import { isKeyStale, daysUntilExpiry } from "../src/lib/key-hygiene";
+import { isAlertMuted, clampMuteHours } from "../src/lib/alert-mute";
+import { forecastDaysUntil, capacityVerdict } from "../src/lib/capacity";
+import { assessDrill, latestBackupName } from "../src/lib/backup-drill";
+import { clampPaletteIndex, stepPaletteIndex } from "../src/lib/palette";
+import { escapeCsvField, seriesToCsv } from "../src/lib/csv-export";
+import { diffServerPatch } from "../src/lib/server-changes";
+import { ipAllowed, parseAllowList } from "../src/lib/ip-allowlist";
+import { isSafeInstallPath, clampTtlHours } from "../src/lib/ephemeral";
+import { buildHeatmap } from "../src/lib/player-history";
+import { detectAnomalies } from "../src/lib/anomaly";
+import { formatFleetDigest } from "../src/lib/fleet-digest";
+import { validateWebhookUrl, verifyWebhookSignature, signWebhookPayload } from "../src/lib/outbound-webhook";
+import { validatePanelImport, IMPORTABLE_SETTING_KEYS, IMPORTABLE_TASK_TYPES } from "../src/lib/panel-export";
 
 let failures = 0;
 let checks = 0;
@@ -876,6 +902,54 @@ console.log("\nH2/H3 auth enforcement wiring");
       /i386: true/.test(read("../src/db/games/l4d2.ts"))
   );
   check(
+    "Unturned installs AppID 1110390 with its Commands.dat config",
+    /appId: "1110390"/.test(read("../src/db/games/unturned.ts")) &&
+      /Unturned_Headless\.x86_64/.test(read("../src/db/games/unturned.ts")) &&
+      /Servers\/\$SERVER_DIR\/Server\/Commands\.dat/.test(read("../src/db/games/unturned.ts")) &&
+      /\+InternetServer\/\{\{SERVER_DIR\}\}/.test(read("../src/db/games/unturned.ts"))
+  );
+  check(
+    "Core Keeper uses the dedicated-server AppID 1963720 and a local data path",
+    /appId: "1963720"/.test(read("../src/db/games/core-keeper.ts")) &&
+      /bash _launch\.sh/.test(read("../src/db/games/core-keeper.ts")) &&
+      /-datapath "\{\{INSTALL_PATH\}\}\/DedicatedServer"/.test(read("../src/db/games/core-keeper.ts")) &&
+      /"DedicatedServer\/ServerConfig\.json"/.test(read("../src/db/games/core-keeper.ts"))
+  );
+  check(
+    "Mindustry pipes config port + host through a console-bridging wrapper",
+    /server-release\.jar/.test(read("../src/db/games/mindustry.ts")) &&
+      /config port %s/.test(read("../src/db/games/mindustry.ts")) &&
+      /mindustry-start\.sh/.test(read("../src/db/games/mindustry.ts")) &&
+      /bash mindustry-start\.sh/.test(read("../src/db/games/mindustry.ts"))
+  );
+  check(
+    "Vintage Story pins a version, installs .NET 10 and starts with DOTNET_ROOT",
+    /"VS_VERSION"/.test(read("../src/db/games/vintage-story.ts")) &&
+    /"Server Version"/.test(read("../src/db/games/vintage-story.ts")) &&
+      /--channel 10\.0/.test(read("../src/db/games/vintage-story.ts")) &&
+      /DOTNET_ROOT="\{\{INSTALL_PATH\}\}\/\.dotnet"/.test(read("../src/db/games/vintage-story.ts")) &&
+      /VintagestoryServer --dataPath/.test(read("../src/db/games/vintage-story.ts"))
+  );
+  check(
+    "the Fabric template installs from the official meta API and runs the JRE bootstrap",
+    /meta\.fabricmc\.net\/v2\/versions\/loader/.test(read("../src/db/games/minecraft-fabric.ts")) &&
+      /"stable":true\)'/.test(read("../src/db/games/minecraft-fabric.ts")) &&
+      /-downloadMinecraft/.test(read("../src/db/games/minecraft-fabric.ts")) &&
+      /ensure_java "\$MIN_JAVA"/.test(read("../src/db/games/minecraft-fabric.ts")) &&
+      /fabric-server-launch\.jar nogui/.test(read("../src/db/games/minecraft-fabric.ts")) &&
+      /"minecraft-fabric": \{ kind: "minecraft"/.test(read("../src/lib/players.ts")) &&
+      /"minecraft-fabric": \["fabric-server-launch\.jar"\]/.test(read("../src/db/games/index.ts"))
+  );
+  check(
+    "Counter-Strike: Source installs AppID 740 with the 32-bit lib warning",
+    /appId: "740"/.test(read("../src/db/games/counter-strike-source.ts")) &&
+      /i386: true/.test(read("../src/db/games/counter-strike-source.ts")) &&
+      /srcds_run -game cstrike/.test(read("../src/db/games/counter-strike-source.ts")) &&
+      /"cstrike\/cfg\/server\.cfg"/.test(read("../src/db/games/counter-strike-source.ts")) &&
+      /"counter-strike-source": \{ kind: "a2s"/.test(read("../src/lib/players.ts")) &&
+      /"counter-strike-source": \["srcds_run"\]/.test(read("../src/db/games/index.ts"))
+  );
+  check(
     "the NeoForge template installs from the official Maven and runs the JRE bootstrap",
     /maven\.neoforged\.net\/releases\/net\/neoforged\/neoforge\/maven-metadata\.xml/.test(read("../src/db/games/minecraft-neoforge.ts")) &&
       /--installServer/.test(read("../src/db/games/minecraft-neoforge.ts")) &&
@@ -924,6 +998,2048 @@ console.log("\nH2/H3 auth enforcement wiring");
 }
 
 
+
+
+// ── Age verification (Australian law) + pre-update backup safety net ────
+console.log("\nAge verification & pre-update backup");
+{
+  const fs = require("node:fs") as typeof import("node:fs");
+  const read = (p: string) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
+
+  const ageLib = read("../src/lib/age-verification.ts");
+  check(
+    "the age floor is 16 and cites the Online Safety Amendment Act 2024",
+    /AUSTRALIAN_MINIMUM_ACCOUNT_AGE = 16/.test(ageLib) &&
+      /Online Safety Amendment \(Social Media Minimum Age\) Act 2024/.test(ageLib) &&
+      /export function ageInYears/.test(ageLib) &&
+      /reason: "under-age"/.test(ageLib)
+  );
+
+  const register = read("../src/app/api/auth/register/route.ts");
+  check(
+    "registration enforces the age gate and stores the verified date of birth",
+    /policy\.ageVerificationEnabled/.test(register) &&
+      /checkMinimumAge\(dateOfBirth, policy\.minimumAccountAge\)/.test(register) &&
+      /ADD COLUMN IF NOT EXISTS date_of_birth DATE/.test(register) &&
+      /ADD COLUMN IF NOT EXISTS age_verified_at TIMESTAMP/.test(register) &&
+      /dateOfBirth: verifiedDob/.test(register) &&
+      /ageVerifiedAt: verifiedDob \? new Date\(\) : null/.test(register) &&
+      /status: check\.reason === "under-age" \? 403 : 400/.test(register)
+  );
+
+  const authPolicy = read("../src/lib/auth-policy.ts");
+  check(
+    "the auth policy never accepts a minimum age below the statutory floor",
+    /minimumAccountAge: AUSTRALIAN_MINIMUM_ACCOUNT_AGE/.test(authPolicy) &&
+      /n >= AUSTRALIAN_MINIMUM_ACCOUNT_AGE/.test(authPolicy)
+  );
+
+  const loginForm = read("../src/components/LoginForm.tsx");
+  check(
+    "the register form collects a date of birth and warns about the law",
+    /dateOfBirth: ""/.test(loginForm) &&
+      /type="date"/.test(loginForm) &&
+      /Australian law/.test(loginForm) &&
+      /at least 16/.test(loginForm)
+  );
+
+  const panelSettings = read("../src/lib/panel-settings.ts");
+  check(
+    "the minimum-age setting cannot be saved below 16 and both gates are panel settings",
+    /minimum_account_age: \{ min: 16, max: 120/.test(panelSettings) &&
+      /"update_auto_backup"/.test(panelSettings) &&
+      /"age_verification_enabled"/.test(panelSettings) &&
+      /"minimum_account_age"/.test(panelSettings)
+  );
+
+  const update = read("../src/app/api/servers/[id]/update/route.ts");
+  check(
+    "updates create a backup first and abort when the backup fails",
+    /eq\(settings\.key, "update_auto_backup"\)/.test(update) &&
+      /createServerBackup\(server\.installPath\)/.test(update) &&
+      /backupName = backup\.name/.test(update) &&
+      /Automatic pre-update backup failed/.test(update) &&
+      /const autoBackup = \(autoBackupRow\?\.value \?\? "true"\) !== "false"/.test(update) &&
+      /pre-update backup: \$\{backupName\}/.test(update)
+  );
+}
+
+
+// ── Metrics history, public status links, scheduler notifications ───────
+console.log("\nMetrics history, status share links & scheduler webhooks");
+{
+  const fs = require("node:fs") as typeof import("node:fs");
+  const read = (p: string) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
+
+  const serverMetricsRoute = read("../src/app/api/servers/[id]/metrics/route.ts");
+  check(
+    "the server metrics history route is permission- and owner-checked, with a clamped range",
+    /servers\.view\.metrics/.test(serverMetricsRoute) &&
+      /auth\.role !== "admin" && server\.userId !== auth\.userId/.test(serverMetricsRoute) &&
+      /clampRangeHours/.test(serverMetricsRoute) &&
+      /limit\(MAX_RAW_ROWS\)/.test(serverMetricsRoute)
+  );
+
+  const nodeMetricsRoute = read("../src/app/api/nodes/[id]/metrics/route.ts");
+  check(
+    "the node metrics history route is gated on nodes.view.metrics",
+    /nodes\.view\.metrics/.test(nodeMetricsRoute) && /clampRangeHours/.test(nodeMetricsRoute)
+  );
+
+  const publicStatusRoute = read("../src/app/api/public/status/[token]/route.ts");
+  check(
+    "the public status endpoint stays anonymous and answers 404 for bad tokens",
+    !/getCurrentUser/.test(publicStatusRoute) &&
+      /lookupPublicStatus\(token\)/.test(publicStatusRoute) &&
+      /status: 404/.test(publicStatusRoute) &&
+      /cache-control/.test(publicStatusRoute)
+  );
+
+  const statusLookup = read("../src/lib/status-lookup.ts");
+  check(
+    "the public lookup selects only whitelisted columns (no paths, configs or webhooks)",
+    !/installPath/.test(statusLookup) &&
+      !/discordWebhook/.test(statusLookup) &&
+      !/config: /.test(statusLookup) &&
+      !/variables/.test(statusLookup) &&
+      /isValidStatusToken\(token\)/.test(statusLookup) &&
+      /publicStatusPayload/.test(statusLookup)
+  );
+
+  const statusLinkRoute = read("../src/app/api/servers/[id]/status-link/route.ts");
+  // Both handlers (create + revoke) must independently carry the auth and
+  // permission checks and route through the shared ownership gate, so count
+  // occurrences rather than testing presence once — a regression that
+  // stripped one handler still fails.
+  const countMatches = (s: string, re: RegExp) => (s.match(re) ?? []).length;
+  check(
+    "share-link create AND revoke both require auth, servers.edit and ownership",
+    countMatches(statusLinkRoute, /getCurrentUser\(req\.headers\)/g) >= 2 &&
+      countMatches(statusLinkRoute, /servers\.edit/g) >= 2 &&
+      countMatches(statusLinkRoute, /await loadOwnedServer\(serverId, auth\)/g) >= 2 &&
+      /auth\.role !== "admin" && server\.userId !== auth\.userId/.test(statusLinkRoute) &&
+      /generateStatusToken\(\)/.test(statusLinkRoute) &&
+      /statusToken: null/.test(statusLinkRoute)
+  );
+
+  const statusShare = read("../src/lib/status-share.ts");
+  check(
+    "share tokens are 256 random bits with a strict shape check",
+    /randomBytes\(STATUS_TOKEN_BYTES\)/.test(statusShare) &&
+      /STATUS_TOKEN_BYTES = 32/.test(statusShare) &&
+      /STATUS_TOKEN_RE = \/\^\[a-f0-9\]\{64\}\$\//.test(statusShare)
+  );
+
+  const statusPage = read("../src/app/status/[token]/page.tsx");
+  check(
+    "the public status page is server-rendered, non-indexable and self-refreshing",
+    /lookupPublicStatus/.test(statusPage) &&
+      /robots: \{ index: false/.test(statusPage) &&
+      /httpEquiv="refresh"/.test(statusPage)
+  );
+
+  const scheduler = read("../src/lib/scheduler.ts");
+  check(
+    "scheduled tasks report their outcome to Discord behind a panel setting",
+    /scheduler_discord_notify/.test(scheduler) &&
+      /resolveWebhookUrl\(server\.discordWebhook\)/.test(scheduler) &&
+      /notifyScheduledTask\(url, \{/.test(scheduler) &&
+      /await notifyTaskResult\(task, server, next, ok, detail, serverStatus\)/.test(scheduler)
+  );
+
+  const discord = read("../src/lib/discord.ts");
+  check(
+    "Discord has a scheduled_task event and a tested message builder",
+    /scheduled_task: "⏰ Scheduled Task"/.test(discord) &&
+      /export function buildScheduledTaskMessage/.test(discord) &&
+      /queueDiscordWebhook\(webhookUrl, \{/.test(discord)
+  );
+}
+
+
+// ── Hardening: backup retention, disk guard, crash-loop breaker ─────────
+console.log("\nBackup retention, disk guard & crash-loop breaker");
+{
+  const fs = require("node:fs") as typeof import("node:fs");
+  const read = (p: string) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
+
+  const backup = read("../src/lib/backup.ts");
+  check(
+    "createServerBackup checks free space before tar and prunes after it",
+    /await ensureBackupSpace\(installPath\)/.test(backup) &&
+      /await pruneServerBackups\(installPath\)/.test(backup) &&
+      /BACKUP_NAME\.test\(n\)/.test(backup),
+    "retention must only ever delete archives the panel created"
+  );
+  check(
+    "the space guard needs size plus margin, refusing a torn mid-tar archive",
+    /BACKUP_SPACE_MARGIN_BYTES = 256 \* 1024 \* 1024/.test(backup) &&
+      /const required = neededBytes \+ marginBytes/.test(backup) &&
+      /freeBytes < required/.test(backup)
+  );
+
+  const processRoute = read("../src/app/api/servers/[id]/process/route.ts");
+  check(
+    "auto-restart is gated by the crash-loop breaker and a manual start resets it",
+    /isCrashLooping\(crashHistory\.get\(server\.id\) \?\? \[\], Date\.now\(\)\)/.test(processRoute) &&
+      /windowedCrashes\(crashHistory\.get\(server\.id\) \?\? \[\], crashNow\)/.test(processRoute) &&
+      /crashHistory\.delete\(server\.id\)/.test(processRoute) &&
+      /CRASH_LOOP_MAX/.test(processRoute)
+  );
+
+  const lifecycle = read("../src/lib/server-lifecycle.ts");
+  check(
+    "the breaker trips at 3 crashes inside a 10-minute window",
+    /CRASH_LOOP_MAX = 3/.test(lifecycle) &&
+      /CRASH_LOOP_WINDOW_MS = 10 \* 60_000/.test(lifecycle) &&
+      /export function isCrashLooping/.test(lifecycle)
+  );
+
+  const scheduler = read("../src/lib/scheduler.ts");
+  check(
+    "a scheduled update takes a pre-update backup too (same toggle as the button)",
+    /eq\(settings\.key, "update_auto_backup"\)/.test(scheduler) &&
+      /const preBackup = await createServerBackup\(installPath\)/.test(scheduler) &&
+      /latest version installed\$\{backupNote\}/.test(scheduler)
+  );
+
+  const panelSettings = read("../src/lib/panel-settings.ts");
+  check(
+    "backup retention is a bounded panel setting (0 keeps everything)",
+    /backup_retention_count: \{ min: 0, max: 100/.test(panelSettings) &&
+      /backupRetentionCount: num\("backup_retention_count", 10\)/.test(panelSettings)
+  );
+}
+
+
+// ── Resource-limit watchdog ─────────────────────────────────────────────
+console.log("\nResource-limit watchdog");
+{
+  const fs = require("node:fs") as typeof import("node:fs");
+  const read = (p: string) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
+
+  const metrics = read("../src/lib/process-metrics.ts");
+  check(
+    "limits compare with a strict > and unset/zero limits never breach",
+    /sample\.ramMb > limits\.maxRamMb/.test(metrics) &&
+      /limits\.maxRamMb !== null && limits\.maxRamMb > 0/.test(metrics) &&
+      /limits\.maxCpuPercent !== null && limits\.maxCpuPercent > 0/.test(metrics) &&
+      /LIMIT_STRIKES_ENFORCE = 4/.test(metrics)
+  );
+
+  const processRoute = read("../src/app/api/servers/[id]/process/route.ts");
+  check(
+    "the poll enforces limits: strike, warn at 1, kill+stop at 4, cleared on stop/start",
+    /checkResourceLimits\(/.test(processRoute) &&
+      /strikeDecision\(limitStrikes\.get\(server\.id\) \?\? 0/.test(processRoute) &&
+      // The enforcement branch must actually be gated on the decision — a
+      // disabled gate with the kill still present is the regression to catch.
+      /if \(decision\.enforce\) \{\n {16}const \{ killProcess \}/.test(processRoute) &&
+      /killProcess\(server\.pid\)/.test(processRoute) &&
+      /status: "stopped", pid: null, lastStopped: new Date\(\)/.test(processRoute) &&
+      /limitStrikes\.delete\(server\.id\)/.test(processRoute) &&
+      /maxRamMb: gameServers\.maxRamMb/.test(processRoute) &&
+      /maxCpuPercent: gameServers\.maxCpuPercent/.test(processRoute)
+  );
+
+  const discord = read("../src/lib/discord.ts");
+  check(
+    "Discord has a resource_limit event for watchdog warnings and stops",
+    /resource_limit: "⛔ Resource Limit"/.test(discord) &&
+      /resource_limit: 0xef4444/.test(discord)
+  );
+}
+
+
+// ── Password reset flow ────────────────────────────────────────────────
+console.log("\nPassword reset flow");
+{
+  const fs = require("node:fs") as typeof import("node:fs");
+  const read = (p: string) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
+
+  const lib = read("../src/lib/password-reset.ts");
+  check(
+    "reset tokens are 256 bits, SHA-256 hashed, and expire in an hour",
+    /RESET_TOKEN_BYTES = 32/.test(lib) &&
+      /RESET_TTL_MS = 60 \* 60_000/.test(lib) &&
+      /createHash\("sha256"\)/.test(lib) &&
+      // The generated pair must run the token through the hash — storing the
+      // raw value defeats the whole design.
+      /tokenHash: hashResetToken\(token\)/.test(lib) &&
+      /RESET_TOKEN_RE = \/\^\[a-f0-9\]\{64\}\$\//.test(lib)
+  );
+
+  const forgot = read("../src/app/api/auth/forgot-password/route.ts");
+  check(
+    "forgot-password is throttled and never reveals whether an account exists",
+    /loginRetryAfter\(throttleKey\)/.test(forgot) &&
+      /recordFailedLogin\(throttleKey\)/.test(forgot) &&
+      /status !== "active"/.test(forgot) &&
+      /const GENERIC_OK =/.test(forgot) &&
+      /return NextResponse\.json\(GENERIC_OK\);/.test(forgot) &&
+      !/Username not found|No account|does not exist/.test(forgot)
+  );
+
+  const reset = read("../src/app/api/auth/reset-password/route.ts");
+  check(
+    "reset-password matches the hash, demands unspent + unexpired, and spends before it changes",
+    /hashResetToken\(token\)/.test(reset) &&
+      /isNull\(passwordResets\.usedAt\)/.test(reset) &&
+      /gt\(passwordResets\.expiresAt, new Date\(\)\)/.test(reset) &&
+      /set\(\{ usedAt: new Date\(\) \}\)/.test(reset) &&
+      /MIN_PASSWORD = 8/.test(reset) &&
+      /MAX_PASSWORD = 200/.test(reset)
+  );
+
+  const schema = read("../src/db/schema.ts");
+  const install = read("../src/app/api/install/route.ts");
+  check(
+    "password_resets stores only the token hash (raw token never persisted)",
+    /tokenHash: text\("token_hash"\)\.notNull\(\)\.unique\(\)/.test(schema) &&
+      /token_hash TEXT NOT NULL UNIQUE/.test(install) &&
+      !/token TEXT/.test(install)
+  );
+
+  const loginForm = read("../src/components/LoginForm.tsx");
+  check(
+    "the login form wires forgot + reset, reading the one-time token from the URL",
+    /api\/auth\/forgot-password/.test(loginForm) &&
+      /api\/auth\/reset-password/.test(loginForm) &&
+      /URLSearchParams\(window\.location\.search\)/.test(loginForm) &&
+      /params\.get\("reset"\)/.test(loginForm) &&
+      /history\.replaceState/.test(loginForm)
+  );
+}
+
+
+// ── Host threshold alerts ──────────────────────────────────────────────
+console.log("\nHost threshold alerts");
+{
+  const fs = require("node:fs") as typeof import("node:fs");
+  const read = (p: string) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
+
+  const lib = read("../src/lib/threshold-alerts.ts");
+  check(
+    "thresholds use strict >, off-at-zero, null-never-breaches, one alert per episode",
+    /reading\.cpuPercent > cfg\.cpuPercent/.test(lib) &&
+      /cfg\.cpuPercent > 0 && reading\.cpuPercent !== null/.test(lib) &&
+      /const fire = !previous\.alerted && strikes >= sustained/.test(lib) &&
+      /DEFAULT_ALERT_SUSTAINED = 3/.test(lib)
+  );
+
+  const scheduler = read("../src/lib/scheduler.ts");
+  check(
+    "the scheduler tick runs the alert check, throttled to once a minute, once per episode",
+    /await runThresholdAlerts\(\)/.test(scheduler) &&
+      /ALERT_INTERVAL_MS = 60_000/.test(scheduler) &&
+      /if \(now - lastAlertCheck < ALERT_INTERVAL_MS\) return/.test(scheduler) &&
+      /alertDecision\(alertEpisode, breaches\.length > 0, cfg\.sustained\)/.test(scheduler) &&
+      /if \(!decision\.fire\) return/.test(scheduler) &&
+      /event: "threshold_alert"/.test(scheduler)
+  );
+
+  const discord = read("../src/lib/discord.ts");
+  check(
+    "Discord has a distinct amber threshold_alert event",
+    /threshold_alert: "⚠️ Threshold Alert"/.test(discord) &&
+      /threshold_alert: 0xf59e0b/.test(discord)
+  );
+
+  const panelSettings = read("../src/lib/panel-settings.ts");
+  check(
+    "alert thresholds are bounded panel settings, defaulting to 90 and off-at-zero",
+    /alert_cpu_percent: \{ min: 0, max: 1000/.test(panelSettings) &&
+      /alert_ram_percent: \{ min: 0, max: 100/.test(panelSettings) &&
+      /alert_disk_percent: \{ min: 0, max: 100/.test(panelSettings) &&
+      /alertCpuPercent: num\("alert_cpu_percent", 90\)/.test(panelSettings)
+  );
+}
+
+
+// ── Source modding (Metamod / SourceMod) ───────────────────────────────
+console.log("\nSource modding (Metamod / SourceMod)");
+{
+  const fs = require("node:fs") as typeof import("node:fs");
+  const read = (p: string) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
+
+  const mods = read("../src/db/games/source-mods.ts");
+  check(
+    "the shared block pulls latest stable from AlliedModders and writes the loader vdf",
+    /mms\.alliedmods\.net\/mmsdrop\/\$MMS_BRANCH\/mmsource-latest-linux/.test(mods) &&
+      /sm\.alliedmods\.net\/smdrop\/\$SM_BRANCH\/sourcemod-latest-linux/.test(mods) &&
+      /\[ -n "\$MMS_FILE" \] \|\| \{ echo/.test(mods) &&
+      /addons\/metamod\.vdf/.test(mods) &&
+      /addons\/metamod\/bin\/server/.test(mods)
+  );
+
+  const slugs = ["tf2", "counter-strike-source", "gmod", "l4d2"] as const;
+  const dirs: Record<string, string> = { tf2: "tf", "counter-strike-source": "cstrike", gmod: "garrysmod", l4d2: "left4dead2" };
+  check(
+    "all four Source templates offer MOD_PLATFORM and target their own game dir",
+    slugs.every((slug) => {
+      const t = read(`../src/db/games/${slug === "counter-strike-source" ? "counter-strike-source" : slug}.ts`);
+      return /sourceModVariables\(\)/.test(t) &&
+        new RegExp(`sourceModInstallBlock\\("${dirs[slug]}"\\)`).test(t);
+    })
+  );
+
+  const harness = read("../scripts/verify-installers.ts");
+  check(
+    "the installer harness executes mod installs (overrides + artifact assertions)",
+    /MOD_PLATFORM_OVERRIDES/.test(harness) &&
+      /MOD_ARTIFACT_CHECKS/.test(harness) &&
+      /\*mms\.alliedmods\.net\*/.test(harness) &&
+      /\*sm\.alliedmods\.net\*/.test(harness)
+  );
+
+  const upstreams = read("../scripts/check-upstreams.sh");
+  check(
+    "check-upstreams follows the full latest-filename-then-download flow",
+    /mmsource-latest-linux/.test(upstreams) && /sourcemod-latest-linux/.test(upstreams)
+  );
+}
+
+
+// ── Discord OAuth sign-in ──────────────────────────────────────────────
+console.log("\nDiscord OAuth sign-in");
+{
+  const fs = require("node:fs") as typeof import("node:fs");
+  const read = (p: string) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
+
+  const oauth = read("../src/lib/discord-oauth.ts");
+  check(
+    "the OAuth decision matrix refuses 2FA bypass and under-age account creation",
+    /if \(s\.twoFactorEnabled\) return "2fa"/.test(oauth) &&
+      /if \(s\.ageVerificationEnabled\) return "age_gate"/.test(oauth) &&
+      /if \(!s\.registrationEnabled\) return "no_register"/.test(oauth)
+  );
+
+  const callback = read("../src/app/api/auth/discord/callback/route.ts");
+  check(
+    "the callback verifies state, demands a verified email, and routes through the decision matrix",
+    /state !== cookieState/.test(callback) &&
+      /me\.verified !== true/.test(callback) &&
+      /oauthLoginDecision\(\{/.test(callback) &&
+      /if \(decision === "age_gate"\) return outcome\(req, "age_gate"\)/.test(callback) &&
+      /if \(decision === "2fa"\) return outcome\(req, "2fa"\)/.test(callback)
+  );
+
+  const authorize = read("../src/app/api/auth/discord/route.ts");
+  check(
+    "the authorize endpoint uses a random state bound to a short-lived cookie",
+    /randomBytes\(16\)\.toString\("hex"\)/.test(authorize) &&
+      /OAUTH_STATE_COOKIE, state, \{/.test(authorize) &&
+      /scope.*identify email|scope", "identify email"/.test(authorize) &&
+      /maxAge: 600/.test(authorize)
+  );
+
+  const settingsRoute = read("../src/app/api/settings/discord/route.ts");
+  check(
+    "the OAuth secret is write-only: masked in GET, validated on save",
+    /oauthConfigured: isOauthConfigured\(s\)/.test(settingsRoute) &&
+      !/oauthClientSecret: s\.oauthClientSecret/.test(settingsRoute) &&
+      /OAuth client ID must be a numeric Discord application ID/.test(settingsRoute)
+  );
+
+  const siteSettings = read("../src/app/api/site-settings/route.ts");
+  check(
+    "the public site-settings allowlist cannot serve the OAuth secret",
+    !/discord_oauth_client_secret/.test(siteSettings) &&
+      /PUBLIC_KEYS/.test(siteSettings)
+  );
+}
+
+
+// ── Emails, bulk actions & player join/leave alerts ───────────────────
+console.log("\nEmails, bulk actions & player alerts");
+{
+  const fs = require("node:fs") as typeof import("node:fs");
+  const read = (p: string) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
+
+  const register = read("../src/app/api/auth/register/route.ts");
+  check(
+    "registration sends a best-effort welcome email that cannot fail the signup",
+    /sendWelcomeEmail\(mail, uname\)/.test(register) &&
+      /void sendWelcomeEmail\(mail, uname\)\.catch\(\(\) => \{\}\)/.test(register)
+  );
+
+  const processRoute = read("../src/app/api/servers/[id]/process/route.ts");
+  check(
+    "crashes email the owner and roster diffs only run on successful probes",
+    /ownerEmail: users\.email/.test(processRoute) &&
+      /sendServerCrashEmail\(server\.ownerEmail/.test(processRoute) &&
+      /if \(probe\.ok\) \{/.test(processRoute) &&
+      /diffRosters\(lastRoster\.get\(server\.id\), current\)/.test(processRoute) &&
+      /describeRosterChange\(server\.name, change\)/.test(processRoute) &&
+      /server\.discordNotifyPlayers !== false/.test(processRoute) &&
+      /lastRoster\.delete\(server\.id\)/.test(processRoute)
+  );
+
+  const roster = read("../src/lib/roster-diff.ts");
+  check(
+    "the first sighting is a silent baseline, not an announcement",
+    /if \(previous === undefined\) return \{ joined: \[\], left: \[\] \}/.test(roster) &&
+      /MAX_LISTED_NAMES = 10/.test(roster)
+  );
+
+  const panel = read("../src/components/panels/ServersPanel.tsx");
+  check(
+    "bulk actions cover restart and backup as well as start/stop/install",
+    /bulkAction\("restart"\)/.test(panel) &&
+      /bulkAction\("backup"\)/.test(panel) &&
+      /action === "backup"/.test(panel)
+  );
+
+  const lifecycle = read("../src/lib/server-lifecycle.ts");
+  const install = read("../src/app/api/install/route.ts");
+  check(
+    "the players-notification toggle is patchable, cloneable and created by default-on",
+    /"discordNotifyPlayers"/.test(lifecycle) &&
+      /discord_notify_players BOOLEAN DEFAULT TRUE/.test(install)
+  );
+}
+
+
+// ── Public board, 2FA recovery codes, disk metrics ─────────────────────
+console.log("\nPublic board, recovery codes & disk metrics");
+{
+  const fs = require("node:fs") as typeof import("node:fs");
+  const read = (p: string) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
+
+  const lookup = read("../src/lib/status-lookup.ts");
+  check(
+    "the public board lists only opted-in servers, capped, with whitelisted payloads",
+    /eq\(gameServers\.statusPublic, true\)/.test(lookup) &&
+      /limit\(MAX_PUBLIC_LIST_SERVERS\)/.test(lookup) &&
+      /MAX_PUBLIC_LIST_SERVERS = 24/.test(lookup) &&
+      /publicStatusPayload\(\{/.test(lookup) &&
+      !/installPath/.test(lookup)
+  );
+
+  const listRoute = read("../src/app/api/public/status/route.ts");
+  check(
+    "the public list endpoint stays anonymous and never errors loudly",
+    !/getCurrentUser/.test(listRoute) &&
+      /lookupPublicList\(\)/.test(listRoute) &&
+      /cache-control": "no-store/.test(listRoute)
+  );
+
+  const recovery = read("../src/lib/recovery-codes.ts");
+  check(
+    "recovery codes are random, hash-only and single-use",
+    /randomBytes\(10\)/.test(recovery) &&
+      /createHash\("sha256"\)/.test(recovery) &&
+      /remaining = storedHashes\.filter\(\(_, i\) => i !== idx\)/.test(recovery) &&
+      /if \(seen\.has\(raw\)\) continue/.test(recovery)
+  );
+
+  const verify2fa = read("../src/app/api/auth/2fa/verify/route.ts");
+  const login = read("../src/app/api/auth/login/route.ts");
+  check(
+    "enabling 2FA mints codes once; login consumes them single-use",
+    /generateRecoveryCodes\(\)/.test(verify2fa) &&
+      /twoFactorRecovery: JSON\.stringify\(hashes\)/.test(verify2fa) &&
+      /recoveryCodes: codes/.test(verify2fa) &&
+      /consumeRecoveryCode\(stored, twoFactorCode\)/.test(login) &&
+      /twoFactorRecovery: JSON\.stringify\(result\.remaining\)/.test(login) &&
+      /isLikelyRecoveryCode\(twoFactorCode\)/.test(login)
+  );
+
+  const metrics = read("../src/app/api/servers/[id]/metrics/route.ts");
+  check(
+    "the metrics route adds cached folder size and filesystem usage",
+    /estimateDirBytes\(server\.installPath/.test(metrics) &&
+      /DIR_SIZE_CACHE_MS = 5 \* 60_000/.test(metrics) &&
+      /statfsAsync\(server\.installPath\)/.test(metrics)
+  );
+}
+
+
+// ── Anonymous-endpoint throttle ────────────────────────────────────────
+console.log("\nAnonymous endpoint throttle");
+{
+  const fs = require("node:fs") as typeof import("node:fs");
+  const read = (p: string) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
+
+  const lib = read("../src/lib/public-throttle.ts");
+  check(
+    "the throttle is a sliding window that does not extend on blocked hits",
+    /PUBLIC_THROTTLE_MAX = 30/.test(lib) &&
+      /PUBLIC_THROTTLE_WINDOW_MS = 60_000/.test(lib) &&
+      /if \(recent\.length >= max\) \{/.test(lib) &&
+      /recent\.push\(now\)/.test(lib)
+  );
+
+  const list = read("../src/app/api/public/status/route.ts");
+  const token = read("../src/app/api/public/status/[token]/route.ts");
+  check(
+    "both public JSON endpoints refuse with 429 before probing",
+    /publicThrottleAllowed\(`public-status:\$\{clientIp\(req\)\}`\)/.test(list) &&
+      /status: 429/.test(list) &&
+      /publicThrottleAllowed\(`public-status:\$\{clientIp\(req\)\}`\)/.test(token) &&
+      /status: 429/.test(token)
+  );
+
+  const page = read("../src/app/status/page.tsx");
+  const pageToken = read("../src/app/status/[token]/page.tsx");
+  check(
+    "the public pages throttle BEFORE probing the fleet",
+    /const servers = throttled \? \[\] : await lookupPublicList\(\)/.test(page) &&
+      /const status = throttled \? null : await lookupPublicStatus\(token\)/.test(pageToken) &&
+      /publicThrottleAllowed\(`public-status:\$\{ip\}`\)/.test(page)
+  );
+}
+
+
+// ── Remote node agent ──────────────────────────────────────────────────
+console.log("\nRemote node agent");
+{
+  const fs = require("node:fs") as typeof import("node:fs");
+  const read = (p: string) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
+
+  const agent = read("../agent/gsm-agent.mjs");
+  check(
+    "the agent authenticates before routing and compares keys constant-time",
+    /if \(req\.method !== "POST"\) return send\(res, 405/.test(agent) &&
+      /if \(!apiKey \|\| typeof presented !== "string" \|\| !constantTimeMatch\(apiKey, presented\)\)/.test(agent) &&
+      /timingSafeEqual\(bufA, bufB\)/.test(agent) &&
+      /size > MAX_BODY_BYTES/.test(agent)
+  );
+  check(
+    "the agent re-roots every installPath against its allowed root",
+    /const full = resolve\(base, candidate\)/.test(agent) &&
+      /if \(full !== base && !full\.startsWith\(base \+ sep\)\) return null/.test(agent) &&
+      /if \(!dir\) return send\(res, 400, \{ error: "installPath outside the allowed root" \}\)/.test(agent)
+  );
+
+  const client = read("../src/lib/node-client.ts");
+  check(
+    "the RPC client sends the key header, times out, and maps failures",
+    /"x-api-key": node\.apiKey/.test(client) &&
+      /AbortSignal\.timeout\(timeoutMs\)/.test(client) &&
+      /throw new NodeRpcError\(\s*\n?\s*aborted/.test(client) &&
+      /if \(!node\.apiUrl \|\| !node\.apiKey\)/.test(client)
+  );
+
+  const processRoute = read("../src/app/api/servers/[id]/process/route.ts");
+  check(
+    "remote servers are driven through the agent, never spawned locally",
+    /return handleRemoteAction\(req, server, action\)/.test(processRoute) &&
+      /nodeApiUrl: nodes\.apiUrl/.test(processRoute) &&
+      /Node agent has no agent URL\/key configured|no agent URL\/key configured/.test(processRoute)
+  );
+
+  const scheduler = read("../src/lib/scheduler.ts");
+  check(
+    "scheduled restarts run remotely via the agent; file tasks report instead of skipping silently",
+    /remoteProcessStart\(node, remotePath\)/.test(scheduler) &&
+      /needs the node agent's file APIs and is not supported remotely yet/.test(scheduler) &&
+      /await notifyTaskResult\(task, server, next, ok, detail, serverStatus\);\n    return;/.test(scheduler)
+  );
+
+  const lifecycle = read("../src/lib/server-lifecycle.ts");
+  check(
+    "stale remote nodes flip offline; never-seen nodes do not",
+    /NODE_STALE_MS = 3 \* 60_000/.test(lifecycle) &&
+      /if \(lastHeartbeat === null\) return false/.test(lifecycle) &&
+      /markStaleNodesOffline/.test(read("../src/lib/scheduler.ts"))
+  );
+
+  const testRoute = read("../src/app/api/nodes/[id]/test/route.ts");
+  check(
+    "the connection test is permission-gated and pings the agent",
+    /nodes\.edit/.test(testRoute) && /pingNodeAgent\(/.test(testRoute)
+  );
+}
+
+
+// ── Remote file ops & backups ──────────────────────────────────────────
+console.log("\nRemote file ops & backups");
+{
+  const fs = require("node:fs") as typeof import("node:fs");
+  const read = (p: string) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
+
+  const agent = read("../agent/gsm-agent.mjs");
+  check(
+    "agent fs ops re-root every path, cap reads, and refuse to delete the root",
+    /const full = containedPath\(root, rel\);\n  if \(!full\) return \{ error: "Path outside the allowed root"/.test(agent) &&
+      /if \(full === resolve\(root\)\) return \{ error: "Refusing to delete the server root"/.test(agent) &&
+      /TEXT_READ_MAX_BYTES = 2 \* 1024 \* 1024/.test(agent) &&
+      /BIN_READ_MAX_BYTES = 20 \* 1024 \* 1024/.test(agent)
+  );
+  check(
+    "agent backups validate the archive name twice and prune with retention",
+    /BACKUP_NAME_RE = \/\^backup-\[A-Za-z0-9\._-\]\+\\\.tar\\\.gz\$\//.test(agent) &&
+      /if \(containedPath\(dir, name\) !== file\) return \{ error: "Invalid backup name"/.test(agent) &&
+      /for \(const f of files\.slice\(keep\)\) await rm/.test(agent) &&
+      /--exclude=gsm-backups/.test(agent)
+  );
+
+  const backupRoute = read("../src/app/api/servers/[id]/backup/route.ts");
+  check(
+    "the backup route routes list/create/restore through the agent for remote servers",
+    /remoteBackupList\(\{ apiUrl: server\.nodeApiUrl, apiKey: server\.nodeApiKey \}/.test(backupRoute) &&
+      /remoteBackupCreate\(node, server\.installPath\)/.test(backupRoute) &&
+      /remoteBackupRestore\(node, server\.installPath, backupName\)/.test(backupRoute) &&
+      /Stop the server before restoring/.test(backupRoute)
+  );
+
+  const filesRoute = read("../src/app/api/servers/[id]/files/route.ts");
+  check(
+    "the files route runs list/read/download/write/mkdir/delete/rename on the agent",
+    /remoteFs\(remoteNode, op, \{ path: reqPath \}\)/.test(filesRoute) &&
+      /op: "readbin"/.test(filesRoute) === false &&
+      /"readbin"/.test(filesRoute) &&
+      /await remoteFs\(remoteNode, "write", \{ path: reqPath, content: content \|\| "" \}\)/.test(filesRoute) &&
+      /not supported on remote nodes yet/.test(filesRoute)
+  );
+}
+
+
+// ── One-click agent deploy over SSH ────────────────────────────────────
+console.log("\nAgent deploy over SSH");
+{
+  const fs = require("node:fs") as typeof import("node:fs");
+  const read = (p: string) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
+
+  const deploy = read("../src/lib/node-deploy.ts");
+  check(
+    "deploy quoting resists injection and the key cannot break the heredoc",
+    /return `'\$\{value\.replace\(\/\'\/g, `'\\\\\\''\)\}'`/.test(deploy) === false &&
+      /value\.replace\(\/\'\/g/.test(deploy) &&
+      /\/\^\[A-Za-z0-9_-\]\{8,128\}\$\//.test(deploy) &&
+      /throw new Error\("Agent key must be 8-128/.test(deploy)
+  );
+  check(
+    "password auth stays out of argv (sshpass -e + SSHPASS env)",
+    /return \{ cmd: "sshpass", args: \["-e", "ssh", "-o", "BatchMode=no", \.\.\.opts\], env: \{ SSHPASS: auth\.password \} \}/.test(deploy) &&
+      /env: \{ SSHPASS: auth\.password \}/.test(deploy)
+  );
+
+  const route = read("../src/app/api/nodes/[id]/deploy/route.ts");
+  check(
+    "the deploy route is permission-gated, preflighted, and verifies the agent afterwards",
+    /nodes\.edit/.test(route) &&
+      /deployPreflight\(node\)/.test(route) &&
+      /if \(node\.isLocal\)/.test(route) &&
+      /pingNodeAgent\(\{ apiUrl, apiKey \}\)/.test(route) &&
+      /randomBytes\(24\)\.toString\("hex"\)/.test(route)
+  );
+}
+
+
+// ── Embed snippets & server event history ──────────────────────────────
+console.log("\nEmbed snippets & event history");
+{
+  const fs = require("node:fs") as typeof import("node:fs");
+  const read = (p: string) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
+
+  const publicRoute = read("../src/app/api/public/status/route.ts");
+  check(
+    "the public JSON endpoint opens CORS for embed widgets (on every response)",
+    (publicRoute.match(/access-control-allow-origin": "\*/g) ?? []).length >= 2
+  );
+
+  const share = read("../src/lib/status-share.ts");
+  check(
+    "embed snippets trim the origin and the widget escapes names",
+    /origin\.replace\(\/\\\/\+\$\/, ""\)/.test(share) &&
+      /replace\(\/\[<>&\]\/g, ""\)/.test(share) &&
+      /export function buildEmbedIframe/.test(share) &&
+      /export function buildEmbedWidget/.test(share)
+  );
+
+  const events = read("../src/lib/server-events.ts");
+  check(
+    "event history is recorded best-effort and pruned per server",
+    /SERVER_EVENT_RETENTION_DAYS = 14/.test(events) &&
+      /await db\.insert\(serverEvents\)\.values\(\{ serverId, kind, detail: detail \?\? null \}\)/.test(events) &&
+      /and\(eq\(serverEvents\.serverId, serverId\), lt\(serverEvents\.createdAt, cutoff\)\)/.test(events) &&
+      /catch \{\n    \/\* history is best-effort \*\/\n  \}/.test(events)
+  );
+
+  const processRoute = read("../src/app/api/servers/[id]/process/route.ts");
+  check(
+    "crashes, watchdog stops and auto-restarts all write the event history",
+    /recordServerEvent\(server\.id, "crashed"\)/.test(processRoute) &&
+      /recordServerEvent\(server\.id, "watchdog-stop", violations\.join\("; "\)\)/.test(processRoute) &&
+      /recordServerEvent\(server\.id, "auto-restarted", `pid \$\{pid\}`\)/.test(processRoute) &&
+      /recordServerEvent\(server\.id, "crashed", "remote node"\)/.test(processRoute)
+  );
+
+  const metricsRoute = read("../src/app/api/servers/[id]/metrics/route.ts");
+  const install = read("../src/app/api/install/route.ts");
+  check(
+    "the Metrics view serves the history and fresh installs create the table",
+    /recentServerEvents\(serverId, 8\)/.test(metricsRoute) &&
+      /CREATE TABLE IF NOT EXISTS server_events/.test(install)
+  );
+}
+
+
+// ── Server migration between nodes ─────────────────────────────────────
+console.log("\nServer migration");
+{
+  const fs = require("node:fs") as typeof import("node:fs");
+  const read = (p: string) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
+
+  const agent = read("../agent/gsm-agent.mjs");
+  check(
+    "agent migration endpoints validate paths and names before touching disk",
+    /MAX_BODY_BYTES = 32 \* 1024 \* 1024/.test(agent) &&
+      /if \(containedPath\(dir, name\) !== file\) return \{ error: "Invalid backup name", code: 400 \};\n  const st = await stat\(file\);/.test(agent) &&
+      /MIGRATION_SLICE_MAX = 8 \* 1024 \* 1024/.test(agent) &&
+      /importStaging\.delete\(installPath\)/.test(agent) &&
+      /await rm\(staged, \{ force: true \}\)/.test(agent)
+  );
+
+  const mig = read("../src/lib/migration.ts");
+  check(
+    "migration computes safe destinations and only moves stopped servers",
+    /if \(status === "running"\) return "Stop the server before migrating it\."/.test(mig) &&
+      /if \(status === "installing"\)/.test(mig) &&
+      /\$\{base\}\/\$\{slugify\(gameSlug \|\| "game"\)\}\/\$\{slugify\(serverName\)\}/.test(mig) &&
+      /MIGRATION_CHUNK_BYTES = 8 \* 1024 \* 1024/.test(mig) &&
+      /--exclude=gsm-backups/.test(mig)
+  );
+
+  const route = read("../src/app/api/servers/[id]/migrate/route.ts");
+  check(
+    "the migrate route is permission-gated, blocks running servers, and reverts on failure",
+    /servers\.edit/.test(route) &&
+      /migrationBlockReason\(server\.status\)/.test(route) &&
+      /server\.nodeId === destNodeId/.test(route) &&
+      /status: "installing"/.test(route) &&
+      /\.set\(\{ status: "stopped", updatedAt: new Date\(\) \}\)/.test(route) &&
+      /if \(archivePath\) await cleanupLocalArchive\(archivePath\)/.test(route)
+  );
+}
+
+// ── PRESETS: one-click setups must not smuggle env vars ─────────────────────
+console.log("\nPRESETS server preset validation and apply-time filtering");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  // Runtime: the apply-time merge is the only place preset data reaches a
+  // server's environment, and it must whitelist declared template variables.
+  const merged = mergePresetVariables(
+    { MAX_PLAYERS: "16" },
+    { MAX_PLAYERS: "24", LD_PRELOAD: "/tmp/evil.so" },
+    new Set(["MAX_PLAYERS"])
+  );
+  check(
+    "preset apply drops undeclared keys (no env smuggling)",
+    merged.MAX_PLAYERS === "24" && !("LD_PRELOAD" in merged)
+  );
+
+  check(
+    "preset validation rejects oversized and malformed payloads",
+    validatePresetInput({ name: "", gameId: 1 }).ok === false &&
+      validatePresetInput({ name: "a".repeat(200), gameId: 1 }).ok === false &&
+      validatePresetInput({ name: "x", gameId: 0 }).ok === false &&
+      validatePresetInput({ name: "x", gameId: 1, variables: { bad_key: "1" } }).ok === false
+  );
+
+  const route = read("../src/app/api/presets/route.ts");
+  check(
+    "preset list/create is authenticated and create needs servers.create",
+    /getCurrentUser\(req\.headers\)/.test(route) &&
+      /if \(!\(await hasPermission\(auth\.userId, "servers\.create"\)\)\)/.test(route) &&
+      /validatePresetInput\(body\)/.test(route) &&
+      /limit\(200\)/.test(route)
+  );
+
+  const del = read("../src/app/api/presets/[id]/route.ts");
+  check(
+    "preset delete requires creator or admin",
+    /getCurrentUser\(req\.headers\)/.test(del) &&
+      /auth\.role !== "admin" && preset\.userId !== auth\.userId/.test(del) &&
+      /Number\.isInteger\(presetId\)/.test(del)
+  );
+}
+
+// ── NODE HEALTH: smart picker must not leak or mislead ──────────────────────
+console.log("\nNODEH smart node picker scoring and metrics permission");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const NOW = 1_700_000_000_000;
+  const fresh = { cpuPercent: 10, ramUsedMb: 2048, ramTotalMb: 16384, diskUsedMb: 100_000, diskTotalMb: 500_000, recordedAt: NOW - 60_000 };
+  const mk = (over: Partial<NodeCandidate> = {}): NodeCandidate => ({ id: 1, online: true, load: fresh, serverCount: 1, ...over });
+
+  check(
+    "offline nodes are never eligible and full disks disqualify",
+    scoreNode(mk({ online: false }), NOW) === Infinity &&
+      scoreNode(mk({ load: { ...fresh, diskTotalMb: 10_000, diskUsedMb: 9_999 } }), NOW) === Infinity
+  );
+
+  check(
+    "recommendation skips offline/disqualified nodes",
+    recommendNodeId([mk({ id: 1, online: false }), mk({ id: 2 })], NOW) === 2
+  );
+
+  const route = read("../src/app/api/nodes/route.ts");
+  check(
+    "node list embeds heartbeat metrics only for nodes.view.metrics holders",
+    /hasPermission\(auth\.userId, "nodes\.view\.metrics"\)/.test(route) &&
+      /if \(canSeeMetrics\) try/.test(route) &&
+      /metrics: latestMetrics\[node\.id\] \?\? null/.test(route)
+  );
+}
+
+// ── NOTES: per-server operator notes ────────────────────────────────────────
+console.log("\nNOTES server notes validation and allowlist");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  check(
+    "notes are trimmed, capped, and whitespace clears them",
+    normalizeServerNotes(null).value === null &&
+      normalizeServerNotes("   ").value === null &&
+      normalizeServerNotes("  hi  ").value === "hi" &&
+      normalizeServerNotes("a".repeat(2000)).ok === true &&
+      normalizeServerNotes("a".repeat(2001)).ok === false &&
+      normalizeServerNotes(42).ok === false
+  );
+
+  const patchFields = SERVER_PATCH_FIELDS as readonly string[];
+  check(
+    "notes and tags are whitelisted but identity/path/token fields stay locked",
+    patchFields.includes("notes") &&
+      patchFields.includes("tags") &&
+      !patchFields.includes("installPath") &&
+      !patchFields.includes("userId") &&
+      !patchFields.includes("nodeId") &&
+      !patchFields.includes("statusToken")
+  );
+
+  const patchRoute = read("../src/app/api/servers/[id]/route.ts");
+  check(
+    "PATCH validates notes through the normaliser under servers.edit",
+    /hasPermission\(auth\.userId, "servers\.edit"\)/.test(patchRoute) &&
+      /normalizeServerNotes\(updates\.notes\)/.test(patchRoute) &&
+      /ADD COLUMN IF NOT EXISTS notes TEXT/.test(patchRoute)
+  );
+
+  const install = read("../src/app/api/install/route.ts");
+  check(
+    "fresh installs create the notes column",
+    /notes TEXT,/.test(install)
+  );
+}
+
+// ── TAGS: server grouping labels ────────────────────────────────────────────
+console.log("\nTAGS server tag validation and plumbing");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  check(
+    "tags are normalised safely and hostile input is rejected",
+    normalizeServerTags(["  EU ", "eu"]).value?.join(",") === "eu" &&
+      normalizeServerTags("../etc").ok === false &&
+      normalizeServerTags(["a b"]).ok === false &&
+      normalizeServerTags(Array.from({ length: 9 }, (_, i) => `t${i}`)).ok === false &&
+      normalizeServerTags("tf2").ok === false
+  );
+
+  const patchRoute = read("../src/app/api/servers/[id]/route.ts");
+  check(
+    "PATCH validates tags through the normaliser under servers.edit",
+    /hasPermission\(auth\.userId, "servers\.edit"\)/.test(patchRoute) &&
+      /normalizeServerTags\(updates\.tags\)/.test(patchRoute) &&
+      /ADD COLUMN IF NOT EXISTS tags JSONB/.test(patchRoute)
+  );
+
+  const list = read("../src/app/api/servers/route.ts");
+  const install = read("../src/app/api/install/route.ts");
+  check(
+    "the server list serves tags and fresh installs create the column",
+    /tags: gameServers\.tags/.test(list) &&
+      /ADD COLUMN IF NOT EXISTS tags JSONB/.test(list) &&
+      /tags JSONB,/.test(install)
+  );
+}
+
+// ── FEED: fleet-wide incident feed ──────────────────────────────────────────
+console.log("\nFEED fleet incident feed scoping and limits");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  check(
+    "the hours window is clamped to 1..168 with a safe default",
+    clampFeedHours(null) === 24 &&
+      clampFeedHours("0") === 1 &&
+      clampFeedHours("99999") === FEED_MAX_HOURS &&
+      clampFeedHours("junk") === 24
+  );
+
+  const route = read("../src/app/api/servers/events/route.ts");
+  check(
+    "the feed is permission-gated and scoped to the caller's own servers",
+    /hasPermission\(auth\.userId, "servers\.view"\)/.test(route) &&
+      /auth\.role !== "admin" \? eq\(gameServers\.userId, auth\.userId\) : undefined/.test(route)
+  );
+
+  check(
+    "the feed query is clamped and capped at 200 rows",
+    /clampFeedHours\(req\.nextUrl\.searchParams\.get\("hours"\)\)/.test(route) &&
+      /\.limit\(FEED_MAX_EVENTS\)/.test(route)
+  );
+}
+
+// ── BATCH: batch process operations ─────────────────────────────────────────
+console.log("\nBATCH batch start/stop/restart validation and scoping");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  check(
+    "batch input is capped, deduped, and rejects hostile ids",
+    validateBatchRequest({ action: "restart", serverIds: [1, 1, 2] }).value?.serverIds.join(",") === "1,2" &&
+      validateBatchRequest({ action: "delete", serverIds: [1] }).ok === false &&
+      validateBatchRequest({ action: "start", serverIds: [0] }).ok === false &&
+      validateBatchRequest({ action: "start", serverIds: Array.from({ length: BATCH_MAX_SIZE + 1 }, (_, i) => i + 1) }).ok === false
+  );
+
+  check(
+    "non-admin batches never dispatch another user's server",
+    (() => {
+      const rows = [
+        { id: 1, name: "mine", userId: 10 },
+        { id: 2, name: "theirs", userId: 99 },
+      ];
+      const { dispatchable, skippedIds } = partitionBatch(rows, [1, 2], false, 10);
+      return dispatchable.map((r) => r.id).join(",") === "1" && skippedIds.join(",") === "2";
+    })()
+  );
+
+  const route = read("../src/app/api/servers/batch/route.ts");
+  check(
+    "the batch route delegates to the real process handler with permission pre-check and ownership partition",
+    /from "\.\.\/\[id\]\/process\/route"/.test(route) &&
+      /if \(!canAct\)/.test(route) &&
+      /hasPermission\(auth\.userId, "servers\.start_stop"\)/.test(route) &&
+      /partitionBatch\(\s*rows,\s*serverIds,\s*auth\.role === "admin",\s*auth\.userId\s*\)/.test(route) &&
+      /validateBatchRequest\(body\)/.test(route)
+  );
+
+  check(
+    "batches leave an audit trail",
+    /action: "server\.batch"/.test(route) &&
+      /insert\(auditLog\)/.test(route)
+  );
+}
+
+// ── PRESET IMPORT: shared setups ────────────────────────────────────────────
+console.log("\nPIMPORT preset import validation and scoping");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  check(
+    "imports are capped, per-item validated, and one bad item fails the batch",
+    validatePresetImport({ presets: Array.from({ length: 21 }, (_, i) => ({ name: `p${i}`, gameId: 1 })) }).ok === false &&
+      validatePresetImport({ presets: [{ name: "ok", gameId: 1 }, { name: "", gameId: 1 }] }).ok === false &&
+      validatePresetImport({ presets: [{ name: "x", gameId: 1, variables: { bad_key: "1" } }] }).ok === false &&
+      // LD_PRELOAD-shaped keys pass validation but are dropped at apply time.
+      mergePresetVariables({}, { LD_PRELOAD: "evil" }, new Set(["MAX_PLAYERS"])).LD_PRELOAD === undefined
+  );
+
+  const route = read("../src/app/api/presets/import/route.ts");
+  check(
+    "the import route needs servers.create, validates payloads, and drops unknown games",
+    /if \(!\(await hasPermission\(auth\.userId, "servers\.create"\)\)\)/.test(route) &&
+      /validatePresetImport\(body\)/.test(route) &&
+      /knownGames\.has\(p\.gameId\)/.test(route) &&
+      /userId: auth\.userId/.test(route)
+  );
+}
+
+// ── DAILY RESTART: one-click scheduled restarts ─────────────────────────────
+console.log("\nDAILY one-click daily restart scoping and shape");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  check(
+    "the toggle only claims strict daily crons, never custom schedules",
+    parseDailyRestartCron(buildDailyRestartCron(4, 0))?.hour === 4 &&
+      parseDailyRestartCron("0 4 * * 1") === null &&
+      parseDailyRestartCron("*/30 * * * *") === null &&
+      buildDailyRestartCron(24, 0) === null
+  );
+
+  const route = read("../src/app/api/servers/[id]/daily-restart/route.ts");
+  const ownershipHits = (route.match(/auth\.role !== "admin" && server\.userId !== auth\.userId/g) ?? []).length;
+  check(
+    "GET and POST both enforce ownership and disable by flag, never delete",
+    ownershipHits >= 2 &&
+      /hasPermission\(auth\.userId, "scheduler\.create"\)/.test(route) &&
+      /\.set\(\{ enabled: false \}\)/.test(route) &&
+      !/delete\(scheduledTasks\)/.test(route)
+  );
+}
+
+// ── MAINTENANCE: node maintenance mode ──────────────────────────────────────
+console.log("\nMAINT node maintenance mode enforcement");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+  const nowMs = Date.now();
+
+  check(
+    "maintenance nodes are disqualified and never recommended",
+    scoreNode({ id: 1, online: true, load: null, serverCount: 0, maintenance: true }, nowMs) === Infinity &&
+      recommendNodeId(
+        [
+          { id: 1, online: true, load: null, serverCount: 0, maintenance: true },
+          { id: 2, online: true, load: null, serverCount: 5 },
+        ],
+        nowMs
+      ) === 2
+  );
+
+  const create = read("../src/app/api/servers/route.ts");
+  check(
+    "server creation is blocked on maintenance nodes",
+    /maintenanceMode: nodes\.maintenanceMode/.test(create) &&
+      /if \(node\.maintenanceMode\)/.test(create) &&
+      /maintenance mode/.test(create)
+  );
+
+  const lifecycle = read("../src/lib/server-lifecycle.ts");
+  check(
+    "maintenanceMode is publicly readable and admin-writable via the node PATCH allowlists",
+    /"maintenanceMode"/.test(lifecycle) &&
+      (lifecycle.match(/"maintenanceMode"/g) ?? []).length >= 2
+  );
+}
+
+// ── ACCESS GATE: CD-key style panel protection ──────────────────────────────
+console.log("\nGATE panel access key enforcement");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  check(
+    "keys are normalised to the unambiguous alphabet and hashed",
+    normalizeAccessKey("gsm-abcd-2345-xyz9-hjkm") === "ABCD2345XYZ9HJKM" &&
+      isValidAccessKeyFormat(normalizeAccessKey("gsm-abcd-2345-xyz9-hjkm")) === true &&
+      isValidAccessKeyFormat("ABCD2345XYZ9HJKM") === true &&
+      isValidAccessKeyFormat("IIII00001111LLLL") === false &&
+      hashAccessKey("ABCD").length === 64
+  );
+
+  const gateLib = read("../src/lib/access-gate.ts");
+  check(
+    "verification fails closed for revoked or unknown keys",
+    /isNull\(accessKeys\.revokedAt\)/.test(gateLib) &&
+      /return false;/.test(gateLib) &&
+      /PANEL_MASTER_KEY_ENV/.test(gateLib)
+  );
+
+  // Every entry point must refuse without a valid key when the gate is on.
+  const entryPoints: Array<[string, string]> = [
+    ["login", "../src/app/api/auth/login/route.ts"],
+    ["register", "../src/app/api/auth/register/route.ts"],
+    ["reset-password", "../src/app/api/auth/reset-password/route.ts"],
+    ["discord-oauth", "../src/app/api/auth/discord/route.ts"],
+  ];
+  for (const [name, path] of entryPoints) {
+    const src = read(path);
+    check(
+      `the ${name} entry point enforces the access gate`,
+      /accessGatePassed\(/.test(src) &&
+        /ACCESS_GATE_ERROR|gate_required/.test(src) &&
+        /status: 403|gate_required/.test(src)
+    );
+  }
+
+  const keysRoute = read("../src/app/api/access-keys/route.ts");
+  const delRoute = read("../src/app/api/access-keys/[id]/route.ts");
+  const gateRoute = read("../src/app/api/access-keys/gate/route.ts");
+  check(
+    "key management is admin-only and stores hashes, never plaintext",
+    /auth\.role !== "admin"/.test(keysRoute) &&
+      /auth\.role !== "admin"/.test(delRoute) &&
+      /auth\.role !== "admin"/.test(gateRoute) &&
+      /keyHash: hash/.test(keysRoute) &&
+      !/"key"/.test(keysRoute.split("generateAccessKey")[0])
+  );
+
+  check(
+    "enabling the gate with zero keys bootstraps one instead of locking out",
+    /bootstrapKey/.test(gateRoute) &&
+      /if \(!active\)/.test(gateRoute) &&
+      /generateAccessKey\(\)/.test(gateRoute) &&
+      /isNull\(accessKeys\.revokedAt\)/.test(gateRoute) &&
+      /ACCESS_GATE_ENV/.test(gateRoute)
+  );
+}
+
+// ── CONNECT: game-specific join strings ─────────────────────────────────────
+console.log("\nCONNECT join-string shapes and the public-payload privacy wall");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  check(
+    "Source games get console commands and Minecraft elides default ports",
+    connectInfoFor("tf2", "1.2.3.4", null, 27015).connect === "connect 1.2.3.4:27015" &&
+      connectInfoFor("minecraft-paper", "mc.example.com", null, 25565).connect === "mc.example.com" &&
+      pickHost("0.0.0.0", "203.0.113.9") === "203.0.113.9" &&
+      pickHost(null, "2001:db8::7") === "[2001:db8::7]"
+  );
+
+  const share = read("../src/lib/status-share.ts");
+  const page = read("../src/app/status/[token]/page.tsx");
+  check(
+    "the anonymous status surface still exposes no addresses",
+    !/ipv4/.test(share.split("publicStatusPayload")[1] ?? "") &&
+      !/connectInfoFor/.test(page) &&
+      /no ids, no addresses/.test(share)
+  );
+}
+
+// ── DAILY BACKUP: one-click scheduled backups ───────────────────────────────
+console.log("\nDBACKUP one-click daily backup scoping and shape");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const route = read("../src/app/api/servers/[id]/daily-backup/route.ts");
+  const ownershipHits = (route.match(/auth\.role !== "admin" && server\.userId !== auth\.userId/g) ?? []).length;
+  check(
+    "GET and POST both enforce ownership, schedule backup tasks, and disable by flag",
+    ownershipHits >= 2 &&
+      /hasPermission\(auth\.userId, "scheduler\.create"\)/.test(route) &&
+      /taskType: "backup"/.test(route) &&
+      /\.set\(\{ enabled: false \}\)/.test(route) &&
+      !/delete\(scheduledTasks\)/.test(route)
+  );
+
+  const scheduler = read("../src/lib/scheduler.ts");
+  check(
+    "the scheduler actually runs backup tasks through the backup engine",
+    /case "backup":/.test(scheduler) &&
+      /createServerBackup\(installPath\)/.test(scheduler)
+  );
+}
+
+// ── UPTIME: fleet stability tracking ────────────────────────────────────────
+console.log("\nUPTIME stability sampling math and scoping");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const now = Date.now();
+  const rows = [
+    { online: true, checkedAt: now - 1_000 },
+    { online: true, checkedAt: now - 2_000 },
+    { online: false, checkedAt: now - 3_000 },
+    { online: false, checkedAt: now - 400 * 24 * 3_600_000 }, // outside retention
+  ];
+  const sum = summarizeUptime(rows, 168 * 3_600_000, now);
+  check(
+    "stability math windows samples and clamps the hours param",
+    sum.checks === 3 && sum.onlineChecks === 2 && sum.percent === 66.67 &&
+      clampUptimeHours("99999") === 336 &&
+      uptimeGrade(sum.percent) === "poor" &&
+      uptimeGrade(99.9) === "excellent"
+  );
+
+  const one = read("../src/app/api/servers/[id]/uptime/route.ts");
+  const fleet = read("../src/app/api/servers/uptime/route.ts");
+  check(
+    "uptime endpoints are ownership-scoped and row-capped",
+    /auth\.role !== "admin" && server\.userId !== auth\.userId/.test(one) &&
+      /\.limit\(10_000\)/.test(one) &&
+      /auth\.role === "admin" \|\| s\.userId === auth\.userId/.test(fleet) &&
+      /MAX_FLEET_ROWS/.test(fleet) &&
+      /MAX_SERVERS_REPORTED/.test(fleet)
+  );
+
+  const tracker = read("../src/lib/uptime-tracker.ts");
+  check(
+    "the sampler only touches running local servers and prunes retention",
+    /if \(server\.status !== "running"\) continue;/.test(tracker) &&
+      /if \(server\.nodeIsLocal === false\) continue;/.test(tracker) &&
+      /uptimeCutoffMs\(now\)/.test(tracker)
+  );
+}
+
+// ── IDLE: zero-player detection ─────────────────────────────────────────────
+console.log("\nIDLE zero-player detection honesty and scoping");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const now = new Date();
+  const earlier = new Date(Date.now() - 2 * 3_600_000);
+  check(
+    "unreachable probes never count as empty and first sighting wins",
+    nextIdleStamp(false, undefined, earlier, now) === undefined &&
+      nextIdleStamp(true, 3, earlier, now) === null &&
+      nextIdleStamp(true, 0, null, now) === now &&
+      nextIdleStamp(true, 0, earlier, now) === earlier &&
+      isServerIdle(Date.now() - 7 * 3_600_000, Date.now(), 6 * 3_600_000) === true &&
+      idleDurationMs(null, Date.now()) === null
+  );
+
+  const route = read("../src/app/api/servers/idle/route.ts");
+  check(
+    "the idle list is ownership-scoped and threshold-clamped",
+    /auth\.role === "admin" \|\| r\.userId === auth\.userId/.test(route) &&
+      /hoursParam >= 1 && hoursParam <= 72/.test(route) &&
+      /\.slice\(0, 100\)/.test(route)
+  );
+
+  const detector = read("../src/lib/idle-detection.ts");
+  check(
+    "the detector caps probes per tick and skips remote nodes",
+    /probeable\.slice\(0, IDLE_MAX_PROBES_PER_TICK\)/.test(detector) &&
+      /if \(s\.nodeIsLocal === false\) return false;/.test(detector) &&
+      /attempts: 1/.test(detector)
+  );
+}
+
+// ── BATCH UPDATE: fleet Steam updates ───────────────────────────────────────
+console.log("\nBUPD batch update validation and delegation");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  check(
+    "batch update ids are validated with a tighter cap",
+    validateBatchServerIds({ serverIds: [1, 2, 3] }, 10).value?.join(",") === "1,2,3" &&
+      validateBatchServerIds({ serverIds: Array.from({ length: 11 }, (_, i) => i + 1) }, 10).ok === false &&
+      validateBatchServerIds({ serverIds: [0] }, 10).ok === false
+  );
+
+  const route = read("../src/app/api/servers/batch-update/route.ts");
+  check(
+    "batch update delegates to the real update handler and never touches running servers",
+    /from "\.\.\/\[id\]\/update\/route"/.test(route) &&
+      /if \(server\.status !== "stopped"\)/.test(route) &&
+      /hasPermission\(auth\.userId, "servers\.install"\)/.test(route) &&
+      /partitionBatch\(/.test(route) &&
+      /action: "server\.batch-update"/.test(route)
+  );
+}
+
+// ── WEBHOOK: outbound event delivery ────────────────────────────────────────
+console.log("\nHOOK outbound webhook SSRF guard and delivery wiring");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  check(
+    "webhook URLs cannot target local, private or metadata endpoints",
+    validateWebhookUrl("https://hooks.example.com/x").ok === true &&
+      validateWebhookUrl("http://localhost/x").ok === false &&
+      validateWebhookUrl("http://169.254.169.254/latest/meta-data").ok === false &&
+      validateWebhookUrl("http://10.0.0.5/x").ok === false &&
+      validateWebhookUrl("https://user:pass@example.com/x").ok === false
+  );
+
+  const body = JSON.stringify({ a: 1 });
+  check(
+    "signatures verify and tamper-detect",
+    verifyWebhookSignature(body, "secretsecret", signWebhookPayload(body, "secretsecret")) === true &&
+      verifyWebhookSignature(body, "secretsecret", "0".repeat(64)) === false
+  );
+
+  const audit = read("../src/app/api/audit-log/route.ts");
+  const hookRoute = read("../src/app/api/settings/webhook/route.ts");
+  check(
+    "the audit funnel fires webhooks and the settings route is admin-only with masked secrets",
+    /fireWebhookEvent\(/.test(audit) &&
+      /import\("@\/lib\/webhook-dispatch"\)/.test(audit) &&
+      /auth\.role !== "admin"/.test(hookRoute) &&
+      (hookRoute.match(/maskWebhookSecret\(/g) ?? []).length >= 2 &&
+      /validateWebhookUrl/.test(hookRoute) &&
+      !/secret/.test("") &&
+      !/\bvalue: secret\b/.test(hookRoute)
+  );
+}
+
+// ── API DOCS: session-gated reference ───────────────────────────────────────
+console.log("\nDOCS API reference page is session-gated");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const page = read("../src/app/api-docs/page.tsx");
+  check(
+    "the reference page authenticates and refuses anonymous visitors",
+    /getCurrentUser\(hdrs\)/.test(page) &&
+      /if \(!auth\)/.test(page) &&
+      /Sign in required/.test(page)
+  );
+}
+
+// ── DISASTER RECOVERY: export/import ────────────────────────────────────────
+console.log("\nDR conservative disaster-recovery import");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  check(
+    "imports drop webhook/gate settings and never accept command tasks",
+    IMPORTABLE_SETTING_KEYS.has("outbound_webhook_url") === false &&
+      IMPORTABLE_SETTING_KEYS.has("accessGateEnabled") === false &&
+      IMPORTABLE_TASK_TYPES.has("command") === false &&
+      validatePanelImport({
+        kind: "panel-export",
+        scheduledTasks: [{ serverName: "x", taskType: "command", cronExpression: "* * * * *" }],
+      }).value?.tasks.length === 0
+  );
+
+  const exp = read("../src/app/api/maintenance/export/route.ts");
+  const imp = read("../src/app/api/maintenance/import/route.ts");
+  check(
+    "export/import are admin-only and the export omits credentials",
+    /auth\.role !== "admin"/.test(exp) &&
+      /auth\.role !== "admin"/.test(imp) &&
+      !/sshPassword/.test(exp) &&
+      !/sshKeyPath/.test(exp) &&
+      !/apiKey/.test(exp.split("nodes")?.[0] ?? "") &&
+      /validatePanelImport\(body\)/.test(imp)
+  );
+}
+
+// ── IDLE AUTO-STOP: policy enforcement ──────────────────────────────────────
+console.log("\nIDLESTOP auto-stop decision and enforcement rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  check(
+    "auto-stop requires policy + running + idle-over-threshold, never remote",
+    shouldIdleStop({ policyEnabled: true, serverStatus: "running", nodeIsLocal: true, idleForMs: 7 * 3_600_000, thresholdMs: 6 * 3_600_000 }) === true &&
+      shouldIdleStop({ policyEnabled: false, serverStatus: "running", nodeIsLocal: true, idleForMs: 7 * 3_600_000, thresholdMs: 6 * 3_600_000 }) === false &&
+      shouldIdleStop({ policyEnabled: true, serverStatus: "running", nodeIsLocal: false, idleForMs: 7 * 3_600_000, thresholdMs: 6 * 3_600_000 }) === false &&
+      shouldIdleStop({ policyEnabled: true, serverStatus: "stopped", nodeIsLocal: true, idleForMs: 7 * 3_600_000, thresholdMs: 6 * 3_600_000 }) === false
+  );
+
+  const detector = read("../src/lib/idle-detection.ts");
+  check(
+    "the enforcer is capped, records events, and clears the clock after stopping",
+    /IDLE_MAX_STOPS_PER_TICK/.test(detector) &&
+      /nodeIsLocal: c\.nodeIsLocal/.test(detector) &&
+      /recordServerEvent\(c\.serverId, "idle-stopped"/.test(detector) &&
+      /zeroPlayersSince: null/.test(detector) &&
+      /if \(!policy\.enabled\) return;/.test(detector)
+  );
+
+  const policyRoute = read("../src/app/api/settings/idle-policy/route.ts");
+  check(
+    "the policy route is admin-only and bounds the threshold",
+    (policyRoute.match(/auth\.role !== "admin"/g) ?? []).length >= 1 &&
+      /hours < IDLE_POLICY_MIN_HOURS \|\| hours > IDLE_POLICY_MAX_HOURS/.test(policyRoute)
+  );
+}
+
+// ── KEY HYGIENE: expiry enforcement and staleness ───────────────────────────
+console.log("\nKEYS API key expiry enforcement and staleness math");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const auth = read("../src/lib/api-key-auth.ts");
+  check(
+    "expired API keys are still rejected at authentication time",
+    /candidate\.expiresAt && candidate\.expiresAt\.getTime\(\) < now/.test(auth) &&
+      /return null/.test(auth)
+  );
+
+  const now = Date.now();
+  const DAY = 86_400_000;
+  check(
+    "staleness nudges fire for forgotten and long-unused keys",
+    isKeyStale({ createdAt: now - 40 * DAY, lastUsedAt: null }, now) === true &&
+      isKeyStale({ createdAt: now - 400 * DAY, lastUsedAt: now - 91 * DAY }, now) === true &&
+      isKeyStale({ createdAt: now - 400 * DAY, lastUsedAt: now - DAY }, now) === false &&
+      (daysUntilExpiry(now - DAY, now) ?? 1) <= 0
+  );
+}
+
+// ── ALERT MUTE: planned-work silence windows ────────────────────────────────
+console.log("\nMUTE alert mute windows fail open and stay scoped");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const now = Date.now();
+  check(
+    "the mute fails open on garbage and caps at 72h",
+    isAlertMuted(null, now) === false &&
+      isAlertMuted("corrupted", now) === false &&
+      isAlertMuted(new Date(now + 3_600_000).toISOString(), now) === true &&
+      clampMuteHours(999) === 72 &&
+      clampMuteHours(0) === null
+  );
+
+  const scheduler = read("../src/lib/scheduler.ts");
+  const route = read("../src/app/api/settings/alert-mute/route.ts");
+  check(
+    "the scheduler consults the mute before firing and the route is admin-only",
+    /isAlertMuted\(muteUntil, now\)/.test(scheduler) &&
+      /alerted: true/.test(scheduler) &&
+      /auth\.role !== "admin"/.test(route) &&
+      /clampMuteHours\(b\.hours\)/.test(route)
+  );
+}
+
+// ── CAPACITY: growth forecasting ────────────────────────────────────────────
+console.log("\nCAP forecasting honesty and permission scoping");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const now = Date.now();
+  const DAY = 86_400_000;
+  const growing = Array.from({ length: 8 }, (_, i) => ({ t: now - (7 - i) * DAY, v: 100 + i * 10 }));
+  check(
+    "forecasts are honest: shrinking and tiny samples return null",
+      forecastDaysUntil(growing, 270, now).daysUntilTarget === 10 &&
+      forecastDaysUntil(growing, 100, now).daysUntilTarget === 0 &&
+      forecastDaysUntil(growing.map((s) => ({ t: s.t, v: 500 - s.v })), 9999, now).daysUntilTarget === null &&
+      forecastDaysUntil(growing.slice(0, 3), 9999, now).daysUntilTarget === null &&
+      capacityVerdict(null).tone === "unknown"
+  );
+
+  const route = read("../src/app/api/nodes/capacity/route.ts");
+  check(
+    "the capacity endpoint needs the metrics permission and bounds its rows",
+    /hasPermission\(auth\.userId, "nodes\.view\.metrics"\)/.test(route) &&
+      /\.limit\(MAX_ROWS_PER_NODE\)/.test(route) &&
+      /MAX_FIT_SAMPLES/.test(route) &&
+      /gte\(nodeMetrics\.recordedAt, since\)/.test(route)
+  );
+}
+
+// ── DRILL: backup restore drills ────────────────────────────────────────────
+console.log("\nDRILL restore drill verdicts and path safety");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  check(
+    "empty or all-empty extractions fail the drill",
+    assessDrill([]).ok === false &&
+      assessDrill([{ name: "x", size: 0, isFile: true }]).ok === false &&
+      assessDrill([{ name: "x", size: 9, isFile: true }]).ok === true &&
+      latestBackupName(["evil.sh", "backup-2026-01-01T00-00-00.tar.gz"]) === "backup-2026-01-01T00-00-00.tar.gz"
+  );
+
+  const route = read("../src/app/api/servers/[id]/backup-drill/route.ts");
+  check(
+    "the drill is permission-gated, path-contained, and always cleans up",
+    /hasPermission\(auth\.userId, "servers\.backup"\)/.test(route) &&
+      /auth\.role !== "admin" && server\.userId !== auth\.userId/.test(route) &&
+      /startsWith\(base \+ sep\)/.test(route) &&
+      /rm\(scratch, \{ recursive: true, force: true \}\)/.test(route) &&
+      /finally/.test(route)
+  );
+}
+
+// ── PALETTE: keyboard navigation ────────────────────────────────────────────
+console.log("\nPALETTE command palette selection integrity");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  check(
+    "selection math never escapes the result list",
+    clampPaletteIndex(99, 5) === 4 &&
+      clampPaletteIndex(-2, 5) === 0 &&
+      clampPaletteIndex(3, 0) === 0 &&
+      stepPaletteIndex(0, 5, -1) === 0 &&
+      stepPaletteIndex(4, 5, 1) === 4 &&
+      stepPaletteIndex(99, 5, -1) === 3
+  );
+
+  const dash = read("../src/components/Dashboard.tsx");
+  check(
+    "the palette stays fully keyboard-operable (arrows + enter wired)",
+    /"ArrowDown"/.test(dash) &&
+      /"ArrowUp"/.test(dash) &&
+      /e\.key === "Enter"/.test(dash) &&
+      /clampPaletteIndex\(paletteIndex, selectables\.length\)/.test(dash)
+  );
+}
+
+// ── CSV: metrics export ─────────────────────────────────────────────────────
+console.log("\nCSV metrics export escaping and wiring");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  check(
+    "CSV fields with quotes/commas are RFC-4180 escaped",
+    escapeCsvField('say "hi"') === '"say ""hi"""' &&
+      escapeCsvField("a,b") === '"a,b"' &&
+      seriesToCsv([{ name: "x", points: [{ t: 1700000000000, v: 1 }] }]).startsWith("time,x\r\n")
+  );
+
+  const node = read("../src/app/api/nodes/[id]/metrics/route.ts");
+  const server = read("../src/app/api/servers/[id]/metrics/route.ts");
+  check(
+    "both metrics routes offer attachment CSVs behind the same auth",
+    /searchParams\.get\("format"\) === "csv"/.test(node) &&
+      /content-disposition.*attachment/.test(node) &&
+      /searchParams\.get\("format"\) === "csv"/.test(server) &&
+      /content-disposition.*attachment/.test(server)
+  );
+}
+
+// ── CHANGES: field-level server history ─────────────────────────────────────
+console.log("\nCHG server change history recording and scoping");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  check(
+    "diffs skip unchanged values and cap giant ones",
+    diffServerPatch({ a: 1 }, { a: 1 }).length === 0 &&
+      diffServerPatch({ a: 1 }, { a: 2 }).length === 1 &&
+      diffServerPatch({ n: null }, { n: "x".repeat(5000) })[0].to.length === 2000
+  );
+
+  const patchRoute = read("../src/app/api/servers/[id]/route.ts");
+  const listRoute = read("../src/app/api/servers/[id]/changes/route.ts");
+  check(
+    "PATCH records history and the history endpoint is ownership-scoped",
+    /diffServerPatch\(/.test(patchRoute) &&
+      /import\("@\/lib\/server-changes"\)/.test(patchRoute) &&
+      /informational only/.test(patchRoute) &&
+      /auth\.role !== "admin" && server\.userId !== auth\.userId/.test(listRoute) &&
+      /CHANGE_LIST_MAX/.test(listRoute)
+  );
+}
+
+// ── SESSIONS + ALLOWLIST: revocable logins and IP gating ────────────────────
+console.log("\nSESS session revocation and IP allowlist enforcement");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  check(
+    "the allowlist fails closed for unknown IPs and always frees loopback",
+    ipAllowed("127.0.0.1", ["203.0.113.9"]) === true &&
+      ipAllowed(null, ["203.0.113.9"]) === false &&
+      ipAllowed("203.0.113.9", parseAllowList("203.0.113.9, 10.*")) === true &&
+      ipAllowed("8.8.8.8", ["203.0.113.9"]) === false
+  );
+
+  const auth = read("../src/lib/auth.ts");
+  const logout = read("../src/app/api/auth/logout/route.ts");
+  const store = read("../src/lib/session-store.ts");
+  check(
+    "auth enforces both gates, logout revokes, and store keys by hash only",
+    /sessionGate\(token\)/.test(auth) &&
+      /ipGate\(headers\)/.test(auth) &&
+      /revokeIssuedSession\(token\)/.test(logout) &&
+      /tokenHash: hashSessionToken\(token\)/.test(store) &&
+      !/token: string/.test(store.split("authSessions")[0] ?? "x")
+  );
+
+  check(
+    "session revocation is owner-or-admin and the allowlist route is admin-only",
+    /if \(!isAdmin && row\.userId !== requesterId\) return false;/.test(store) &&
+      /auth\.role !== "admin"/.test(read("../src/app/api/settings/ip-allowlist/route.ts")) &&
+      /is not a valid IP or IP\.\* pattern/.test(read("../src/app/api/settings/ip-allowlist/route.ts"))
+  );
+}
+
+// ── EPHEMERAL: TTL test servers ─────────────────────────────────────────────
+console.log("\nEPHEM TTL clone safety and sweep guardrails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  check(
+    "recursive deletes only ever touch deep, non-system paths",
+    isSafeInstallPath("/opt/gameservers/tf2/srv") === true &&
+      isSafeInstallPath("/opt") === false &&
+      isSafeInstallPath("/opt/gameservers/../../etc") === false &&
+      isSafeInstallPath("/home") === false &&
+      clampTtlHours(0) === null &&
+      clampTtlHours(9999) === 168
+  );
+
+  const sweeper = read("../src/lib/ephemeral-sweeper.ts");
+  const clone = read("../src/app/api/servers/[id]/clone/route.ts");
+  check(
+    "the sweep is local-only, path-gated, capped, and audited",
+    /server\.nodeIsLocal !== false && isSafeInstallPath\(server\.installPath\)/.test(sweeper) &&
+      /\.limit\(EXPIRE_SWEEP_LIMIT\)/.test(sweeper) &&
+      /action: "server\.expired"/.test(sweeper) &&
+      /ttlHours must be between 1 and 168/.test(clone) &&
+      /clampTtlHours\(body\.ttlHours\)/.test(clone)
+  );
+}
+
+// ── ROSTER + HEATMAP: live players and peak hours ───────────────────────────
+console.log("\nROSTER live rosters and player-history scoping");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const t = (day: number, hour: number, players: number) => ({ ts: new Date(2026, 8, 6 + day, hour).getTime(), players });
+  check(
+    "heatmap peaks need two sightings and empty buckets stay empty",
+    buildHeatmap([t(0, 19, 99)]).peak === null &&
+      buildHeatmap([t(0, 19, 10), t(0, 19, 20)]).peak?.avg === 15 &&
+      buildHeatmap([t(1, 5, 3)]).cells.length === 1
+  );
+
+  const roster = read("../src/app/api/servers/[id]/roster/route.ts");
+  const history = read("../src/app/api/servers/[id]/player-history/route.ts");
+  check(
+    "rosters are cooldown-limited, local-only, and ownership-scoped",
+    /ROSTER_COOLDOWN_MS/.test(roster) &&
+      /status: 429/.test(roster) &&
+      /server\.nodeIsLocal === false/.test(roster) &&
+      /auth\.role !== "admin" && server\.userId !== auth\.userId/.test(roster) &&
+      /auth\.role !== "admin" && server\.userId !== auth\.userId/.test(history) &&
+      /MAX_SAMPLES/.test(history)
+  );
+}
+
+// ── ANOMALY: rolling z-score spike detection ────────────────────────────────
+console.log("\nANOM spike detection conservatism");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const jitter = Array.from({ length: 40 }, (_, i) => ({ t: i * 60_000, v: 50 + (i % 2 === 0 ? 2 : -2) }));
+  const spiked = [...jitter.slice(0, 30), { t: 30 * 60_000, v: 600 }, ...jitter.slice(30)];
+  const deadFlat = Array.from({ length: 60 }, (_, i) => ({ t: i * 60_000, v: 50 }));
+  // Flat history then a spike: with zero variance there is no "normal" to
+  // deviate from, so the guard must keep this quiet.
+  const flatThenSpike = [...Array.from({ length: 30 }, (_, i) => ({ t: i * 60_000, v: 50 })), { t: 30 * 60_000, v: 500 }];
+  check(
+    "spikes are flagged only with real history and flat series stay quiet",
+    detectAnomalies(spiked).length >= 1 &&
+      detectAnomalies(jitter).length === 0 &&
+      detectAnomalies(deadFlat).length === 0 &&
+      detectAnomalies(flatThenSpike).length === 0 &&
+      detectAnomalies(spiked.slice(0, 8)).length === 0
+  );
+
+  const route = read("../src/app/api/nodes/[id]/metrics/route.ts");
+  check(
+    "the metrics endpoint caps anomaly output",
+    /detectAnomalies\(cpu\)\.slice\(-20\)/.test(route) &&
+      /detectAnomalies\(ram\)\.slice\(-20\)/.test(route)
+  );
+}
+
+// ── DIGEST: weekly fleet summary ────────────────────────────────────────────
+console.log("\nDIGEST fleet digest scoping and shape");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const text = formatFleetDigest({
+    serversTotal: 5, serversRunning: 3, crashed: 1, watchdogStops: 0, idleStops: 0,
+    uptime: [{ name: "x", percent: 97 }],
+  });
+  check(
+    "the digest summarises fleet health and stays within Discord limits",
+    /Fleet digest/.test(text) &&
+      /3 running \/ 5 total/.test(text) &&
+      text.length <= 1900
+  );
+
+  const scheduler = read("../src/lib/scheduler.ts");
+  const route = read("../src/app/api/scheduler/route.ts");
+  const digest = read("../src/lib/fleet-digest.ts");
+  check(
+    "fleet-digest is a panel task: admin-only, runner wired, both channels fired",
+    /"fleet-digest"/.test(scheduler) &&
+      /sendFleetDigest/.test(scheduler) &&
+      /Only administrators can schedule panel-level tasks/.test(route) &&
+      /taskType === "fleet-digest"/.test(route) &&
+      /fireWebhookEvent/.test(digest) &&
+      /DIGEST_MAX_LENGTH/.test(digest)
+  );
+}
+
+// ── IDLE UPDATE: update only when empty ─────────────────────────────────────
+console.log("\nIDLEUPD idle-aware update guardrails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const scheduler = read("../src/lib/scheduler.ts");
+  check(
+    "idle-update refuses busy servers, keeps the backup safety net, and restarts after",
+    /"idle-update"/.test(scheduler) &&
+      /players may be online/.test(scheduler) &&
+      /idleDurationMs\(idleRow\?\.zeroPlayersSince \?\? null, Date\.now\(\)\)/.test(scheduler) &&
+      /createServerBackup\(installPath\)/.test(scheduler) &&
+      /wasRunning/.test(scheduler) &&
+      /idleThresholdMs/.test(scheduler)
+  );
+  check(
+    "idle-update gate is a strict less-than, skips running+busy, restarts only when wasRunning",
+    /idleFor === null \|\| idleFor < idleThresholdMs/.test(scheduler) &&
+      /players may be online/.test(scheduler) &&
+      /wasRunning/.test(scheduler) &&
+      /startDetachedScript\(join\([^)]*installPath, "gsm-start\.sh"\)\)/.test(scheduler) &&
+      /if \(wasRunning\) \{/.test(scheduler) &&
+      /\(idleBackupPref\?\.value \?\? "true"\) !== "false"/.test(scheduler)
+  );
+}
+
+// ── STAGED ROLLOUT: canary before the fleet ─────────────────────────────────
+console.log("\nSTAGED rollout safety rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const route = read("../src/app/api/servers/batch-update/route.ts");
+  const lib = read("../src/lib/staged-rollout.ts");
+  check(
+    "staged rollout plans a canary, boot-verifies it, and halts before sweeping on failure",
+    /planStagedRollout\(dispatchable\)/.test(route) &&
+      /shouldSweepRest\(canaryUpdateOk, canaryBootAlive\)/.test(route) &&
+      /halted = canaryUpdateOk \? "canary-boot-failed" : "canary-update-failed"/.test(route) &&
+      /setTimeout\(r, BOOT_GRACE_MS\)/.test(route)
+  );
+  check(
+    "sweep only happens inside the canary-passed branch",
+    /if \(!shouldSweepRest\(canaryUpdateOk, canaryBootAlive\)\) \{/.test(route) &&
+      /for \(const server of plan\.rest\) \{/.test(route) &&
+      /canaryVerified = true/.test(route)
+  );
+  check(
+    "pure planner keeps blocked servers visible and canary out of the sweep",
+    /eligible\.slice\(1\)/.test(lib) &&
+      /status is \$\{server\.status\} — stop it first/.test(lib) &&
+      /return canaryUpdateOk && canaryBootAlive/.test(lib)
+  );
+  check(
+    "canary is restored to stopped state after boot verification",
+    /\{ action: "stop" \}/.test(route) &&
+      /best-effort cleanup/.test(route)
+  );
+}
+
+// ── COLLAB: server sharing rails ────────────────────────────────────────────
+console.log("\nCOLLAB server-sharing rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const listRoute = read("../src/app/api/servers/route.ts");
+  const getRoute = read("../src/app/api/servers/[id]/route.ts");
+  const procRoute = read("../src/app/api/servers/[id]/process/route.ts");
+  const collabRoute = read("../src/app/api/servers/[id]/collaborators/route.ts");
+  const lib = read("../src/lib/server-collab.ts");
+
+  check(
+    "server list includes shared servers and marks them",
+    /sharedServerIdsFor\(auth\.userId\)/.test(listRoute) &&
+      /inArray\(gameServers\.id, sharedIds\)/.test(listRoute) &&
+      /sharedWithMe: sharedSet\.has\(srv\.id\)/.test(listRoute)
+  );
+  check(
+    "server detail: strangers get 404, collaborators never see the webhook secret",
+    /getCollaboratorRole\(server\.id, auth\.userId\)/.test(getRoute) &&
+      /server\.discordWebhook = null/.test(getRoute)
+  );
+  check(
+    "process route: collaborators pass the ownership gate, viewers can't control",
+    /collabRole = await getCollaboratorRole\(server\.id, auth\.userId\)/.test(procRoute) &&
+      /collabRole === "viewer" && action !== "status"/.test(procRoute) &&
+      /Viewers can't control this server/.test(procRoute)
+  );
+  check(
+    "collaborators route: owner/admin manage, roles validated, no self-owner rows, self-removal allowed",
+    /canManageSharing/.test(collabRoute) &&
+      /isCollaboratorRole\(role\)/.test(collabRoute) &&
+      /The owner already has full access/.test(collabRoute) &&
+      /const selfRemoval = targetUserId === \(auth\.userId as number\)/.test(collabRoute)
+  );
+  check(
+    "pure access model: control = owner+operator, manage = owner only",
+    /return access === "owner" \|\| access === "operator"/.test(lib) &&
+      /return access === "owner"/.test(lib) &&
+      /if \(input\.isAdmin \|\| input\.isOwner\) return "owner"/.test(lib)
+  );
+}
+
+// ── BLUEPRINT: multi-server deploy rails ────────────────────────────────────
+console.log("\nBLUEPRINT deploy rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const lib = read("../src/lib/blueprints.ts");
+  const deploy = read("../src/app/api/blueprints/[id]/deploy/route.ts");
+  const crud = read("../src/app/api/blueprints/[id]/route.ts");
+
+  check(
+    "blueprint caps enforced at validation AND again at expansion (no fork bombs)",
+    /total > BLUEPRINT_MAX_TOTAL/.test(lib) &&
+      /plan\.length > BLUEPRINT_MAX_TOTAL/.test(lib) &&
+      /count < 1 \|\| count > BLUEPRINT_MAX_PER_ENTRY/.test(lib)
+  );
+  check(
+    "deploy: blueprint access gate, preset visibility, and real create path",
+    /blueprint\.userId !== auth\.userId/.test(deploy) &&
+      /is not shared with you/.test(deploy) &&
+      /createServerAction\(new NextRequest\(inner\)\)/.test(deploy) &&
+      /nextFreePort\(preset\.defaultPort \?\? MIN_SERVER_PORT, taken, 2\)/.test(deploy)
+  );
+  check(
+    "deploy stops at the first failed server instead of plowing into a wall",
+    /if \(!res\.ok\) break;/.test(deploy)
+  );
+  check(
+    "blueprint CRUD: strangers get 404 on read/update/delete",
+    /auth\.role === "admin" \|\| blueprint\.userId === auth\.userId/.test(crud)
+  );
+}
+
+// ── ROLLING RESTART: one at a time, verified ────────────────────────────────
+console.log("\nROLLING restart rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const batch = read("../src/app/api/servers/batch/route.ts");
+  const lib = read("../src/lib/rolling-restart.ts");
+  check(
+    "rolling restart verifies each server after a settle window before continuing",
+    /planRollingRestart\(dispatchable\)/.test(batch) &&
+      /setTimeout\(\(\) => void verifyServerAlive\(server\.id\)\.then\(resolve\)\.catch\(\(\) => resolve\(false\)\), SETTLE_MS\)/.test(batch) &&
+      /shouldContinueRolling\(verified\)/.test(batch)
+  );
+  check(
+    "first unverified restart halts the sweep and leaves the rest untouched",
+    /if \(!shouldContinueRolling\(verified\)\) \{/.test(batch) &&
+      /rolling restart halted before this server/.test(batch) &&
+      /haltedAt = server\.name/.test(batch)
+  );
+  check(
+    "pure planner admits only running servers and the halt decision is explicit",
+    /server\.status === "running"/.test(lib) &&
+      /return lastVerified/.test(lib)
+  );
+}
+
+// ── UPDATE DIFF: know what Steam touched ────────────────────────────────────
+console.log("\nUPDDIFF update snapshot rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const route = read("../src/app/api/servers/[id]/update/route.ts");
+  const lib = read("../src/lib/update-diff.ts");
+  check(
+    "update route snapshots before AND after the Steam run",
+    /snapshotInstallPath\(server\.installPath\)/.test(route) &&
+      /const pre = await snapshotInstallPath/.test(route) &&
+      /const post = await snapshotInstallPath/.test(route) &&
+      /diffSnapshots\(pre\.entries, post\.entries, pre\.truncated, post\.truncated\)/.test(route)
+  );
+  check(
+    "diff report is persisted as an update-report event and surfaced in the response",
+    /recordServerEvent\(server\.id, "update-report"/.test(route) &&
+      /configsChanged/.test(route)
+  );
+  check(
+    "pure diff: size-or-mtime change detection, caps, config flagging",
+    /prev\.size !== entry\.size \|\| prev\.mtimeMs !== entry\.mtimeMs/.test(lib) &&
+      /slice\(0, REPORT_MAX_PATHS\)/.test(lib) &&
+      /CONFIG_EXTENSIONS\.some/.test(lib) &&
+      /entries\.length >= SNAPSHOT_MAX_FILES/.test(lib)
+  );
+  check(
+    "walker never follows symlinks",
+    /if \(st\.isSymbolicLink\(\)\) continue;/.test(lib)
+  );
+}
+
+// ── MAINTWINDOWS: scheduled drain/release rails ─────────────────────────────
+console.log("\nMAINTW scheduled maintenance rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const lib = read("../src/lib/maintenance-windows.ts");
+  const scheduler = read("../src/lib/scheduler.ts");
+  const post = read("../src/app/api/maintenance-windows/route.ts");
+  const del = read("../src/app/api/maintenance-windows/[id]/route.ts");
+
+  check(
+    "phase math is boundary-exact and the applier only releases what it applied",
+    /if \(nowMs < input\.startsAtMs\) return "pending"/.test(lib) &&
+      /if \(nowMs < input\.endsAtMs\) return "active"/.test(lib) &&
+      /if \(win\.appliedAt\) \{/.test(lib) &&
+      /phase === "active" && !win\.appliedAt/.test(lib)
+  );
+  check(
+    "validation caps window length and rejects backwards windows",
+    /endsAt\.getTime\(\) <= startsAt\.getTime\(\)/.test(lib) &&
+      /MAINTENANCE_WINDOW_MAX_HOURS \* 3_600_000/.test(lib)
+  );
+  check(
+    "scheduler tick runs the window sweep best-effort",
+    /applyMaintenanceWindows\(\)/.test(scheduler) &&
+      /maintenance window sweep failed/.test(scheduler)
+  );
+  check(
+    "routes gate on nodes.maintenance and cancelling an applied window releases the node",
+    /hasPermission\(auth\.userId, "nodes\.maintenance"\)/.test(post) &&
+      /hasPermission\(auth\.userId, "nodes\.maintenance"\)/.test(del) &&
+      /maintenanceMode: false/.test(del)
+  );
+}
+
+// ── PLAYERALERT: edge-triggered crowd alerts ────────────────────────────────
+console.log("\nPALERT player-alert rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const lib = read("../src/lib/player-alerts.ts");
+  const idle = read("../src/lib/idle-detection.ts");
+  const patch = read("../src/app/api/servers/[id]/route.ts");
+  check(
+    "evaluation is edge-triggered and null players never touch the armed state",
+    /const above = input\.players >= input\.threshold/.test(lib) &&
+      /return \{ fire: above && !input\.wasAbove, above \}/.test(lib) &&
+      /if \(input\.threshold === null \|\| input\.players === null\) \{/.test(lib) &&
+      /return \{ fire: false, above: input\.wasAbove \}/.test(lib)
+  );
+  check(
+    "threshold parsing rejects floats/zero/oversized and accepts null to disable",
+    /!Number\.isInteger\(n\) \|\| n < 1 \|\| n > PLAYER_ALERT_MAX_THRESHOLD/.test(lib) &&
+      /if \(value === null \|\| value === "" \|\| value === undefined\) return null/.test(lib)
+  );
+  check(
+    "idle tick feeds the alert evaluator on successful probes only",
+    /processPlayerProbeForAlerts\(\{/.test(idle) &&
+      /server\.playerAlertThreshold !== null/.test(idle)
+  );
+  check(
+    "PATCH validates the threshold and clears the edge state when disabling",
+    /parsePlayerAlertThreshold\(updates\.playerAlertThreshold\)/.test(patch) &&
+      /updates\.playerAlertAbove = false/.test(patch) &&
+      /playerAlertThreshold must be a whole number between 1 and 1000/.test(patch)
+  );
+}
 
 console.log(`\n${checks - failures}/${checks} checks passed`);
 if (failures > 0) {

@@ -16,7 +16,7 @@ Deploy, configure, and monitor game servers across multiple machines from one da
 
 <br>
 
-<samp>**28** games · **1,625** config options · **67** API routes · **562** tests · **161** security checks</samp>
+<samp>**34** games · **1,753** config options · **102** API routes · **1,003** tests · **311** security checks</samp>
 
 <br>
 
@@ -156,13 +156,32 @@ Then visit `http://your-server:3000` to finish setup in the install wizard.
 <td width="33%" valign="top">
 
 #### 🎮 Server Control
-- **28 game templates**, 1,625 options
+- **34 game templates**, 1,749 options
 - **RCON console** in the browser
-- **Auto-restart** crashed servers
+- **Auto-restart** crashed servers — with a crash-loop breaker: 3 crashes in 10 minutes parks the server instead of restarting forever
 - **Start on boot** after a reboot
 - **File manager** — browse, edit, upload
 - **Scheduler** — cron restarts, backups, updates & commands, executed by the panel itself
-- **Backups** with one-click restore
+- **Backups** with one-click restore — automatic before every Steam update (button *and* scheduled), retention-capped and disk-space guarded
+- **Age verification** — registration requires a date of birth; under-16s are refused per the Australian Online Safety Amendment Act 2024
+- **Password reset** — tokenised email flow (one-time link, one hour, hash-only storage), throttled and account-enumeration-proof
+- **Discord login** — optional OAuth sign-in that never bypasses 2FA and never mints accounts around the age gate
+- **Player join/leave alerts** — roster diffs every poll, posted to the server's Discord (spam-safe baselines)
+- **Welcome & crash emails** — signup welcomes and crash wake-ups through the existing SMTP layer
+- **Bulk restart & backup** — the multi-select bar now restarts and backs up whole selections
+- **2FA recovery codes** — the profile panel now has the full 2FA flow (QR → verify → eight single-use codes, hash-only) with a login fallback
+- **Per-server disk stats** — the Metrics view shows the server folder size and filesystem usage
+- **Anonymous-surface throttle** — the public status endpoints are capped per client (30/min) before they may trigger probes
+- **Remote node agent** — a zero-dependency process for remote machines: start/stop/restart/status, log tail, **file manager and backups**, all over authenticated RPC with path containment, a Test Connection button and **one-click deploy over SSH**
+- **Metrics graphs** — per-server CPU & RAM history charts (1h–7d) drawn from the samples the pipeline already records
+- **Resource limits enforced** — per-server CPU/RAM caps actually stop runaway servers (warn → stop, with Discord alerts)
+- **Host threshold alerts** — Discord ping when node CPU/RAM/disk stays over set thresholds (one alert per episode)
+- **Stability history** — every crash, watchdog stop and auto-restart is recorded per server and shown in the Metrics view (14-day rolling window)
+- **Embeddable status** — CORS-open public JSON plus copy-paste iframe/widget snippets for community sites
+- **Server migration** — move a stopped server to any node with one button: archived on the source, streamed through the panel, unpacked on the destination, re-pointed in the database
+- **SourceMod & Metamod:Source** — one option at setup installs the latest stable mod platform on TF2, CS:S, Garry's Mod and L4D2
+- **Public status links** — an unguessable share URL shows up/down + players to anyone, no account needed, plus an opt-in aggregated board at `/status`
+- **Scheduled-task Discord notifications** — cron restarts, backups, updates and commands post their outcome (including failures) to the server's webhook
 - **Live logs** streamed to the panel
 
 </td>
@@ -191,25 +210,25 @@ Then visit `http://your-server:3000` to finish setup in the install wizard.
 
 ## 🎯 Supported Games
 
-**28 templates, 1,625 configurable options.** Every option is typed, validated, and genuinely wired into the install script, generated config files, or start command — nothing is decorative.
+**34 templates, 1,749 configurable options.** Every option is typed, validated, and genuinely wired into the install script, generated config files, or start command — nothing is decorative.
 
 <table>
 <tr><th align="left">Category</th><th align="left">Games</th></tr>
 <tr>
   <td><b>⛏️ Minecraft</b></td>
-  <td>Java Edition <sup><code>55</code></sup> · NeoForge <sup><code>56</code></sup> · Paper <sup><code>52</code></sup> · Bedrock <sup><code>27</code></sup></td>
+  <td>Java Edition <sup><code>55</code></sup> · NeoForge <sup><code>56</code></sup> · Fabric <sup><code>57</code></sup> · Paper <sup><code>52</code></sup> · Bedrock <sup><code>27</code></sup></td>
 </tr>
 <tr>
   <td><b>🔫 FPS</b></td>
-  <td>Counter-Strike 2 <sup><code>65</code></sup> · Team Fortress 2 <sup><code>58</code></sup> · Left 4 Dead 2 <sup><code>49</code></sup> · Insurgency: Sandstorm <sup><code>42</code></sup> · Squad <sup><code>45</code></sup> · Arma 3 <sup><code>50</code></sup></td>
+  <td>Counter-Strike 2 <sup><code>65</code></sup> · Counter-Strike: Source <sup><code>26</code></sup> · Team Fortress 2 <sup><code>58</code></sup> · Left 4 Dead 2 <sup><code>49</code></sup> · Insurgency: Sandstorm <sup><code>42</code></sup> · Squad <sup><code>45</code></sup> · Arma 3 <sup><code>50</code></sup></td>
 </tr>
 <tr>
   <td><b>🏝️ Survival</b></td>
-  <td>Project Zomboid <sup><code>95</code></sup> · Palworld <sup><code>92</code></sup> · 7 Days to Die <sup><code>81</code></sup> · ARK <sup><code>80</code></sup> · Rust <sup><code>56</code></sup> · Enshrouded <sup><code>54</code></sup> · Don't Starve Together <sup><code>36</code></sup> · Valheim <sup><code>28</code></sup></td>
+  <td>Project Zomboid <sup><code>95</code></sup> · Palworld <sup><code>92</code></sup> · 7 Days to Die <sup><code>81</code></sup> · ARK <sup><code>80</code></sup> · Rust <sup><code>56</code></sup> · Enshrouded <sup><code>54</code></sup> · Don't Starve Together <sup><code>36</code></sup> · Valheim <sup><code>28</code></sup> · Unturned <sup><code>13</code></sup> · Core Keeper <sup><code>11</code></sup> · Vintage Story <sup><code>8</code></sup></td>
 </tr>
 <tr>
   <td><b>🧱 Sandbox</b></td>
-  <td>Terraria (TShock) <sup><code>63</code></sup> · Garry's Mod <sup><code>51</code></sup> · Factorio <sup><code>33</code></sup> · Satisfactory <sup><code>21</code></sup></td>
+  <td>Terraria (TShock) <sup><code>63</code></sup> · Garry's Mod <sup><code>51</code></sup> · Factorio <sup><code>33</code></sup> · Satisfactory <sup><code>21</code></sup> · Mindustry <sup><code>9</code></sup></td>
 </tr>
 <tr>
   <td><b>🕹️ Classic</b></td>
@@ -483,7 +502,7 @@ Two places to configure things, split by who they are for:
 
 | Where | What |
 |:--|:--|
-| **Settings** *(Administration)* | Data retention, default server quota, self-registration, login attempt limit, session length, and everything Discord — webhook, bot, and channel backfill |
+| **Settings** *(Administration)* | Data retention, default server quota, self-registration, age verification (minimum age, Australian 16+ default), pre-update auto-backup, login attempt limit, session length, and everything Discord — webhook, bot, and channel backfill |
 | **Site Editor** *(✏️ on the public site)* | Panel name, hero text, footer, announcements, navigation links, chat widget, and **custom CSS** |
 
 Everything in **Settings** overrides the matching environment variable, so you
@@ -643,12 +662,12 @@ One command chains every check, exiting non-zero on the first failure — drop i
 
 | Script | Checks |
 |:--|:--|
-| `npm test` | 510 tests over the config renderer, path guard, auth, pagination, API key scopes, server lifecycle rules, and **database integrity, end-to-end installer round-trips, and multi-write atomicity against a real PostgreSQL** *(see below)* |
+| `npm test` | 1,003 tests over the config renderer, path guard, auth, age verification, panel settings, pagination, API key scopes, server lifecycle rules, and **database integrity, end-to-end installer round-trips, and multi-write atomicity against a real PostgreSQL** *(see below)* |
 | `npm run typecheck` | `tsc --noEmit` across the project |
 | `npm run lint` | ESLint, including React hooks rules |
-| `npm run verify:templates` | All 1,625 template options — types, enums, defaults, and that every declared variable is actually consumed |
+| `npm run verify:templates` | All 1,753 template options — types, enums, defaults, and that every declared variable is actually consumed |
 | `npm run verify:installers` | Renders every game's install script, runs `bash -n` + shellcheck, then **executes** it in a sandbox with SteamCMD/curl/apt mocked, and asserts the artifacts the panel needs were produced |
-| `npm run verify:security` | 151 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, and a sweep for leaked exception messages |
+| `npm run verify:security` | 311 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, the 16+ age gate, the pre-update backup safety net, backup retention & disk guard, the crash-loop breaker, the resource-limit watchdog, password-reset token handling, host threshold alerts, Source modding wiring, Discord OAuth sign-in rules, metrics-history access control, the anonymous status-link whitelist, scheduler webhook wiring, and a sweep for leaked exception messages |
 
 All of these run automatically in CI on every push and pull request, along
 with a production build and a high-severity dependency audit.
@@ -686,7 +705,7 @@ src/
 ├── app/api/              67 API routes
 ├── components/           panels, forms, and the public site
 ├── db/
-│   ├── games/            28 game templates — one module each
+│   ├── games/            34 game templates — one module each
 │   ├── schema.ts         Drizzle schema
 │   └── seeds.ts          re-export shim
 ├── lib/                  auth, permissions, config rendering, file ops

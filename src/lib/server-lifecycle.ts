@@ -95,11 +95,16 @@ export const SERVER_PATCH_FIELDS = [
   "autoStart",
   "maxRamMb",
   "maxCpuPercent",
+  "statusPublic",
+  "notes",
+  "tags",
   "discordWebhook",
   "discordNotifyStart",
   "discordNotifyStop",
   "discordNotifyRestart",
   "discordNotifyCrash",
+  "discordNotifyPlayers",
+  "playerAlertThreshold",
 ] as const;
 
 export type ServerPatchField = (typeof SERVER_PATCH_FIELDS)[number];
@@ -128,6 +133,24 @@ export function pickServerPatch(body: unknown): {
   return { updates, rejected };
 }
 
+/** Operator notes are capped so a textarea cannot grow unbounded. */
+export const SERVER_NOTES_MAX_LENGTH = 2_000;
+
+/**
+ * Validate + normalise a notes value from a PATCH body.
+ * Empty string / whitespace-only / null all clear the note.
+ */
+export function normalizeServerNotes(value: unknown): { ok: boolean; value?: string | null; error?: string } {
+  if (value === null) return { ok: true, value: null };
+  if (typeof value !== "string") return { ok: false, error: "Notes must be a string" };
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return { ok: true, value: null };
+  if (trimmed.length > SERVER_NOTES_MAX_LENGTH) {
+    return { ok: false, error: `Notes must be at most ${SERVER_NOTES_MAX_LENGTH} characters` };
+  }
+  return { ok: true, value: trimmed };
+}
+
 /**
  * Node columns that are safe to send to a browser.
  *
@@ -153,6 +176,7 @@ export const NODE_PUBLIC_FIELDS = [
   "status",
   "isLocal",
   "isDefault",
+  "maintenanceMode",
   "lastHeartbeat",
   "location",
   "provider",
@@ -185,6 +209,7 @@ export const NODE_PATCH_FIELDS = [
   "gameServerPath",
   "steamcmdPath",
   "isDefault",
+  "maintenanceMode",
   "location",
   "provider",
   "tags",
@@ -463,3 +488,47 @@ export const QUOTA_PREDICATE_SQL = `(
   OR (SELECT count(*) FROM game_servers WHERE user_id = $userId)
      < (SELECT COALESCE(max_servers, 0) FROM users WHERE id = $userId)
 )`;
+
+// ── Crash-loop breaker ──────────────────────────────────────────────────────
+//
+// Auto-restart is a feature until the server crashes on boot: then it becomes
+// a restart-spam loop that burns CPU and floods Discord. After CRASH_LOOP_MAX
+// crashes inside CRASH_LOOP_WINDOW_MS the breaker trips and the server stays
+// down until a human intervenes (a manual start clears the history).
+
+/** Crashes tolerated inside the window before the breaker trips. */
+export const CRASH_LOOP_MAX = 3;
+export const CRASH_LOOP_WINDOW_MS = 10 * 60_000;
+
+/** Keep only the crashes still inside the window, newest last. */
+export function windowedCrashes(timestamps: readonly number[], now: number, windowMs: number = CRASH_LOOP_WINDOW_MS): number[] {
+  return timestamps.filter((t) => now - t <= windowMs);
+}
+
+/**
+ * True when the recent crash history says "stop restarting this server".
+ * Pure so the tripping boundary is unit-tested, not discovered in production.
+ */
+export function isCrashLooping(
+  timestamps: readonly number[],
+  now: number,
+  max: number = CRASH_LOOP_MAX,
+  windowMs: number = CRASH_LOOP_WINDOW_MS
+): boolean {
+  return windowedCrashes(timestamps, now, windowMs).length >= max;
+}
+
+
+// ── Node liveness ────────────────────────────────────────────────────────────
+//
+// Remote nodes prove they are alive by heartbeating; when the beats stop the
+// panel must say so instead of presenting a dead machine as healthy.
+
+/** A remote node with no heartbeat for this long is considered offline. */
+export const NODE_STALE_MS = 3 * 60_000;
+
+/** Pure so the boundary is unit-testable: null (never seen) is NOT stale. */
+export function isNodeStale(lastHeartbeat: Date | null, now: Date = new Date()): boolean {
+  if (lastHeartbeat === null) return false;
+  return now.getTime() - lastHeartbeat.getTime() > NODE_STALE_MS;
+}

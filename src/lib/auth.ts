@@ -81,6 +81,13 @@ export async function getCurrentUser(
   if (token) {
     const session = verifyToken(token);
     if (session) {
+      // Defense-in-depth gates on top of the verified JWT: session
+      // revocation and the IP allowlist. Both fail open on db errors.
+      const { sessionGate, ipGate } = await import("./auth-gates");
+      if (!(await sessionGate(token)) || !(await ipGate(headers))) {
+        setAuthContext({ keyPermissions: null, keyId: null });
+        return null;
+      }
       // A cookie session carries no key scope. Setting it explicitly (rather
       // than leaving the store untouched) prevents a scope from a previous
       // request ever bleeding into this one.
@@ -94,6 +101,11 @@ export async function getCurrentUser(
   const { authenticateApiKey } = await import("./api-key-auth");
   const viaKey = await authenticateApiKey(headers);
   if (!viaKey) {
+    setAuthContext({ keyPermissions: null, keyId: null });
+    return null;
+  }
+  const { ipGate } = await import("./auth-gates");
+  if (!(await ipGate(headers))) {
     setAuthContext({ keyPermissions: null, keyId: null });
     return null;
   }
@@ -114,6 +126,41 @@ export function getCookieOptions(headers?: Headers) {
     path: "/",
     maxAge: 60 * 60 * 24 * sessionDays,
   };
+}
+
+// ── Session tracking ─────────────────────────────────────────────────────────
+// Every cookie login is recorded (by token hash) so it can be listed and
+// revoked. Best-effort: tracking failures never block authentication.
+
+/** Record a fresh login so it appears in the session list. */
+export async function trackIssuedSession(token: string, headers?: Headers): Promise<void> {
+  try {
+    const { registerSession } = await import("./session-store");
+    const session = verifyToken(token);
+    if (!session) return;
+    const ip =
+      headers?.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      headers?.get("x-real-ip") ||
+      null;
+    await registerSession(token, {
+      userId: session.userId,
+      ip,
+      userAgent: headers?.get("user-agent") ?? null,
+    });
+  } catch {
+    /* tracking must never break a login */
+  }
+}
+
+/** Revoke the session attached to a token (logout). */
+export async function revokeIssuedSession(token: string | null | undefined): Promise<void> {
+  if (!token) return;
+  try {
+    const { revokeSessionByToken } = await import("./session-store");
+    await revokeSessionByToken(token);
+  } catch {
+    /* best-effort */
+  }
 }
 
 // ── Login throttling ─────────────────────────────────────────────────────────

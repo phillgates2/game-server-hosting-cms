@@ -8,9 +8,11 @@ import type { GameTemplate } from "./types";
 
 import { minecraftJava } from "./minecraft-java";
 import { minecraftNeoForge } from "./minecraft-neoforge";
+import { minecraftFabric } from "./minecraft-fabric";
 import { minecraftPaper } from "./minecraft-paper";
 import { minecraftBedrock } from "./minecraft-bedrock";
 import { cs2 } from "./cs2";
+import { counterStrikeSource } from "./counter-strike-source";
 import { tf2 } from "./tf2";
 import { gmod } from "./gmod";
 import { l4d2 } from "./l4d2";
@@ -26,6 +28,10 @@ import { insurgencySandstorm } from "./insurgency-sandstorm";
 import { squad } from "./squad";
 import { arma3 } from "./arma3";
 import { wolfensteinET } from "./wolfenstein-et";
+import { unturned } from "./unturned";
+import { coreKeeper } from "./core-keeper";
+import { mindustry } from "./mindustry";
+import { vintageStory } from "./vintage-story";
 import { openra } from "./openra";
 import { quakeLive } from "./quake-live";
 import { xonotic } from "./xonotic";
@@ -43,10 +49,12 @@ export const gameTemplates: GameTemplate[] = [
   // Minecraft
   minecraftJava,
   minecraftNeoForge,
+  minecraftFabric,
   minecraftPaper,
   minecraftBedrock,
   // Valve / Source engine
   cs2,
+  counterStrikeSource,
   tf2,
   gmod,
   l4d2,
@@ -69,6 +77,10 @@ export const gameTemplates: GameTemplate[] = [
   arma3,
   // Classics
   wolfensteinET,
+  unturned,
+  coreKeeper,
+  mindustry,
+  vintageStory,
   openra,
   quakeLive,
   xonotic,
@@ -84,9 +96,11 @@ export const gameTemplates: GameTemplate[] = [
 export const EXPECTED_ARTIFACTS_BY_SLUG: Record<string, string[]> = {
   "minecraft-java": ["server.jar"],
   "minecraft-neoforge": ["run.sh"],
+  "minecraft-fabric": ["fabric-server-launch.jar"],
   "minecraft-paper": ["server.jar"],
   "minecraft-bedrock": ["bedrock_server"],
   "cs2": ["game/bin/linuxsteamrt64/cs2"],
+  "counter-strike-source": ["srcds_run"],
   "tf2": ["srcds_run"],
   "gmod": ["srcds_run"],
   "l4d2": ["srcds_run"],
@@ -102,6 +116,10 @@ export const EXPECTED_ARTIFACTS_BY_SLUG: Record<string, string[]> = {
   "squad": ["SquadGame/Binaries/Linux/SquadGameServer*"],
   "arma3": ["arma3server_x64"],
   "wolfenstein-et": ["etlded", "etmain/pak0.pk3"],
+  "unturned": ["Unturned_Headless.x86_64"],
+  "core-keeper": ["_launch.sh"],
+  "mindustry": ["server-release.jar"],
+  "vintage-story": ["VintagestoryServer", "VintagestoryServer.dll"],
   "openra": ["OpenRA.AppImage|openra-extracted/AppRun"],
   "quake-live": ["run_server_x64.sh"],
   "xonotic": ["xonotic-linux64-dedicated"],

@@ -35,6 +35,15 @@ export async function POST(
     const body = await req.json();
     const newName = body.name || `${source.name} (Clone)`;
 
+    // Optional TTL turns the clone into an ephemeral test server that the
+    // panel stops and deletes automatically when it expires.
+    const { clampTtlHours } = await import("@/lib/ephemeral");
+    const ttl = body.ttlHours === undefined ? null : clampTtlHours(body.ttlHours);
+    if (body.ttlHours !== undefined && ttl === null) {
+      return NextResponse.json({ error: "ttlHours must be between 1 and 168" }, { status: 400 });
+    }
+    const expiresAt = ttl === null ? null : new Date(Date.now() + ttl * 3_600_000);
+
     // Clone is a create: it must respect the same quota, or a user at their
     // limit could simply clone past it.
     if (auth.role !== "admin") {
@@ -135,6 +144,10 @@ export async function POST(
       discordNotifyStop: source.discordNotifyStop,
       discordNotifyRestart: source.discordNotifyRestart,
       discordNotifyCrash: source.discordNotifyCrash,
+      discordNotifyPlayers: source.discordNotifyPlayers,
+      notes: source.notes ?? null,
+      tags: source.tags ?? null,
+      expiresAt,
     }).returning();
 
     // Give the clone its own channel, mirroring what happens on create.

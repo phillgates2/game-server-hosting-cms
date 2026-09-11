@@ -81,6 +81,7 @@ export function isLikelyBot(name: string, ping: number): boolean {
 const SPECS: Record<string, ProbeSpec> = {
   // Source / Source 2 with a query port (game port + 1 by convention)
   "cs2": { kind: "a2s", port: "query" },
+  "counter-strike-source": { kind: "a2s", port: "query" },
   "tf2": { kind: "a2s", port: "query" },
   "gmod": { kind: "a2s", port: "query" },
   "l4d2": { kind: "a2s", port: "query" },
@@ -102,6 +103,7 @@ const SPECS: Record<string, ProbeSpec> = {
   // Minecraft family
   "minecraft-java": { kind: "minecraft", port: "game" },
   "minecraft-neoforge": { kind: "minecraft", port: "game" },
+  "minecraft-fabric": { kind: "minecraft", port: "game" },
   "minecraft-paper": { kind: "minecraft", port: "game" },
   "minecraft-bedrock": { kind: "bedrock", port: "game" },
 };

@@ -1,5 +1,6 @@
 import { V, group, STEAM_VARS, RCON_VARS, type GameTemplate, STEAMCMD_VAR } from "./types";
 import { steamInstallScript } from "./steamcmd";
+import { sourceModVariables, sourceModInstallBlock } from "./source-mods";
 
 // Left 4 Dead 2 dedicated server (srcds). Reads left4dead2/cfg/server.cfg.
 export const l4d2: GameTemplate = {
@@ -16,6 +17,7 @@ export const l4d2: GameTemplate = {
   variables: [
     ...STEAM_VARS,
     STEAMCMD_VAR,
+    ...sourceModVariables(),
     ...RCON_VARS,
 
     ...group("Match Setup", [
@@ -125,7 +127,8 @@ export const l4d2: GameTemplate = {
     name: "Left 4 Dead 2",
   i386: true,
     post: `## srcds reads cfg files from left4dead2/cfg — the panel writes server.cfg there
-mkdir -p "$INSTALL_DIR/left4dead2/cfg"`,
+mkdir -p "$INSTALL_DIR/left4dead2/cfg"\n` +
+      sourceModInstallBlock("left4dead2"),
   }),
 
   startCommand: `cd {{INSTALL_PATH}} && ./srcds_run -game left4dead2 -console -port {{PORT}} +maxplayers {{MAX_PLAYERS}} +map {{MAP}} +mp_gamemode {{MP_GAMEMODE}}`,

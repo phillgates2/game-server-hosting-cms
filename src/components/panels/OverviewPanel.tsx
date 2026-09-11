@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { eventLabel } from "@/lib/event-labels";
+import type { FleetEvent } from "@/lib/event-feed";
+import { UPTIME_ATTENTION_PERCENT, type UptimeGrade } from "@/lib/uptime";
+import { IDLE_DEFAULT_THRESHOLD_HOURS } from "@/lib/idle-math";
 import { movePanelInOrder, type DashboardPanelId } from "./dashboardLayoutUtils";
 
 interface AuthUser {
@@ -56,6 +60,9 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
   const [games, setGames] = useState<GameRow[]>([]);
   const [nodeList, setNodeList] = useState<NodeRow[]>([]);
   const [recentActivity, setRecentActivity] = useState<ActivityEntry[]>([]);
+  const [fleetEvents, setFleetEvents] = useState<FleetEvent[]>([]);
+  const [fleetUptime, setFleetUptime] = useState<Array<{ serverId: number; name: string; gameIcon: string | null; percent: number | null; checks: number; grade: UptimeGrade }>>([]);
+  const [idleServers, setIdleServers] = useState<Array<{ serverId: number; name: string; idleFor: string }>>([]);
   const [loaded, setLoaded] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -145,6 +152,48 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
     return () => window.clearTimeout(timer);
   }, []);
 
+  useEffect(() => {
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch("/api/servers/uptime?hours=168");
+        if (res.ok) {
+          const data = await res.json();
+          setFleetUptime((data.servers || []).filter((x: { percent: number | null }) => x.percent !== null));
+        }
+      } catch {
+        setFleetUptime([]);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch("/api/servers/idle");
+        if (res.ok) setIdleServers((await res.json()).idle || []);
+      } catch {
+        setIdleServers([]);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch("/api/servers/events?hours=24");
+        if (res.ok) {
+          const data = await res.json();
+          setFleetEvents(data.events || []);
+        }
+      } catch {
+        setFleetEvents([]);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   const onlineServers = servers.filter((s) => s.status === "running").length;
   const onlineNodes = nodeList.filter((n) => n.status === "online").length;
   const hasNodes = nodeList.length > 0;
@@ -156,6 +205,9 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
     ...(offlineNodes > 0 ? [`${offlineNodes} node${offlineNodes === 1 ? "" : "s"} ${offlineNodes === 1 ? "is" : "are"} offline.`] : []),
     ...(failedInstalls > 0 ? [`${failedInstalls} server${failedInstalls === 1 ? "" : "s"} ${failedInstalls === 1 ? "has" : "have"} an install failure.`] : []),
     ...(hasServers && onlineServers === 0 ? ["No servers are currently running."] : []),
+    ...(idleServers.length > 0
+      ? [`😴 ${idleServers.length} server${idleServers.length === 1 ? " has" : "s have"} had zero players for ${IDLE_DEFAULT_THRESHOLD_HOURS}h+ — longest: ${idleServers[0].name} (${idleServers[0].idleFor}). Consider stopping ${idleServers.length === 1 ? "it" : "them"}.`]
+      : []),
   ];
 
   const togglePanel = (panelId: DashboardPanelId) => {
@@ -352,6 +404,61 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
       )}
 
       {panelOrder.map((panelId) => panelSections[panelId])}
+
+      {loaded && hasServers && (
+        <div className="gaming-surface rounded-xl p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="heading-font text-lg font-semibold uppercase tracking-[0.06em]">💥 Fleet incidents (24h)</h3>
+              <p className="text-sm text-text-secondary">Crashes, watchdog stops and auto-restarts across your servers.</p>
+            </div>
+            <span className="text-xs text-text-muted whitespace-nowrap">{fleetEvents.length} event{fleetEvents.length === 1 ? "" : "s"}</span>
+          </div>
+          <div className="mt-4 space-y-2">
+            {fleetEvents.length > 0 ? fleetEvents.slice(0, 12).map((ev) => (
+              <div key={ev.id} className="rounded-lg border border-border bg-bg-secondary/70 px-3 py-2 flex items-center justify-between gap-2">
+                <p className="text-sm min-w-0 truncate">
+                  <span>{eventLabel(ev.kind)}</span>
+                  <span className="text-text-secondary"> — {ev.serverName || `Server #${ev.serverId}`}</span>
+                  {ev.gameName ? <span className="text-text-muted text-xs"> · {ev.gameIcon || "🎮"} {ev.gameName}</span> : null}
+                </p>
+                <span className="text-[11px] text-text-muted whitespace-nowrap">{formatRelativeTime(ev.createdAt)}</span>
+              </div>
+            )) : (
+              <p className="rounded-lg bg-bg-secondary px-3 py-2 text-sm text-text-secondary">No incidents in the last 24 hours. 🌙</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {loaded && hasServers && fleetUptime.length > 0 && (
+        <div className="gaming-surface rounded-xl p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="heading-font text-lg font-semibold uppercase tracking-[0.06em]">📉 Fleet stability (7 days)</h3>
+              <p className="text-sm text-text-secondary">Share of 5-minute checks the process was alive while the server ran.</p>
+            </div>
+            <span className="text-xs text-text-muted whitespace-nowrap">{fleetUptime.filter((u) => u.percent !== null && u.percent < UPTIME_ATTENTION_PERCENT).length} below {UPTIME_ATTENTION_PERCENT}%</span>
+          </div>
+          <div className="mt-4 space-y-2">
+            {fleetUptime.slice(0, 8).map((u) => {
+              const pct = u.percent ?? 0;
+              const color = u.grade === "excellent" ? "text-success" : u.grade === "good" ? "text-warning" : "text-danger";
+              return (
+                <div key={u.serverId} className="rounded-lg border border-border bg-bg-secondary/70 px-3 py-2 flex items-center justify-between gap-2">
+                  <p className="text-sm min-w-0 truncate">{u.gameIcon || "🎮"} {u.name}</p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="w-32 h-1.5 rounded-full bg-bg-tertiary overflow-hidden">
+                      <div className={`h-full rounded-full ${u.grade === "excellent" ? "bg-success" : u.grade === "good" ? "bg-warning" : "bg-danger"}`} style={{ width: `${Math.max(2, pct)}%` }} />
+                    </div>
+                    <span className={`text-xs font-semibold ${color}`}>{pct}%</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {(attentionItems.length > 0 || recentActivity.length > 0) && (
         <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">

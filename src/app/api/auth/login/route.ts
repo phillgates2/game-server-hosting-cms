@@ -11,6 +11,7 @@ import {
 } from "@/lib/auth";
 import { getUserPermissions } from "@/lib/permissions";
 import { apiError } from "@/lib/api-error";
+import { accessGatePassed, ACCESS_GATE_ERROR } from "@/lib/access-gate";
 import { eq, sql } from "drizzle-orm";
 import * as OTPAuth from "otpauth";
 
@@ -27,6 +28,11 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const username = (body.username || "").trim();
     const password = body.password || "";
+
+    // CD-key gate: when enabled, credentials alone are not enough.
+    if (!(await accessGatePassed(body.accessKey))) {
+      return NextResponse.json({ error: ACCESS_GATE_ERROR }, { status: 403 });
+    }
     const twoFactorCode = body.twoFactorCode ? String(body.twoFactorCode).trim() : "";
 
     if (!username || !password) {
@@ -82,11 +88,30 @@ export async function POST(req: NextRequest) {
       });
 
       if (totp.validate({ token: twoFactorCode, window: 1 }) === null) {
-        recordFailedLogin(throttleKey);
-        return NextResponse.json(
-          { twoFactorRequired: true, error: "Invalid two-factor code" },
-          { status: 401 }
-        );
+        // Not a TOTP — try a single-use recovery code. The consumed code is
+        // deleted immediately; a spent code can never open the account again.
+        const { isLikelyRecoveryCode, consumeRecoveryCode } = await import("@/lib/recovery-codes");
+        let recovered = false;
+        if (isLikelyRecoveryCode(twoFactorCode)) {
+          const stored = user.twoFactorRecovery
+            ? (JSON.parse(user.twoFactorRecovery) as string[])
+            : [];
+          const result = consumeRecoveryCode(stored, twoFactorCode);
+          if (result.match) {
+            await db
+              .update(users)
+              .set({ twoFactorRecovery: JSON.stringify(result.remaining), updatedAt: new Date() })
+              .where(eq(users.id, user.id));
+            recovered = true;
+          }
+        }
+        if (!recovered) {
+          recordFailedLogin(throttleKey);
+          return NextResponse.json(
+            { twoFactorRequired: true, error: "Invalid two-factor code" },
+            { status: 401 }
+          );
+        }
       }
     }
 
@@ -111,6 +136,8 @@ export async function POST(req: NextRequest) {
       permissions,
     });
     res.cookies.set("gsm_token", token, getCookieOptions(req.headers));
+    const { trackIssuedSession } = await import("@/lib/auth");
+    await trackIssuedSession(token, req.headers);
     return res;
   } catch (e: unknown) {
     return apiError(e, "Login failed");

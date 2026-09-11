@@ -69,15 +69,44 @@ describe("panel setting validation", () => {
     assert.notEqual(validatePanelSetting("registration_enabled", "maybe").error, null);
   });
 
+  test("update_auto_backup and age_verification_enabled are boolean settings", () => {
+    assert.deepEqual(validatePanelSetting("update_auto_backup", true), { value: "true", error: null });
+    assert.deepEqual(validatePanelSetting("update_auto_backup", "false"), { value: "false", error: null });
+    assert.match(String(validatePanelSetting("update_auto_backup", "maybe").error), /on or off/);
+    assert.deepEqual(validatePanelSetting("age_verification_enabled", false), { value: "false", error: null });
+    assert.match(String(validatePanelSetting("age_verification_enabled", 1).error), /on or off/);
+  });
+
+  test("minimum_account_age cannot go below the Australian floor of 16", () => {
+    // The law sets 16; operators may raise the bar, never lower it.
+    assert.equal(validatePanelSetting("minimum_account_age", 16).error, null);
+    assert.equal(validatePanelSetting("minimum_account_age", 21).error, null);
+    assert.match(String(validatePanelSetting("minimum_account_age", 15).error), /between 16 and 120/);
+    assert.match(String(validatePanelSetting("minimum_account_age", 121).error), /between 16 and 120/);
+    assert.match(String(validatePanelSetting("minimum_account_age", 16.5).error), /whole number/);
+  });
+
   test("refuses unknown keys rather than storing junk", () => {
     assert.match(String(validatePanelSetting("drop_all_tables", 1).error), /Unknown setting/);
   });
 
   test("every advertised key validates", () => {
+    const probeFor = (key: string): unknown => {
+      if (
+        key === "registration_enabled" ||
+        key === "update_auto_backup" ||
+        key === "age_verification_enabled" ||
+        key === "scheduler_discord_notify"
+      ) {
+        return true;
+      }
+      if (key === "minimum_account_age") return 16;
+      if (key === "backup_retention_count") return 10;
+      return 1;
+    };
     for (const key of PANEL_SETTING_KEYS) {
-      const probe = key === "registration_enabled" ? true : 1;
       assert.equal(
-        validatePanelSetting(key, probe).error,
+        validatePanelSetting(key, probeFor(key)).error,
         null,
         `${key} should accept a valid value`
       );
@@ -140,6 +169,61 @@ describe("parsing stored settings", () => {
         .registrationEnabled,
       true
     );
+  });
+
+  test("safety-net defaults: pre-update backup on, age gate on at 16", () => {
+    // Both protections must be active on a fresh install without any
+    // configuration: an unconfigured panel is exactly the one that needs
+    // the safety nets most.
+    const p = parsePanelSettings([], defaults);
+    assert.equal(p.updateAutoBackup, true);
+    assert.equal(p.ageVerificationEnabled, true);
+    assert.equal(p.minimumAccountAge, 16);
+  });
+
+  test("stored overrides for the update-backup and age settings", () => {
+    const p = parsePanelSettings(
+      [
+        { key: "update_auto_backup", value: "false" },
+        { key: "age_verification_enabled", value: "false" },
+        { key: "minimum_account_age", value: "18" },
+      ],
+      defaults
+    );
+    assert.equal(p.updateAutoBackup, false);
+    assert.equal(p.ageVerificationEnabled, false);
+    assert.equal(p.minimumAccountAge, 18);
+  });
+
+  test("a corrupt minimum-age row falls back to 16, never below", () => {
+    const p = parsePanelSettings(
+      [{ key: "minimum_account_age", value: "junk" }],
+      defaults
+    );
+    assert.equal(p.minimumAccountAge, 16);
+  });
+
+  test("backup retention: defaults to 10, accepts 0 (keep all), rejects nonsense", () => {
+    assert.equal(parsePanelSettings([], defaults).backupRetentionCount, 10);
+    assert.equal(
+      parsePanelSettings([{ key: "backup_retention_count", value: "0" }], defaults).backupRetentionCount,
+      0,
+      "a stored 0 means keep everything and must survive parsing"
+    );
+    assert.equal(validatePanelSetting("backup_retention_count", 25).error, null);
+    assert.match(String(validatePanelSetting("backup_retention_count", -1).error), /between 0 and 100/);
+    assert.match(String(validatePanelSetting("backup_retention_count", 101).error), /between 0 and 100/);
+  });
+
+  test("scheduled-task Discord notifications default on and can be silenced", () => {
+    assert.equal(parsePanelSettings([], defaults).schedulerDiscordNotify, true);
+    assert.equal(
+      parsePanelSettings([{ key: "scheduler_discord_notify", value: "false" }], defaults)
+        .schedulerDiscordNotify,
+      false
+    );
+    assert.deepEqual(validatePanelSetting("scheduler_discord_notify", true), { value: "true", error: null });
+    assert.match(String(validatePanelSetting("scheduler_discord_notify", "maybe").error), /on or off/);
   });
 });
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { gameServers, gameDefinitions, nodes } from "@/db/schema";
+import { gameServers, gameDefinitions, nodes, settings } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
@@ -49,7 +49,41 @@ export async function POST(
       return NextResponse.json({ error: "This server does not use SteamCMD or SteamCMD is not installed on the host. Use Install Files instead." }, { status: 400 });
     }
 
+    // Safety net: archive the server before Steam overwrites files. On by
+    // default ("update_auto_backup" in Settings → Panel). A failed backup
+    // aborts the update rather than proceeding without a restore point —
+    // that is the exact failure mode this feature exists to prevent. The
+    // status stays "stopped" when it aborts, so nothing else can act on it.
+    const [autoBackupRow] = await db
+      .select({ value: settings.value })
+      .from(settings)
+      .where(eq(settings.key, "update_auto_backup"))
+      .limit(1);
+    const autoBackup = (autoBackupRow?.value ?? "true") !== "false";
+
+    let backupName: string | null = null;
+    if (autoBackup) {
+      try {
+        const { createServerBackup } = await import("@/lib/backup");
+        const backup = await createServerBackup(server.installPath);
+        backupName = backup.name;
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return NextResponse.json(
+          {
+            error: `Automatic pre-update backup failed (${msg}). The update was aborted and no files were changed. Turn off "Automatic backup before update" in Settings → Panel to update without a backup.`,
+          },
+          { status: 500 }
+        );
+      }
+    }
+
     await db.update(gameServers).set({ status: "installing", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
+
+    // Snapshot before Steam touches anything so we can report what changed.
+    // Best-effort: a failing walk must never block the update itself.
+    const { snapshotInstallPath, diffSnapshots, configFilesChanged, formatUpdateReport } = await import("@/lib/update-diff");
+    const pre = await snapshotInstallPath(server.installPath).catch(() => null);
 
     const { runSteamUpdate } = await import("@/lib/server-update-runner");
     const result = await runSteamUpdate({
@@ -61,7 +95,32 @@ export async function POST(
 
     await db.update(gameServers).set({ status: "stopped", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
 
-    return NextResponse.json({ ok: true, message: `${server.gameName} updated successfully`, output: result.stdout.slice(-4000) });
+    // Diff + persist the report (best-effort, like all history writes).
+    let report: { added: number; removed: number; changed: number; configsChanged: string[]; truncated: boolean } | null = null;
+    if (pre) {
+      const post = await snapshotInstallPath(server.installPath).catch(() => null);
+      if (post) {
+        const diff = diffSnapshots(pre.entries, post.entries, pre.truncated, post.truncated);
+        const configs = configFilesChanged(diff);
+        report = {
+          added: diff.added.length,
+          removed: diff.removed.length,
+          changed: diff.changed.length,
+          configsChanged: configs.slice(0, 20),
+          truncated: diff.truncated,
+        };
+        try {
+          const { recordServerEvent } = await import("@/lib/server-events");
+          await recordServerEvent(server.id, "update-report", formatUpdateReport(diff).slice(0, 500));
+        } catch {
+          /* best-effort */
+        }
+      }
+    }
+
+    const backupNote = backupName ? ` (pre-update backup: ${backupName})` : "";
+    const configNote = report && report.configsChanged.length > 0 ? ` — heads-up: ${report.configsChanged.length} config file(s) changed` : "";
+    return NextResponse.json({ ok: true, backup: backupName, report, message: `${server.gameName} updated successfully${backupNote}${configNote}`, output: result.stdout.slice(-4000) });
   } catch (e: unknown) {
     const err = e as { message?: string; stdout?: string; stderr?: string };
     try { await db.update(gameServers).set({ status: "stopped", updatedAt: new Date() }).where(eq(gameServers.id, Number(id))); } catch { /**/ }

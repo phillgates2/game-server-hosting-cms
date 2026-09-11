@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { gameServers } from "@/db/schema";
+import { gameServers, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
@@ -27,8 +27,18 @@ export async function GET(
 
   try {
     const [server] = await db
-      .select({ id: gameServers.id, userId: gameServers.userId, installPath: gameServers.installPath, status: gameServers.status, pid: gameServers.pid })
+      .select({
+        id: gameServers.id,
+        userId: gameServers.userId,
+        installPath: gameServers.installPath,
+        status: gameServers.status,
+        pid: gameServers.pid,
+        nodeIsLocal: nodes.isLocal,
+        nodeApiUrl: nodes.apiUrl,
+        nodeApiKey: nodes.apiKey,
+      })
       .from(gameServers)
+      .leftJoin(nodes, eq(gameServers.nodeId, nodes.id))
       .where(eq(gameServers.id, Number(id)))
       .limit(1);
 
@@ -37,12 +47,31 @@ export async function GET(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const logPath = join(server.installPath, "gsm-server.log");
     const url = new URL(req.url);
     // Raw parseInt let "-5" return an empty log (indistinguishable from a
     // server that produced no output) and "1e9" return a single line, because
     // parseInt stops at the "e". Clamped to a sane range instead.
     const tailLines = intParam(url.searchParams.get("tail"), 200, 1, 5000);
+
+    // Remote node: the log lives on the agent's machine.
+    if (server.nodeIsLocal === false) {
+      if (!server.nodeApiUrl || !server.nodeApiKey) {
+        return NextResponse.json({ error: "This server's node has no agent URL/key configured." }, { status: 400 });
+      }
+      const { remoteLogTail } = await import("@/lib/node-client");
+      try {
+        const log = await remoteLogTail(
+          { apiUrl: server.nodeApiUrl, apiKey: server.nodeApiKey },
+          server.installPath,
+          tailLines
+        );
+        return NextResponse.json({ log, lines: log ? log.split("\n").length : 0, offset: 0, fileSizeKb: 0, status: server.status, pid: server.pid });
+      } catch (e: unknown) {
+        return NextResponse.json({ error: `Node agent: ${e instanceof Error ? e.message : String(e)}` }, { status: 502 });
+      }
+    }
+
+    const logPath = join(server.installPath, "gsm-server.log");
 
     let content = "";
     let fileSize = 0;

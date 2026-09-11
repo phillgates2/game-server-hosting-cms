@@ -3,6 +3,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useToast } from "@/components/ToastProvider";
 import { useConfirm } from "@/components/ConfirmDialog";
+import AccessGateSection from "./AccessGateSection";
+import { keyVerdict } from "@/lib/key-hygiene";
 
 interface ApiKey {
   id: number; name: string; keyPrefix: string;
@@ -11,6 +13,7 @@ interface ApiKey {
 }
 
 export default function ApiKeysPanel() {
+  const [now] = useState(() => Date.now());
   const toast = useToast();
   const confirm = useConfirm();
   const [keys, setKeys] = useState<ApiKey[]>([]);
@@ -68,9 +71,11 @@ export default function ApiKeysPanel() {
   return (
     <div className="animate-fade-in panel-view space-y-6">
       <div className="flex items-center justify-between">
-        <div><h2 className="text-2xl font-bold">🔐 API Keys</h2><p className="text-text-secondary text-sm">Generate personal API keys for external tools and scripts</p></div>
+        <div><h2 className="text-2xl font-bold">🔐 API Keys</h2><p className="text-text-secondary text-sm">Generate personal API keys for external tools and scripts · <a href="/api-docs" className="text-accent hover:underline" target="_blank" rel="noreferrer">📖 API reference</a></p></div>
         <button onClick={() => { setShowCreate(!showCreate); setNewKey(null); }} className="px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium">{showCreate ? "✕ Cancel" : "+ New Key"}</button>
       </div>
+
+      <AccessGateSection />
 
       {/* New key reveal */}
       {newKey && (
@@ -118,7 +123,14 @@ export default function ApiKeysPanel() {
               <div className="flex items-center gap-4">
                 <span className="text-2xl">🔑</span>
                 <div>
-                  <h3 className="font-semibold">{key.name}</h3>
+                  <h3 className="font-semibold">
+                    {key.name}{" "}
+                    {(() => {
+                      const v = keyVerdict({ createdAt: key.createdAt, lastUsedAt: key.lastUsedAt, expiresAt: key.expiresAt }, now);
+                      const toneCls = v.tone === "danger" ? "bg-danger/15 text-danger" : v.tone === "warn" ? "bg-warning/15 text-warning" : "bg-success/15 text-success";
+                      return <span className={`ml-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${toneCls}`}>{v.label}</span>;
+                    })()}
+                  </h3>
                   <div className="flex gap-3 mt-1 text-xs text-text-muted">
                     <span className="font-mono">{key.keyPrefix}•••</span>
                     <span>Created {new Date(key.createdAt).toLocaleDateString()}</span>

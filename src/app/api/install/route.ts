@@ -134,7 +134,10 @@ export async function POST(req: NextRequest) {
         theme_config JSONB,
         two_factor_enabled BOOLEAN DEFAULT FALSE,
         two_factor_secret TEXT,
+        two_factor_recovery TEXT,
         max_servers INTEGER DEFAULT 5,
+        date_of_birth DATE,
+        age_verified_at TIMESTAMP,
         last_login_at TIMESTAMP,
         last_login_ip VARCHAR(45),
         login_count INTEGER DEFAULT 0,
@@ -164,6 +167,7 @@ export async function POST(req: NextRequest) {
         status VARCHAR(20) NOT NULL DEFAULT 'offline',
         is_local BOOLEAN DEFAULT FALSE,
         is_default BOOLEAN DEFAULT FALSE,
+        maintenance_mode BOOLEAN DEFAULT FALSE,
         last_heartbeat TIMESTAMP,
         location VARCHAR(128),
         provider VARCHAR(64),
@@ -237,11 +241,17 @@ export async function POST(req: NextRequest) {
         discord_notify_stop BOOLEAN DEFAULT TRUE,
         discord_notify_restart BOOLEAN DEFAULT TRUE,
         discord_notify_crash BOOLEAN DEFAULT TRUE,
+        discord_notify_players BOOLEAN DEFAULT TRUE,
         discord_channel_id TEXT,
         discord_status_enabled BOOLEAN DEFAULT FALSE,
         discord_status_message_id TEXT,
         discord_status_updated_at TIMESTAMP,
         discord_status_error TEXT,
+        status_token VARCHAR(64) UNIQUE,
+        status_public BOOLEAN DEFAULT FALSE,
+        notes TEXT,
+        tags JSONB,
+        expires_at TIMESTAMP,
         last_started TIMESTAMP,
         last_stopped TIMESTAMP,
         created_at TIMESTAMP DEFAULT NOW() NOT NULL,
@@ -347,6 +357,99 @@ export async function POST(req: NextRequest) {
         value TEXT,
         created_at TIMESTAMP DEFAULT NOW() NOT NULL,
         updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+
+      -- Player-count samples (idle + heatmap history)
+      CREATE TABLE IF NOT EXISTS player_samples (
+        id SERIAL PRIMARY KEY,
+        server_id INTEGER REFERENCES game_servers(id) NOT NULL,
+        players INTEGER NOT NULL,
+        recorded_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS player_samples_server_idx ON player_samples (server_id, recorded_at);
+
+      -- Tracked login sessions (revocable)
+      CREATE TABLE IF NOT EXISTS auth_sessions (
+        id SERIAL PRIMARY KEY,
+        token_hash TEXT NOT NULL UNIQUE,
+        user_id INTEGER REFERENCES users(id) NOT NULL,
+        ip_address VARCHAR(45),
+        user_agent VARCHAR(256),
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        last_seen_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        revoked_at TIMESTAMP
+      );
+
+      -- Server change history (field-level diffs)
+      CREATE TABLE IF NOT EXISTS server_changes (
+        id SERIAL PRIMARY KEY,
+        server_id INTEGER REFERENCES game_servers(id) NOT NULL,
+        user_id INTEGER REFERENCES users(id),
+        field VARCHAR(64) NOT NULL,
+        from_value TEXT,
+        to_value TEXT,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS server_changes_server_idx ON server_changes (server_id, created_at);
+
+      -- Idle detection state (zero-player streaks)
+      CREATE TABLE IF NOT EXISTS server_idle_state (
+        server_id INTEGER PRIMARY KEY REFERENCES game_servers(id) ON DELETE CASCADE,
+        zero_players_since TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+
+      -- Server stability history (uptime samples)
+      CREATE TABLE IF NOT EXISTS server_uptime_history (
+        id SERIAL PRIMARY KEY,
+        server_id INTEGER REFERENCES game_servers(id) NOT NULL,
+        online BOOLEAN NOT NULL,
+        checked_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS server_uptime_history_server_idx
+        ON server_uptime_history (server_id, checked_at);
+
+      -- Panel access keys (CD-key gate)
+      CREATE TABLE IF NOT EXISTS access_keys (
+        id SERIAL PRIMARY KEY,
+        key_hash TEXT NOT NULL UNIQUE,
+        key_prefix VARCHAR(16) NOT NULL,
+        label VARCHAR(128),
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        last_used_at TIMESTAMP,
+        revoked_at TIMESTAMP
+      );
+
+      -- Server presets (one-click setups)
+      CREATE TABLE IF NOT EXISTS server_presets (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        name VARCHAR(128) NOT NULL,
+        description TEXT,
+        game_id INTEGER REFERENCES game_definitions(id) NOT NULL,
+        variables JSONB,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+
+      -- Server lifecycle events (crash/restart history)
+      CREATE TABLE IF NOT EXISTS server_events (
+        id SERIAL PRIMARY KEY,
+        server_id INTEGER REFERENCES game_servers(id) NOT NULL,
+        kind VARCHAR(32) NOT NULL,
+        detail TEXT,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+
+      -- Password reset links (raw token only ever exists in the email)
+      CREATE TABLE IF NOT EXISTS password_resets (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TIMESTAMP NOT NULL,
+        used_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL
       );
 
       -- Scheduled Tasks

@@ -5,11 +5,12 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { sendDiscordWebhook, resolveWebhookUrl } from "@/lib/discord";
 import { allowServerPorts, denyServerPorts, updateServerPorts } from "@/lib/firewall";
-import { eq, and, ne } from "drizzle-orm";
+import { eq, and, ne, sql } from "drizzle-orm";
 import { rm } from "node:fs/promises";
 import { resolve, relative } from "node:path";
 import { apiError } from "@/lib/api-error";
-import { pickServerPatch, validatePorts } from "@/lib/server-lifecycle";
+import { pickServerPatch, validatePorts, normalizeServerNotes } from "@/lib/server-lifecycle";
+import { normalizeServerTags } from "@/lib/server-tags";
 
 function isProcessAlive(pid: number): boolean {
   try {
@@ -70,6 +71,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       .select({
         id: gameServers.id,
         name: gameServers.name,
+        userId: gameServers.userId,
         ipv4: gameServers.ipv4,
         ipv6: gameServers.ipv6,
         port: gameServers.port,
@@ -93,6 +95,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       .limit(1);
 
     if (!server) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+    if (auth.role !== "admin" && server.userId !== auth.userId) {
+      const { getCollaboratorRole } = await import("@/lib/server-collab");
+      const collabRole = await getCollaboratorRole(server.id, auth.userId);
+      if (!collabRole) return NextResponse.json({ error: "Not found" }, { status: 404 });
+      // Shared users may inspect but never see the webhook secret.
+      server.discordWebhook = null;
+    }
     return NextResponse.json({ server });
   } catch (e: unknown) {
     return apiError(e, "Unknown", 500);
@@ -120,6 +130,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         queryPort: gameServers.queryPort,
         rconPort: gameServers.rconPort,
         discordWebhook: gameServers.discordWebhook,
+        autoRestart: gameServers.autoRestart,
+        autoStart: gameServers.autoStart,
+        maxRamMb: gameServers.maxRamMb,
+        maxCpuPercent: gameServers.maxCpuPercent,
+        statusPublic: gameServers.statusPublic,
+        notes: gameServers.notes,
+        tags: gameServers.tags,
         gameName: gameDefinitions.name,
         gameSlug: gameDefinitions.slug,
         variables: gameServers.variables,
@@ -142,6 +159,48 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: "No updatable fields provided" }, { status: 400 });
+    }
+
+    // Notes live on installs created before the column existed; add lazily.
+    if (updates.notes !== undefined) {
+      try {
+        await db.execute(sql`ALTER TABLE game_servers ADD COLUMN IF NOT EXISTS notes TEXT`);
+      } catch { /* best-effort: the column exists on fresh installs */ }
+      const notes = normalizeServerNotes(updates.notes);
+      if (!notes.ok) {
+        return NextResponse.json({ error: notes.error }, { status: 400 });
+      }
+      updates.notes = notes.value;
+    }
+
+    // Tags share the lazy-upgrade story and need shape validation too.
+    if (updates.tags !== undefined) {
+      try {
+        await db.execute(sql`ALTER TABLE game_servers ADD COLUMN IF NOT EXISTS tags JSONB`);
+      } catch { /* best-effort */ }
+      const tags = normalizeServerTags(updates.tags);
+      if (!tags.ok) {
+        return NextResponse.json({ error: tags.error }, { status: 400 });
+      }
+      updates.tags = tags.value ?? [];
+    }
+
+    // Player-alert threshold: integer 1-1000, or null/empty to disable.
+    if (updates.playerAlertThreshold !== undefined) {
+      try {
+        await db.execute(sql`ALTER TABLE game_servers ADD COLUMN IF NOT EXISTS player_alert_threshold INTEGER`);
+        await db.execute(sql`ALTER TABLE game_servers ADD COLUMN IF NOT EXISTS player_alert_above BOOLEAN DEFAULT FALSE`);
+      } catch { /* best-effort */ }
+      const { parsePlayerAlertThreshold } = await import("@/lib/player-alerts");
+      const parsed = parsePlayerAlertThreshold(updates.playerAlertThreshold);
+      if (updates.playerAlertThreshold !== null && updates.playerAlertThreshold !== "" && parsed === null) {
+        return NextResponse.json({ error: "playerAlertThreshold must be a whole number between 1 and 1000 (or null to disable)" }, { status: 400 });
+      }
+      updates.playerAlertThreshold = parsed;
+      if (parsed === null) {
+        // Disarming also clears the edge-trigger state.
+        updates.playerAlertAbove = false;
+      }
     }
 
     // The allowlist controls which fields may be written, not what they may
@@ -188,6 +247,54 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       updates.queryPort = portCheck.ports.queryPort;
       updates.rconPort = portCheck.ports.rconPort;
     }
+
+    // Field-level change history — best-effort, never blocks the write.
+    try {
+      const { diffServerPatch } = await import("@/lib/server-changes");
+      const { serverChanges } = await import("@/db/schema");
+      const changes = diffServerPatch(
+        {
+          name: current.name,
+          status: current.status,
+          ipv4: current.ipv4,
+          ipv6: current.ipv6,
+          port: current.port,
+          queryPort: current.queryPort,
+          rconPort: current.rconPort,
+          discordWebhook: current.discordWebhook,
+          autoRestart: current.autoRestart,
+          autoStart: current.autoStart,
+          maxRamMb: current.maxRamMb,
+          maxCpuPercent: current.maxCpuPercent,
+          statusPublic: current.statusPublic,
+          notes: current.notes,
+          tags: current.tags,
+          variables: current.variables,
+          config: current.config,
+        },
+        updates
+      );
+      if (changes.length > 0) {
+        await db.execute(sql`CREATE TABLE IF NOT EXISTS server_changes (
+          id SERIAL PRIMARY KEY,
+          server_id INTEGER REFERENCES game_servers(id) NOT NULL,
+          user_id INTEGER REFERENCES users(id),
+          field VARCHAR(64) NOT NULL,
+          from_value TEXT,
+          to_value TEXT,
+          created_at TIMESTAMP DEFAULT NOW() NOT NULL
+        )`);
+        await db.insert(serverChanges).values(
+          changes.map((c) => ({
+            serverId: Number(id),
+            userId: auth.userId,
+            field: c.field,
+            fromValue: c.from,
+            toValue: c.to,
+          }))
+        );
+      }
+    } catch { /* history is informational only */ }
 
     const [updated] = await db
       .update(gameServers)

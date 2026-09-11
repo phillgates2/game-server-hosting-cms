@@ -9,7 +9,18 @@ import {
   recordFailedLogin,
 } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
-import { eq, or } from "drizzle-orm";
+import { accessGatePassed, ACCESS_GATE_ERROR } from "@/lib/access-gate";
+import { eq, or, sql } from "drizzle-orm";
+
+/**
+ * Upgrades from before age verification exist have no date_of_birth column.
+ * Added lazily here (the same pattern the profile route uses for
+ * theme_config) rather than requiring a manual migration step.
+ */
+async function ensureAgeVerificationColumns() {
+  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE`);
+  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS age_verified_at TIMESTAMP`);
+}
 
 // Mirrors the column widths in src/db/schema.ts. Without these the database
 // raises a length error and the route answers 500 for what is really a 400.
@@ -63,10 +74,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
 
-    const { username, email, password } = (body ?? {}) as Record<string, unknown>;
+    // CD-key gate: no key, no account.
+    if (!(await accessGatePassed((body as Record<string, unknown>).accessKey))) {
+      return NextResponse.json({ error: ACCESS_GATE_ERROR }, { status: 403 });
+    }
+
+    const { username, email, password, dateOfBirth } = (body ?? {}) as Record<string, unknown>;
 
     if (typeof username !== "string" || typeof email !== "string" || typeof password !== "string") {
       return NextResponse.json({ error: "All fields required" }, { status: 400 });
+    }
+
+    // ── Age verification ────────────────────────────────────────────────────
+    // Australian law (Online Safety Amendment (Social Media Minimum Age)
+    // Act 2024) bars people under 16 from holding accounts on platforms
+    // with community features. When the gate is on, a valid date of birth
+    // proving the minimum age is mandatory; it is stored on the account so
+    // the declaration can be audited.
+    const { checkMinimumAge } = await import("@/lib/age-verification");
+    let verifiedDob: string | null = null;
+    if (policy.ageVerificationEnabled) {
+      const check = checkMinimumAge(dateOfBirth, policy.minimumAccountAge);
+      if (!check.ok) {
+        if (check.reason === "under-age") recordFailedLogin(throttleKey);
+        return NextResponse.json(
+          { error: check.error || "Age verification failed" },
+          { status: check.reason === "under-age" ? 403 : 400 }
+        );
+      }
+      // Store the exact ISO date the client submitted.
+      verifiedDob = typeof dateOfBirth === "string" ? dateOfBirth.trim() : null;
     }
 
     const uname = username.trim();
@@ -116,6 +153,8 @@ export async function POST(req: NextRequest) {
 
     const passwordHash = await hashPassword(password);
 
+    await ensureAgeVerificationColumns();
+
     let created;
     try {
       [created] = await db
@@ -128,6 +167,8 @@ export async function POST(req: NextRequest) {
           // 0 in the settings panel means unlimited, which the column
           // represents as NULL.
           maxServers: policy.defaultMaxServers > 0 ? policy.defaultMaxServers : null,
+          dateOfBirth: verifiedDob,
+          ageVerifiedAt: verifiedDob ? new Date() : null,
         })
         .returning({ id: users.id, role: users.role, username: users.username });
     } catch (e: unknown) {
@@ -140,6 +181,11 @@ export async function POST(req: NextRequest) {
       throw e;
     }
 
+    // Best-effort welcome email. SMTP may not be configured and a mail
+    // hiccup must never fail a signup that already succeeded.
+    const { sendWelcomeEmail } = await import("@/lib/email");
+    void sendWelcomeEmail(mail, uname).catch(() => {});
+
     const token = createToken({ userId: created.id, role: created.role });
 
     const res = NextResponse.json({
@@ -147,6 +193,8 @@ export async function POST(req: NextRequest) {
       user: { id: created.id, username: created.username, role: created.role },
     });
     res.cookies.set("gsm_token", token, getCookieOptions(req.headers));
+    const { trackIssuedSession } = await import("@/lib/auth");
+    await trackIssuedSession(token, req.headers);
     return res;
   } catch (e: unknown) {
     return apiError(e, "Registration failed", 500);

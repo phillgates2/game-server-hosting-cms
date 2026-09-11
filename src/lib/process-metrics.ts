@@ -139,3 +139,63 @@ export function shouldStoreSample(serverId: number, now = Date.now()): boolean {
 export function forgetSampleThrottle(serverId: number): void {
   lastStored.delete(serverId);
 }
+
+// ── Resource-limit watchdog ──────────────────────────────────────────────────
+//
+// Every server row has maxRamMb / maxCpuPercent and an edit permission for
+// them, but nothing ever enforced either — one runaway server could eat the
+// whole box. The watchdog rides on the same 60s sample: a sample over a set
+// limit is a strike, a clean sample resets them. The first strike warns in
+// Discord; LIMIT_STRIKES_ENFORCE consecutive strikes stop the server.
+
+/** Strikes that produce a Discord warning (the first over-limit sample). */
+export const LIMIT_STRIKES_WARN = 1;
+/** Consecutive over-limit samples before the watchdog stops the server. */
+export const LIMIT_STRIKES_ENFORCE = 4;
+
+export interface ResourceLimits {
+  maxRamMb: number | null;
+  maxCpuPercent: number | null;
+}
+
+/**
+ * Compare one sample against the server's configured limits.
+ *
+ * Returns a human-readable violation string per breached limit — these go
+ * straight into log lines and Discord messages. A limit that is unset (null)
+ * or non-positive means "no limit" and can never be breached. Being exactly
+ * AT a limit is not a breach; CPU percent may legitimately exceed 100 on
+ * multi-threaded processes, so the comparison is a plain >.
+ */
+export function checkResourceLimits(
+  sample: { ramMb: number; cpuPercent: number },
+  limits: ResourceLimits
+): string[] {
+  const violations: string[] = [];
+  if (limits.maxRamMb !== null && limits.maxRamMb > 0 && sample.ramMb > limits.maxRamMb) {
+    const fmt = (mb: number) =>
+      mb >= 1024 ? `${Math.round((mb / 1024) * 10) / 10} GB` : `${Math.round(mb)} MB`;
+    violations.push(`RAM ${fmt(sample.ramMb)} is over the ${fmt(limits.maxRamMb)} limit`);
+  }
+  if (limits.maxCpuPercent !== null && limits.maxCpuPercent > 0 && sample.cpuPercent > limits.maxCpuPercent) {
+    violations.push(`CPU ${Math.round(sample.cpuPercent)}% is over the ${limits.maxCpuPercent}% limit`);
+  }
+  return violations;
+}
+
+/**
+ * Strike accounting: given the current consecutive-strike count and whether
+ * this sample breached, return the updated count and what should happen.
+ */
+export function strikeDecision(
+  previousStrikes: number,
+  breached: boolean
+): { strikes: number; warn: boolean; enforce: boolean } {
+  if (!breached) return { strikes: 0, warn: false, enforce: false };
+  const strikes = previousStrikes + 1;
+  return {
+    strikes,
+    warn: strikes === LIMIT_STRIKES_WARN,
+    enforce: strikes >= LIMIT_STRIKES_ENFORCE,
+  };
+}

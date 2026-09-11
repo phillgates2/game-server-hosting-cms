@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     const { code, action } = await req.json(); // action: "enable" | "disable"
 
     const [user] = await db
-      .select({ twoFactorSecret: users.twoFactorSecret, twoFactorEnabled: users.twoFactorEnabled })
+      .select({ twoFactorSecret: users.twoFactorSecret, twoFactorEnabled: users.twoFactorEnabled, twoFactorRecovery: users.twoFactorRecovery })
       .from(users).where(eq(users.id, auth.userId)).limit(1);
 
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -28,22 +28,37 @@ export async function POST(req: NextRequest) {
 
       if (delta === null) return NextResponse.json({ error: "Invalid code. Try again." }, { status: 400 });
 
-      await db.update(users).set({ twoFactorEnabled: true, updatedAt: new Date() }).where(eq(users.id, auth.userId));
-      return NextResponse.json({ ok: true, message: "Two-factor authentication enabled" });
+      // Mint the one-time recovery codes NOW and return them exactly once —
+      // only hashes are stored, so this response is the only copy anywhere.
+      const { generateRecoveryCodes } = await import("@/lib/recovery-codes");
+      const { codes, hashes } = generateRecoveryCodes();
+      await db.update(users).set({
+        twoFactorEnabled: true,
+        twoFactorRecovery: JSON.stringify(hashes),
+        updatedAt: new Date(),
+      }).where(eq(users.id, auth.userId));
+      return NextResponse.json({ ok: true, message: "Two-factor authentication enabled", recoveryCodes: codes });
     }
 
     if (action === "disable") {
       if (!user.twoFactorEnabled || !user.twoFactorSecret) {
-        await db.update(users).set({ twoFactorEnabled: false, twoFactorSecret: null, updatedAt: new Date() }).where(eq(users.id, auth.userId));
+        await db.update(users).set({ twoFactorEnabled: false, twoFactorSecret: null, twoFactorRecovery: null, updatedAt: new Date() }).where(eq(users.id, auth.userId));
         return NextResponse.json({ ok: true, message: "2FA disabled" });
       }
 
       const totp = new OTPAuth.TOTP({ secret: OTPAuth.Secret.fromBase32(user.twoFactorSecret), algorithm: "SHA1", digits: 6, period: 30 });
       const delta = totp.validate({ token: String(code), window: 1 });
 
-      if (delta === null) return NextResponse.json({ error: "Invalid code" }, { status: 400 });
+      if (delta === null) {
+        // A lost phone is exactly when someone disables 2FA: accept a
+        // recovery code here too (it is consumed either way right below).
+        const { isLikelyRecoveryCode, consumeRecoveryCode } = await import("@/lib/recovery-codes");
+        const stored = user.twoFactorRecovery ? (JSON.parse(user.twoFactorRecovery) as string[]) : [];
+        const ok = isLikelyRecoveryCode(String(code)) && consumeRecoveryCode(stored, String(code)).match;
+        if (!ok) return NextResponse.json({ error: "Invalid code" }, { status: 400 });
+      }
 
-      await db.update(users).set({ twoFactorEnabled: false, twoFactorSecret: null, updatedAt: new Date() }).where(eq(users.id, auth.userId));
+      await db.update(users).set({ twoFactorEnabled: false, twoFactorSecret: null, twoFactorRecovery: null, updatedAt: new Date() }).where(eq(users.id, auth.userId));
       return NextResponse.json({ ok: true, message: "Two-factor authentication disabled" });
     }
 

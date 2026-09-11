@@ -28,6 +28,10 @@ SteamCMD tarball|https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux
 Adoptium Temurin JRE|https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jre/hotspot/normal/eclipse
 .NET install script (TShock)|https://dot.net/v1/dotnet-install.sh
 NeoForge maven metadata|https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml
+Fabric meta API|https://meta.fabricmc.net/v2/versions/loader
+Mindustry releases API|https://api.github.com/repos/Anuken/Mindustry/releases/latest
+Vintage Story 1.22.7 server|https://cdn.vintagestory.at/gamefiles/stable/vs_server_linux-x64_1.22.7.tar.gz
+Fabric installer|https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.2/fabric-installer-1.1.2.jar
 Factorio headless|https://factorio.com/get-download/stable/headless/linux64
 Xonotic 0.8.6|https://dl.xonotic.org/xonotic-0.8.6.zip
 ET:Legacy x86_64|https://www.etlegacy.com/download/file/715
@@ -79,6 +83,22 @@ gh_asset() { # $1 repo, $2 grep filter, $3 label
 }
 gh_asset "Pryaxis/TShock"            "-linux-x64-"  "TShock (Terraria)"
 gh_asset "compujuckel/AssettoServer" "-linux-x64"   "AssettoServer"
+
+# AlliedModders "latest filename then download" flow (Metamod + SourceMod).
+# The *-latest-linux endpoint answers with a bare archive name; the second
+# request fetches that archive. Both steps must work for Source modding.
+MMS=$(curl -fsSL --retry 2 --max-time 25 "https://mms.alliedmods.net/mmsdrop/1.12/mmsource-latest-linux" 2>/dev/null | tr -d '[:space:]')
+if [ -n "$MMS" ] && head_ok "https://mms.alliedmods.net/mmsdrop/1.12/$MMS"; then
+  ok "Metamod:Source latest ($MMS)"
+else
+  bad "Metamod:Source latest-linux flow"
+fi
+SMS=$(curl -fsSL --retry 2 --max-time 25 "https://sm.alliedmods.net/smdrop/1.12/sourcemod-latest-linux" 2>/dev/null | tr -d '[:space:]')
+if [ -n "$SMS" ] && head_ok "https://sm.alliedmods.net/smdrop/1.12/$SMS"; then
+  ok "SourceMod latest ($SMS)"
+else
+  bad "SourceMod latest-linux flow"
+fi
 
 # Bedrock link API
 BR=$(curl -fsSL --max-time 25 "https://net-secondary.web.minecraft-services.net/api/v1.0/download/links" 2>/dev/null \

@@ -17,6 +17,7 @@ const TASK_TYPES = [
   { value: "backup", label: "💾 Backup", desc: "Create a backup archive" },
   { value: "update", label: "📥 Update", desc: "Run SteamCMD app_update" },
   { value: "command", label: "⌨️ Command", desc: "Run a custom shell command" },
+  { value: "idle-update", label: "🌙 Idle Update", desc: "Steam-update only when empty for hours; auto-restarts" },
 ];
 
 const CRON_PRESETS = [

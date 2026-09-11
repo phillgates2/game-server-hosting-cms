@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { gameServers } from "@/db/schema";
+import { gameServers, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
@@ -15,11 +15,23 @@ async function getServer(id: number) {
       id: gameServers.id,
       userId: gameServers.userId,
       installPath: gameServers.installPath,
+      nodeIsLocal: nodes.isLocal,
+      nodeApiUrl: nodes.apiUrl,
+      nodeApiKey: nodes.apiKey,
     })
     .from(gameServers)
+    .leftJoin(nodes, eq(gameServers.nodeId, nodes.id))
     .where(eq(gameServers.id, id))
     .limit(1);
   return server || null;
+}
+
+type ServerRow = Awaited<ReturnType<typeof getServer>> & object;
+
+function remoteNodeOf(server: NonNullable<ServerRow>): { apiUrl: string; apiKey: string } | null {
+  if (server.nodeIsLocal !== false) return null;
+  if (!server.nodeApiUrl || !server.nodeApiKey) return null;
+  return { apiUrl: server.nodeApiUrl, apiKey: server.nodeApiKey };
 }
 
 // GET — List directory or read file
@@ -44,6 +56,31 @@ export async function GET(
   const url = new URL(req.url);
   const reqPath = url.searchParams.get("path") || ".";
   const action = url.searchParams.get("action") || "list"; // list | read | download
+
+  // Remote node: every operation runs on the agent's machine.
+  const remoteNode = remoteNodeOf(server);
+  if (remoteNode) {
+    const { remoteFs } = await import("@/lib/node-client");
+    try {
+      if (action === "download") {
+        const r = await remoteFs<{ base64?: string; fileName?: string; error?: string }>(remoteNode, "readbin", { path: reqPath });
+        if (typeof r.base64 !== "string") return NextResponse.json({ error: r.error || "Download failed" }, { status: 502 });
+        const content = Buffer.from(r.base64, "base64");
+        return new NextResponse(new Uint8Array(content), {
+          headers: {
+            "Content-Disposition": `attachment; filename="${r.fileName || "download"}"`,
+            "Content-Type": "application/octet-stream",
+            "Content-Length": String(content.length),
+          },
+        });
+      }
+      const op = action === "read" ? "read" : "list";
+      const r = await remoteFs(remoteNode, op, { path: reqPath });
+      return NextResponse.json(r);
+    } catch (e: unknown) {
+      return NextResponse.json({ error: `Node agent: ${e instanceof Error ? e.message : String(e)}` }, { status: 502 });
+    }
+  }
 
   try {
     const fileOps = await import("@/lib/server-file-ops");
@@ -92,11 +129,45 @@ export async function POST(
   }
 
   try {
-    const fileOps = await import("@/lib/server-file-ops");
     const body = await req.json();
     const { action, path: reqPath, content, newName, newPath, paths, targetDir } = body;
 
     if (!action) return NextResponse.json({ error: "Action required" }, { status: 400 });
+
+    // Remote node: supported ops run on the agent; batch ops honestly decline.
+    const remoteNode = remoteNodeOf(server);
+    if (remoteNode) {
+      const { remoteFs } = await import("@/lib/node-client");
+      try {
+        if (action === "save" || action === "createFile") {
+          await remoteFs(remoteNode, "write", { path: reqPath, content: content || "" });
+          return NextResponse.json({ ok: true });
+        }
+        if (action === "createDir") {
+          await remoteFs(remoteNode, "mkdir", { path: reqPath });
+          return NextResponse.json({ ok: true });
+        }
+        if (action === "delete") {
+          await remoteFs(remoteNode, "delete", { path: reqPath });
+          return NextResponse.json({ ok: true });
+        }
+        if (action === "rename") {
+          const sourcePath = String(reqPath || "");
+          const nextPath = String(newPath || "");
+          const fallback = sourcePath.split("/").slice(0, -1).concat(String(newName || "")).join("/");
+          await remoteFs(remoteNode, "rename", { path: sourcePath, to: nextPath || fallback });
+          return NextResponse.json({ ok: true });
+        }
+        return NextResponse.json(
+          { error: "Batch file operations are not supported on remote nodes yet — use single-file actions." },
+          { status: 400 }
+        );
+      } catch (e: unknown) {
+        return NextResponse.json({ error: `Node agent: ${e instanceof Error ? e.message : String(e)}` }, { status: 502 });
+      }
+    }
+
+    const fileOps = await import("@/lib/server-file-ops");
 
     if (action === "save") {
       await fileOps.writeTextFile(server.installPath, reqPath, content || "");

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { gameServers } from "@/db/schema";
+import { gameServers, nodes } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
@@ -40,9 +40,34 @@ export async function GET(
 
   const { id } = await params;
   try {
-    const [server] = await db.select({ installPath: gameServers.installPath, userId: gameServers.userId }).from(gameServers).where(eq(gameServers.id, Number(id))).limit(1);
+    const [server] = await db
+      .select({
+        installPath: gameServers.installPath,
+        userId: gameServers.userId,
+        nodeIsLocal: nodes.isLocal,
+        nodeApiUrl: nodes.apiUrl,
+        nodeApiKey: nodes.apiKey,
+      })
+      .from(gameServers)
+      .leftJoin(nodes, eq(gameServers.nodeId, nodes.id))
+      .where(eq(gameServers.id, Number(id)))
+      .limit(1);
     if (!server) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (auth.role !== "admin" && server.userId !== auth.userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+    // Remote node: the archives live on the agent's machine.
+    if (server.nodeIsLocal === false) {
+      if (!server.nodeApiUrl || !server.nodeApiKey) {
+        return NextResponse.json({ error: "This server's node has no agent URL/key configured." }, { status: 400 });
+      }
+      const { remoteBackupList } = await import("@/lib/node-client");
+      try {
+        const r = await remoteBackupList({ apiUrl: server.nodeApiUrl, apiKey: server.nodeApiKey }, server.installPath);
+        return NextResponse.json({ backups: r.backups });
+      } catch (e: unknown) {
+        return NextResponse.json({ error: `Node agent: ${e instanceof Error ? e.message : String(e)}` }, { status: 502 });
+      }
+    }
 
     const backupDir = join(server.installPath, "gsm-backups");
     try {
@@ -79,9 +104,47 @@ export async function POST(
   }
 
   try {
-    const [server] = await db.select({ installPath: gameServers.installPath, userId: gameServers.userId, name: gameServers.name, status: gameServers.status }).from(gameServers).where(eq(gameServers.id, Number(id))).limit(1);
+    const [server] = await db
+      .select({
+        installPath: gameServers.installPath,
+        userId: gameServers.userId,
+        name: gameServers.name,
+        status: gameServers.status,
+        nodeIsLocal: nodes.isLocal,
+        nodeApiUrl: nodes.apiUrl,
+        nodeApiKey: nodes.apiKey,
+      })
+      .from(gameServers)
+      .leftJoin(nodes, eq(gameServers.nodeId, nodes.id))
+      .where(eq(gameServers.id, Number(id)))
+      .limit(1);
     if (!server) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (auth.role !== "admin" && server.userId !== auth.userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+    // Remote node: create/restore run on the agent's machine.
+    if (server.nodeIsLocal === false) {
+      if (!server.nodeApiUrl || !server.nodeApiKey) {
+        return NextResponse.json({ error: "This server's node has no agent URL/key configured." }, { status: 400 });
+      }
+      const node = { apiUrl: server.nodeApiUrl, apiKey: server.nodeApiKey };
+      const { remoteBackupCreate, remoteBackupRestore } = await import("@/lib/node-client");
+      try {
+        if (action === "create") {
+          const r = await remoteBackupCreate(node, server.installPath);
+          return NextResponse.json({ ok: true, message: `Backup created: ${r.name}`, name: r.name, output: "" });
+        }
+        if (action === "restore") {
+          if (server.status === "running") return NextResponse.json({ error: "Stop the server before restoring" }, { status: 400 });
+          const backupName = body.name as string;
+          if (!backupName) return NextResponse.json({ error: "Backup name required" }, { status: 400 });
+          const r = await remoteBackupRestore(node, server.installPath, backupName);
+          return NextResponse.json({ ok: true, message: `Restored from ${backupName}`, output: "" });
+        }
+        return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+      } catch (e: unknown) {
+        return NextResponse.json({ error: `Node agent: ${e instanceof Error ? e.message : String(e)}` }, { status: 502 });
+      }
+    }
 
     const backupDir = join(server.installPath, "gsm-backups");
     await mkdir(backupDir, { recursive: true });

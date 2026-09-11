@@ -5,7 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { apiError } from "@/lib/api-error";
 import { eq } from "drizzle-orm";
-import { getDiscordSettings, DISCORD_KEYS } from "@/lib/discord-settings";
+import { isOauthConfigured, getDiscordSettings, DISCORD_KEYS } from "@/lib/discord-settings";
 import { isValidWebhookUrl, verifyBot, sendDiscordWebhook } from "@/lib/discord";
 
 async function requireAdmin(req: NextRequest) {
@@ -39,6 +39,8 @@ export async function GET(req: NextRequest) {
       extraServers: s.extraServers,
       masterUrls: s.masterUrls,
       botReady: Boolean(s.botToken && s.guildId),
+      oauthClientId: s.oauthClientId,
+      oauthConfigured: isOauthConfigured(s),
     });
   } catch (e: unknown) {
     return apiError(e, "Could not read Discord settings", 500);
@@ -134,6 +136,20 @@ export async function POST(req: NextRequest) {
     // so the UI can save other fields without resending the secret.
     if (typeof body.botToken === "string") {
       updates.push({ key: "discord_bot_token", value: body.botToken.trim() });
+    }
+    // Same write-only semantics for the OAuth client secret.
+    if (typeof body.oauthClientSecret === "string") {
+      updates.push({ key: "discord_oauth_client_secret", value: body.oauthClientSecret.trim() });
+    }
+    if (typeof body.oauthClientId === "string") {
+      const v = body.oauthClientId.trim();
+      if (v && !/^\d{5,25}$/.test(v)) {
+        return NextResponse.json(
+          { error: "OAuth client ID must be a numeric Discord application ID" },
+          { status: 400 }
+        );
+      }
+      updates.push({ key: "discord_oauth_client_id", value: v });
     }
 
     for (const [field, key] of [

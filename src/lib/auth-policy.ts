@@ -15,12 +15,17 @@ import { db } from "@/db";
 import { settings } from "@/db/schema";
 import { inArray } from "drizzle-orm";
 import { applyAuthSettings } from "@/lib/auth";
+import { AUSTRALIAN_MINIMUM_ACCOUNT_AGE } from "@/lib/age-verification";
 
 export interface AuthPolicy {
   registrationEnabled: boolean;
   defaultMaxServers: number;
   loginThrottleAttempts: number;
   sessionDays: number;
+  /** Whether registration demands a date of birth meeting the minimum age. */
+  ageVerificationEnabled: boolean;
+  /** Minimum age to hold an account (Australian statutory floor: 16). */
+  minimumAccountAge: number;
 }
 
 const DEFAULTS: AuthPolicy = {
@@ -28,6 +33,8 @@ const DEFAULTS: AuthPolicy = {
   defaultMaxServers: 5,
   loginThrottleAttempts: 10,
   sessionDays: 7,
+  ageVerificationEnabled: true,
+  minimumAccountAge: AUSTRALIAN_MINIMUM_ACCOUNT_AGE,
 };
 
 const KEYS = [
@@ -35,6 +42,8 @@ const KEYS = [
   "default_max_servers",
   "login_throttle_attempts",
   "session_days",
+  "age_verification_enabled",
+  "minimum_account_age",
 ];
 
 let cache: { value: AuthPolicy; at: number } | null = null;
@@ -57,11 +66,20 @@ export async function getAuthPolicy(): Promise<AuthPolicy> {
         value.registrationEnabled = raw !== "false";
         continue;
       }
+      if (row.key === "age_verification_enabled") {
+        value.ageVerificationEnabled = raw !== "false";
+        continue;
+      }
       const n = Number.parseInt(raw, 10);
       if (!Number.isFinite(n) || n < 0) continue;
       if (row.key === "default_max_servers") value.defaultMaxServers = n;
       if (row.key === "login_throttle_attempts" && n > 0) value.loginThrottleAttempts = n;
       if (row.key === "session_days" && n > 0) value.sessionDays = n;
+      // Never accept a stored value below the statutory floor, even if the
+      // database was edited by hand.
+      if (row.key === "minimum_account_age" && n >= AUSTRALIAN_MINIMUM_ACCOUNT_AGE) {
+        value.minimumAccountAge = n;
+      }
     }
   } catch {
     // No settings table yet (fresh install) — the defaults are correct.

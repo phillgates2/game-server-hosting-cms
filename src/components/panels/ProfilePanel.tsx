@@ -441,9 +441,8 @@ export default function ProfilePanel() {
       <div className="gaming-surface rounded-xl p-6">
         <h3 className="font-semibold mb-4">🔐 Security</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-          <div>
-            <p className="text-text-muted text-xs mb-1">Two-Factor Authentication</p>
-            <p className={profile.twoFactorEnabled ? "text-success" : "text-text-muted"}>{profile.twoFactorEnabled ? "✅ Enabled" : "❌ Not enabled"}</p>
+          <div className="md:col-span-2">
+            <TwoFactorManager enabled={Boolean(profile.twoFactorEnabled)} onChanged={() => void loadProfile()} />
           </div>
           <div>
             <p className="text-text-muted text-xs mb-1">Last Login</p>
@@ -459,6 +458,145 @@ export default function ProfilePanel() {
           </div>
         </div>
       </div>
+
+      <SessionManager />
+    </div>
+  );
+}
+
+/**
+ * Full 2FA lifecycle: setup (QR + secret), verify-to-enable, single-use
+ * recovery codes shown exactly once, and disable. Kept self-contained so the
+ * flow cannot drift from the /api/auth/2fa routes it talks to.
+ */
+function TwoFactorManager({ enabled, onChanged }: { enabled: boolean; onChanged: () => void }) {
+  const [stage, setStage] = useState<"idle" | "setup" | "codes">("idle");
+  const [qr, setQr] = useState("");
+  const [secret, setSecret] = useState("");
+  const [code, setCode] = useState("");
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  async function beginSetup() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/auth/2fa/setup", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) { setMsg({ kind: "err", text: data.error || "Setup failed" }); return; }
+      setQr(data.qrCode);
+      setSecret(data.secret);
+      setCode("");
+      setStage("setup");
+    } catch {
+      setMsg({ kind: "err", text: "Network error" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmEnable() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/auth/2fa/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, action: "enable" }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg({ kind: "err", text: data.error || "Could not enable 2FA" }); return; }
+      setRecoveryCodes(data.recoveryCodes || []);
+      setStage("codes");
+      onChanged();
+    } catch {
+      setMsg({ kind: "err", text: "Network error" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disable() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/auth/2fa/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, action: "disable" }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg({ kind: "err", text: data.error || "Could not disable 2FA" }); return; }
+      setMsg({ kind: "ok", text: "Two-factor authentication disabled." });
+      setCode("");
+      setStage("idle");
+      onChanged();
+    } catch {
+      setMsg({ kind: "err", text: "Network error" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const inputCls = "w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent";
+
+  return (
+    <div className="space-y-3">
+      <p className="text-text-muted text-xs mb-1">Two-Factor Authentication</p>
+      <p className={enabled ? "text-success text-sm" : "text-text-muted text-sm"}>
+        {enabled ? "✅ Enabled" : "❌ Not enabled"}
+      </p>
+
+      {!enabled && stage === "idle" && (
+        <button onClick={() => void beginSetup()} disabled={busy} className="px-3 py-2 bg-accent/15 text-accent rounded-lg text-xs font-medium disabled:opacity-40">
+          {busy ? "Preparing…" : "Set up 2FA"}
+        </button>
+      )}
+
+      {!enabled && stage === "setup" && (
+        <div className="space-y-3 bg-bg-secondary rounded-lg p-4">
+          <p className="text-xs text-text-muted">Scan the QR code with your authenticator app (or enter the secret), then confirm with the 6-digit code.</p>
+          {qr && <img src={qr} alt="2FA QR code" className="w-40 h-40 rounded-lg bg-white p-2" />}
+          <p className="font-mono text-xs break-all text-text-secondary">{secret}</p>
+          <input value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6-digit code" inputMode="numeric" className={inputCls} />
+          <div className="flex gap-2">
+            <button onClick={() => void confirmEnable()} disabled={busy || code.length !== 6} className="px-3 py-2 bg-accent text-white rounded-lg text-xs font-medium disabled:opacity-40">Confirm &amp; Enable</button>
+            <button onClick={() => setStage("idle")} className="px-3 py-2 bg-bg-card border border-border rounded-lg text-xs text-text-muted">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {!enabled && stage === "codes" && (
+        <div className="space-y-3 bg-bg-secondary rounded-lg p-4">
+          <p className="text-sm font-medium text-success">2FA enabled. Save these recovery codes — they are shown only once.</p>
+          <p className="text-xs text-text-muted">Each code works one time if you lose access to your authenticator.</p>
+          <div className="grid grid-cols-2 gap-2 font-mono text-sm">
+            {recoveryCodes.map((c) => (
+              <span key={c} className="bg-bg-card border border-border rounded px-2 py-1.5 text-text-primary">{c}</span>
+            ))}
+          </div>
+          <button
+            onClick={() => { void navigator.clipboard.writeText(recoveryCodes.join("\n")).catch(() => undefined); setMsg({ kind: "ok", text: "Recovery codes copied." }); }}
+            className="px-3 py-2 bg-bg-card border border-border rounded-lg text-xs text-text-secondary"
+          >
+            Copy all codes
+          </button>
+          <button onClick={() => setStage("idle")} className="block px-3 py-2 bg-accent text-white rounded-lg text-xs font-medium">I have saved them</button>
+        </div>
+      )}
+
+      {enabled && (
+        <div className="space-y-2 bg-bg-secondary rounded-lg p-4">
+          <p className="text-xs text-text-muted">To disable 2FA, enter a current code from your authenticator (or a recovery code).</p>
+          <input value={code} onChange={(e) => setCode(e.target.value.slice(0, 12))} placeholder="Code" className={inputCls} />
+          <button onClick={() => void disable()} disabled={busy || code.length < 6} className="px-3 py-2 bg-danger/15 text-danger rounded-lg text-xs font-medium disabled:opacity-40">
+            {busy ? "Working…" : "Disable 2FA"}
+          </button>
+        </div>
+      )}
+
+      {msg && <p className={`text-xs ${msg.kind === "ok" ? "text-success" : "text-danger"}`}>{msg.text}</p>}
     </div>
   );
 }
@@ -530,6 +668,88 @@ function MiniStat({ label, value, icon }: { label: string; value: string; icon: 
         <span className="text-text-muted text-xs">{label}</span>
       </div>
       <p className="text-lg font-bold">{value}</p>
+    </div>
+  );
+}
+
+interface SessionInfo {
+  id: number;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+  lastSeenAt: string;
+  current: boolean;
+}
+
+/** Active login sessions for this account, with instant revocation. */
+function SessionManager() {
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/auth/sessions");
+      if (res.ok) setSessions((await res.json()).sessions || []);
+    } catch { /* panel stays usable */ } finally {
+      setLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(t);
+  }, [load]);
+
+  async function revoke(id: number, isCurrent: boolean) {
+    if (isCurrent && !window.confirm("Revoke your CURRENT session? You will be logged out.")) return;
+    setBusyId(id);
+    try {
+      const res = await fetch(`/api/auth/sessions/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        if (isCurrent) {
+          window.location.reload();
+          return;
+        }
+        setSessions((prev) => prev.filter((s) => s.id !== id));
+      }
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div className="gaming-surface rounded-xl p-6">
+      <h3 className="font-semibold mb-4">🖥️ Active Sessions</h3>
+      {!loaded ? (
+        <p className="text-text-muted text-sm">Loading sessions…</p>
+      ) : sessions.length === 0 ? (
+        <p className="text-text-muted text-sm">No tracked sessions. (Sessions created before tracking was enabled appear on their next request.)</p>
+      ) : (
+        <div className="space-y-2">
+          {sessions.map((s) => (
+            <div key={s.id} className="flex items-center justify-between gap-3 flex-wrap rounded-lg border border-border bg-bg-secondary/40 px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium flex items-center gap-2">
+                  {s.current ? "🟢" : "⚪"} {s.ipAddress || "unknown IP"}
+                  {s.current && <span className="text-[10px] px-1.5 py-0.5 rounded bg-success/15 text-success font-semibold">this device</span>}
+                </p>
+                <p className="text-xs text-text-muted truncate max-w-[420px]">{s.userAgent || "unknown client"}</p>
+                <p className="text-[10px] text-text-muted mt-0.5">
+                  signed in {new Date(s.createdAt).toLocaleString()} · last seen {new Date(s.lastSeenAt).toLocaleString()}
+                </p>
+              </div>
+              <button
+                onClick={() => void revoke(s.id, s.current)}
+                disabled={busyId === s.id}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium shrink-0 disabled:opacity-40 ${s.current ? "bg-warning/15 text-warning hover:bg-warning/25" : "bg-danger/15 text-danger hover:bg-danger/25"}`}
+              >
+                {busyId === s.id ? "…" : s.current ? "Log out" : "Revoke"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

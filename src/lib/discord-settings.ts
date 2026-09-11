@@ -23,6 +23,8 @@ export const DISCORD_KEYS = [
   "discord_status_interval_minutes",
   "et_extra_servers",
   "et_master_urls",
+  "discord_oauth_client_id",
+  "discord_oauth_client_secret",
 ] as const;
 
 export interface DiscordSettings {
@@ -47,6 +49,12 @@ export interface DiscordSettings {
    * comma or space separated (default port 27950). Empty = no discovery.
    */
   masterUrls: string;
+  /**
+   * OAuth application for "Sign in with Discord". The secret is a
+   * credential: like the bot token it is write-only from the UI.
+   */
+  oauthClientId: string;
+  oauthClientSecret: string;
 }
 
 const DEFAULTS: DiscordSettings = {
@@ -59,6 +67,8 @@ const DEFAULTS: DiscordSettings = {
   statusIntervalMinutes: 3,
   extraServers: "",
   masterUrls: DEFAULT_MASTER_URLS,
+  oauthClientId: "",
+  oauthClientSecret: "",
 };
 
 /**
@@ -75,6 +85,8 @@ export async function getDiscordSettings(): Promise<DiscordSettings> {
     guildId: process.env.DISCORD_GUILD_ID?.trim() || "",
     extraServers: process.env.GSM_ET_EXTRA_SERVERS?.trim() || "",
     masterUrls: process.env.GSM_ET_MASTER_URLS?.trim() || "",
+    oauthClientId: process.env.DISCORD_OAUTH_CLIENT_ID?.trim() || "",
+    oauthClientSecret: process.env.DISCORD_OAUTH_CLIENT_SECRET?.trim() || "",
   };
 
   try {
@@ -102,6 +114,8 @@ export async function getDiscordSettings(): Promise<DiscordSettings> {
         }
         case "et_extra_servers": result.extraServers = value; break;
         case "et_master_urls":   result.masterUrls = value; break;
+        case "discord_oauth_client_id":     result.oauthClientId = value; break;
+        case "discord_oauth_client_secret": result.oauthClientSecret = value; break;
       }
     }
   } catch {
@@ -109,6 +123,11 @@ export async function getDiscordSettings(): Promise<DiscordSettings> {
   }
 
   return result;
+}
+
+/** True when a complete OAuth application is configured. */
+export function isOauthConfigured(s: DiscordSettings): boolean {
+  return Boolean(s.oauthClientId && s.oauthClientSecret);
 }
 
 /** Bot credentials in the shape the Discord helpers expect, or null. */

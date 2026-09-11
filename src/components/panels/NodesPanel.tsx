@@ -1,7 +1,21 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import MetricsChart from "@/components/MetricsChart";
+import type { MetricPoint } from "@/lib/metrics-history";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { useToast } from "@/components/ToastProvider";
+
+interface CapacityInfo {
+  nodeId: number;
+  disk: { usedPct: number | null; days: number | null; tone: string; label: string };
+  ram: { usedPct: number | null; days: number | null; tone: string; label: string };
+}
+
+interface NodeAnomalies {
+  cpu: Array<{ t: number; v: number; z: number }>;
+  ram: Array<{ t: number; v: number; z: number }>;
+}
 
 interface NodeMetrics {
   cpuPercent: number | null;
@@ -25,6 +39,7 @@ interface Node {
   status: string;
   isLocal: boolean | null;
   isDefault: boolean | null;
+  maintenanceMode: boolean | null;
   maxServers: number | null;
   maxRamMb: number | null;
   maxDiskMb: number | null;
@@ -44,11 +59,23 @@ interface AuthUser {
   role: string;
 }
 
+interface MaintenanceWindowInfo {
+  id: number;
+  nodeId: number;
+  nodeName: string | null;
+  startsAt: string;
+  endsAt: string;
+  reason: string | null;
+  applied: boolean;
+}
+
 export default function NodesPanel({ user }: { user: AuthUser }) {
   const confirm = useConfirm();
+  const toast = useToast();
   const [nodes, setNodes] = useState<Node[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+  const [capacity, setCapacity] = useState<Record<number, CapacityInfo>>({});
   const [form, setForm] = useState({
     name: "",
     description: "",
@@ -67,6 +94,82 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
   });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [testingNode, setTestingNode] = useState<number | null>(null);
+  const [testResult, setTestResult] = useState<{ nodeId: number; ok: boolean; text: string } | null>(null);
+  const [deployingNode, setDeployingNode] = useState<number | null>(null);
+  const [nodeHist, setNodeHist] = useState<{ cpu: MetricPoint[]; ram: MetricPoint[]; samples: number; anomalies?: NodeAnomalies } | null>(null);
+  const [nodeHistRange, setNodeHistRange] = useState(6);
+  const [nodeHistLoading, setNodeHistLoading] = useState(false);
+  const [nodeHistId, setNodeHistId] = useState<number | null>(null);
+
+  const [maintWindows, setMaintWindows] = useState<MaintenanceWindowInfo[]>([]);
+  const [mwStart, setMwStart] = useState("");
+  const [mwEnd, setMwEnd] = useState("");
+  const [mwReason, setMwReason] = useState("");
+  const [mwBusy, setMwBusy] = useState(false);
+
+  async function loadMaintenanceWindows() {
+    try {
+      const res = await fetch("/api/maintenance-windows");
+      const data = await res.json().catch(() => null);
+      if (res.ok) setMaintWindows(data?.windows ?? []);
+    } catch { /* panel keeps working */ }
+  }
+
+  async function scheduleMaintenanceWindow(nodeId: number) {
+    if (!mwStart || !mwEnd || mwBusy) return;
+    setMwBusy(true);
+    try {
+      const res = await fetch("/api/maintenance-windows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nodeId,
+          startsAt: new Date(mwStart).toISOString(),
+          endsAt: new Date(mwEnd).toISOString(),
+          reason: mwReason.trim() || null,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok) {
+        toast.success("Maintenance scheduled", "The node will drain automatically at the window start and release itself at the end.");
+        setMwStart(""); setMwEnd(""); setMwReason("");
+        void loadMaintenanceWindows();
+      } else {
+        toast.error("Scheduling failed", data?.error || "Invalid maintenance window");
+      }
+    } catch (e) {
+      toast.error("Scheduling failed", e instanceof Error ? e.message : "Network error");
+    } finally { setMwBusy(false); }
+  }
+
+  async function cancelMaintenanceWindow(id: number) {
+    if (mwBusy) return;
+    setMwBusy(true);
+    try {
+      const res = await fetch(`/api/maintenance-windows/${id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => null);
+      if (res.ok) void loadMaintenanceWindows();
+      else toast.error("Cancel failed", data?.error || "Could not cancel the window");
+    } finally { setMwBusy(false); }
+  }
+
+  async function loadNodeHistory(nodeId: number, hours: number) {
+    setNodeHistLoading(true);
+    setNodeHist(null);
+    try {
+      const res = await fetch(`/api/nodes/${nodeId}/metrics?hours=${hours}`);
+      const data = await res.json();
+      if (res.ok) setNodeHist({ cpu: data.cpu || [], ram: data.ram || [], samples: data.samples || 0, anomalies: data.anomalies || { cpu: [], ram: [] } });
+    } catch { /* leave empty */ }
+    finally { setNodeHistLoading(false); }
+  }
+
+  function toggleNodeHistory(nodeId: number) {
+    if (nodeHistId === nodeId) { setNodeHistId(null); setNodeHist(null); return; }
+    setNodeHistId(nodeId);
+    void loadNodeHistory(nodeId, nodeHistRange);
+  }
   const [editingNode, setEditingNode] = useState<Node | null>(null);
   const [editForm, setEditForm] = useState({ name: "", hostname: "", ipv4: "", ipv6: "", sshPort: "22", maxServers: "10", maxRamMb: "16384", gameServerPath: "", location: "", provider: "", description: "" });
 
@@ -75,6 +178,15 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
       const res = await fetch("/api/nodes");
       const data = await res.json();
       setNodes(data.nodes || []);
+      fetch("/api/nodes/capacity")
+        .then(async (r) => {
+          if (!r.ok) return;
+          const cap = await r.json();
+          const map: Record<number, CapacityInfo> = {};
+          for (const n of cap.nodes || []) map[n.nodeId] = n;
+          setCapacity(map);
+        })
+        .catch(() => undefined);
     } catch {
       // ignore
     }
@@ -83,10 +195,12 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadNodes();
+      void loadMaintenanceWindows();
     }, 0);
 
     const interval = window.setInterval(() => {
       void loadNodes();
+      void loadMaintenanceWindows();
     }, 30000);
 
     return () => {
@@ -210,6 +324,45 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
     }
   }
 
+  async function testNode(id: number) {
+    setTestingNode(id);
+    setTestResult(null);
+    try {
+      const res = await fetch(`/api/nodes/${id}/test`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setTestResult({ nodeId: id, ok: false, text: data.error || "Connection failed" });
+      } else {
+        setTestResult({ nodeId: id, ok: true, text: data.message || "Agent reachable" });
+      }
+    } catch (e) {
+      setTestResult({ nodeId: id, ok: false, text: e instanceof Error ? e.message : "Network error" });
+    } finally {
+      setTestingNode(null);
+    }
+  }
+
+  async function deployAgent(id: number) {
+    const ok = await confirm({ title: "Deploy Agent", message: "Copy the node agent to this machine over SSH and start it as a user service? The node needs its SSH user and a key path or password.", confirmLabel: "Deploy" });
+    if (!ok) return;
+    setDeployingNode(id);
+    setTestResult(null);
+    try {
+      const res = await fetch(`/api/nodes/${id}/deploy`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const data = await res.json();
+      if (!res.ok) {
+        setTestResult({ nodeId: id, ok: false, text: data.error || "Deploy failed" });
+      } else {
+        setTestResult({ nodeId: id, ok: true, text: data.message || "Agent deployed" });
+        loadNodes();
+      }
+    } catch (e) {
+      setTestResult({ nodeId: id, ok: false, text: e instanceof Error ? e.message : "Network error" });
+    } finally {
+      setDeployingNode(null);
+    }
+  }
+
   async function setDefaultNode(id: number) {
     try {
       await fetch(`/api/nodes/${id}`, {
@@ -220,6 +373,29 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
       loadNodes();
     } catch {
       // ignore
+    }
+  }
+
+  async function toggleMaintenance(node: Node) {
+    const next = !node.maintenanceMode;
+    try {
+      const res = await fetch(`/api/nodes/${node.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maintenanceMode: next }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        toast.error("Maintenance mode", data?.error || "Could not update the node");
+        return;
+      }
+      toast.success(
+        "Maintenance mode",
+        next ? `${node.name} is drained — no new servers will be placed on it.` : `${node.name} is accepting new servers again.`
+      );
+      loadNodes();
+    } catch {
+      toast.error("Maintenance mode", "Could not update the node");
     }
   }
 
@@ -440,6 +616,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
                       <h3 className="font-semibold">{node.name}</h3>
                       {node.isLocal && <span className="px-1.5 py-0.5 text-[10px] bg-accent/15 text-accent rounded">Local</span>}
                       {node.isDefault && <span className="px-1.5 py-0.5 text-[10px] bg-success/15 text-success rounded">Default</span>}
+                      {node.maintenanceMode && <span className="px-1.5 py-0.5 text-[10px] bg-warning/15 text-warning rounded" title="Maintenance mode: new servers are blocked">🔧 Maintenance</span>}
                     </div>
                     <p className="text-xs text-text-muted">{node.hostname}</p>
                   </div>
@@ -468,6 +645,20 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
                   <p className="text-[10px] text-text-muted">RAM</p>
                 </div>
               </div>
+
+              {/* Capacity forecast */}
+              {capacity[node.id] && capacity[node.id].disk.usedPct !== null && (
+                <div className="mt-3 flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] px-2 py-1 rounded-full bg-bg-secondary text-text-muted">
+                    💽 Disk {capacity[node.id].disk.usedPct}% · {capacity[node.id].disk.label}
+                  </span>
+                  {(capacity[node.id].ram.days ?? Infinity) <= 45 && capacity[node.id].ram.days !== null && (
+                    <span className={`text-[10px] px-2 py-1 rounded-full ${capacity[node.id].ram.tone === "critical" ? "bg-danger/15 text-danger" : "bg-warning/15 text-warning"}`}>
+                      🧠 RAM {capacity[node.id].ram.label}
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* Metrics bar */}
               {node.metrics && (
@@ -516,13 +707,118 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold">{selectedNode.name} — Details</h3>
             <div className="flex gap-2">
+              {!selectedNode.isLocal && (
+                <button onClick={() => testNode(selectedNode.id)} disabled={testingNode === selectedNode.id} className="px-3 py-1.5 bg-sky-500/15 text-sky-400 rounded-lg text-xs font-medium disabled:opacity-40">
+                  {testingNode === selectedNode.id ? "Testing…" : "🔌 Test Connection"}
+                </button>
+              )}
+              {!selectedNode.isLocal && selectedNode.hostname && (
+                <button onClick={() => deployAgent(selectedNode.id)} disabled={deployingNode === selectedNode.id} className="px-3 py-1.5 bg-accent/15 text-accent rounded-lg text-xs font-medium disabled:opacity-40" title="Copy the agent over SSH and start it (needs the SSH user + key/password)">
+                  {deployingNode === selectedNode.id ? "Deploying…" : "🚀 Deploy Agent"}
+                </button>
+              )}
               <button onClick={() => startEditNode(selectedNode)} className="px-3 py-1.5 bg-accent/15 text-accent rounded-lg text-xs font-medium">✏️ Edit</button>
               {!selectedNode.isDefault && (
                 <button onClick={() => setDefaultNode(selectedNode.id)} className="px-3 py-1.5 bg-success/15 text-success rounded-lg text-xs font-medium">Set as Default</button>
               )}
+              <button
+                onClick={() => void toggleMaintenance(selectedNode)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedNode.maintenanceMode ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}
+                title={selectedNode.maintenanceMode ? "Let this node accept new servers again" : "Drain this node: block new server placements while you work on it"}
+              >
+                {selectedNode.maintenanceMode ? "✅ End Maintenance" : "🔧 Maintenance Mode"}
+              </button>
               <button onClick={() => deleteNode(selectedNode.id)} className="px-3 py-1.5 bg-danger/15 text-danger rounded-lg text-xs font-medium">Delete Node</button>
             </div>
           </div>
+          {testResult && testResult.nodeId === selectedNode.id && (
+            <div className={`mb-4 rounded-lg border p-3 text-sm ${testResult.ok ? "border-success/30 bg-success/10 text-success" : "border-danger/30 bg-danger/10 text-danger"}`}>
+              {testResult.ok ? "✅ " : "❌ "}{testResult.text}
+            </div>
+          )}
+          {/* Maintenance windows */}
+          <div className="mb-4 rounded-lg border border-border bg-bg-secondary/40 p-3 space-y-2">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h4 className="font-semibold text-sm">🗓️ Scheduled maintenance windows</h4>
+            </div>
+            {maintWindows.filter((w) => w.nodeId === selectedNode.id).length === 0 ? (
+              <p className="text-xs text-text-muted">No upcoming windows for this node. Schedule one below — it drains the node automatically at the start and releases it at the end.</p>
+            ) : (
+              <div className="space-y-1">
+                {maintWindows.filter((w) => w.nodeId === selectedNode.id).map((w) => (
+                  <div key={w.id} className="flex items-center gap-2 flex-wrap rounded-lg bg-bg-card px-3 py-2">
+                    <span className="flex-1 min-w-[180px] text-xs text-text-secondary">
+                      {new Date(w.startsAt).toLocaleString()} → {new Date(w.endsAt).toLocaleString()}
+                      {w.reason ? <span className="text-text-muted"> · {w.reason}</span> : null}
+                      {w.applied ? <span className="ml-2 px-1.5 py-0.5 rounded-full bg-warning/15 text-warning text-[10px]">active</span> : null}
+                    </span>
+                    <button onClick={() => void cancelMaintenanceWindow(w.id)} disabled={mwBusy} className="text-xs text-text-muted hover:text-danger disabled:opacity-40">Cancel</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex items-center gap-2 flex-wrap">
+              <input type="datetime-local" value={mwStart} onChange={(e) => setMwStart(e.target.value)} className="rounded-lg border border-border bg-bg-card px-2 py-1.5 text-xs text-text-secondary" />
+              <span className="text-text-muted text-xs">→</span>
+              <input type="datetime-local" value={mwEnd} onChange={(e) => setMwEnd(e.target.value)} className="rounded-lg border border-border bg-bg-card px-2 py-1.5 text-xs text-text-secondary" />
+              <input value={mwReason} onChange={(e) => setMwReason(e.target.value)} placeholder="Reason (optional), e.g. kernel upgrade" maxLength={200} className="min-w-[180px] flex-1 rounded-lg border border-border bg-bg-card px-2 py-1.5 text-xs text-text-primary placeholder:text-text-muted" />
+              <button
+                onClick={() => void scheduleMaintenanceWindow(selectedNode.id)}
+                disabled={mwBusy || !mwStart || !mwEnd}
+                className="rounded-lg bg-warning/15 px-3 py-1.5 text-xs font-medium text-warning hover:bg-warning/25 disabled:opacity-40"
+              >{mwBusy ? "Working…" : "Schedule"}</button>
+            </div>
+            <p className="text-[10px] text-text-muted">Max 24h. Windows apply on the scheduler tick (~30s); a window that was never reached is simply skipped, never applied late.</p>
+          </div>
+
+          {/* Resource history */}
+          <div className="border-t border-border pt-4 mt-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h4 className="font-semibold text-sm">📈 Resource history</h4>
+                {nodeHistId !== null && (
+                  <a href={`/api/nodes/${nodeHistId}/metrics?hours=${nodeHistRange}&format=csv`} className="text-[11px] px-2 py-1 rounded-lg bg-bg-tertiary text-text-secondary hover:bg-bg-hover font-medium">⬇ CSV</a>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                {[{ h: 1, l: "1h" }, { h: 6, l: "6h" }, { h: 24, l: "24h" }].map((r) => (
+                  <button key={r.h} onClick={() => { setNodeHistRange(r.h); if (nodeHistId === selectedNode.id) void loadNodeHistory(selectedNode.id, r.h); }} className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${nodeHistRange === r.h ? "bg-accent text-white" : "bg-bg-secondary text-text-secondary hover:text-text-primary border border-border"}`}>{r.l}</button>
+                ))}
+                <button onClick={() => toggleNodeHistory(selectedNode.id)} className="ml-2 rounded-lg border border-border bg-bg-secondary px-3 py-1 text-[11px] font-medium text-text-secondary hover:border-accent/40 hover:text-accent transition-colors">
+                  {nodeHistId === selectedNode.id ? "Hide" : "Load charts"}
+                </button>
+              </div>
+            </div>
+            {nodeHistId === selectedNode.id && (
+              nodeHistLoading ? (
+                <p className="text-xs text-text-muted mt-3">Loading samples…</p>
+              ) : nodeHist ? (
+                <div className="mt-3 space-y-3">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <MetricsChart points={nodeHist.cpu} color="#38bdf8" label="CPU load" unit="%" />
+                    <MetricsChart points={nodeHist.ram} color="#a78bfa" label="RAM used" unit="%" />
+                  </div>
+                  <p className="text-[10px] text-text-muted">{nodeHist.samples.toLocaleString()} heartbeat samples in window · sent every 15 seconds{selectedNode.isLocal ? " by the panel itself" : " by the node agent"}</p>
+                  {(() => {
+                    const cpuA = nodeHist.anomalies?.cpu ?? [];
+                    const ramA = nodeHist.anomalies?.ram ?? [];
+                    if (cpuA.length === 0 && ramA.length === 0) return (
+                      <p className="text-[10px] text-text-muted">✅ No unusual spikes detected in this window.</p>
+                    );
+                    return (
+                      <div className="rounded-lg border border-warning/30 bg-warning/10 p-2.5">
+                        <p className="text-[11px] font-medium text-warning">⚠️ Unusual spikes in this window: {cpuA.length > 0 ? `${cpuA.length} CPU` : ""}{cpuA.length > 0 && ramA.length > 0 ? " · " : ""}{ramA.length > 0 ? `${ramA.length} RAM` : ""}</p>
+                        <p className="text-[10px] text-text-muted mt-1">Latest: {[...cpuA.map((a) => ({ ...a, kind: "CPU" })), ...ramA.map((a) => ({ ...a, kind: "RAM" }))].sort((a, b) => b.t - a.t).slice(0, 3).map((a) => `${a.kind} ${Math.round(a.v)}% @ ${new Date(a.t).toLocaleTimeString()} (z=${a.z})`).join(" · ")}</p>
+                      </div>
+                    );
+                  })()}
+                </div>
+              ) : (
+                <p className="text-xs text-text-muted mt-3">No samples yet — the agent sends heartbeats every 15 seconds once deployed.</p>
+              )
+            )}
+          </div>
+
           {/* Edit form */}
           {editingNode?.id === selectedNode.id && (
             <div className="border-t border-border pt-4 mt-4 space-y-4">
