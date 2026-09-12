@@ -395,6 +395,67 @@ export const serverEvents = pgTable("server_events", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// ── Shop (sell license keys) ───────────────────────────────────
+export const shopProducts = pgTable("shop_products", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 128 }).notNull(),
+  description: text("description"),
+  priceCents: integer("price_cents").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default("usd"),
+  maxActivations: integer("max_activations").notNull().default(1),
+  durationDays: integer("duration_days"), // null = never expires
+  active: boolean("active").notNull().default(true),
+  kind: varchar("kind", { length: 12 }).notNull().default("onetime"), // onetime | subscription
+  billingInterval: varchar("billing_interval", { length: 5 }), // month | year
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const shopCoupons = pgTable("shop_coupons", {
+  id: serial("id").primaryKey(),
+  code: varchar("code", { length: 64 }).notNull().unique(),
+  kind: varchar("kind", { length: 8 }).notNull().default("percent"), // percent | fixed
+  value: integer("value").notNull(), // percent 1-100, or fixed cents
+  maxUses: integer("max_uses"), // null = unlimited
+  usedCount: integer("used_count").notNull().default(0),
+  expiresAt: timestamp("expires_at"),
+  active: boolean("active").notNull().default(true),
+  productId: integer("product_id").references(() => shopProducts.id), // null = any product
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const shopResellers = pgTable("shop_resellers", {
+  id: serial("id").primaryKey(),
+  label: varchar("label", { length: 128 }).notNull(),
+  email: varchar("email", { length: 254 }),
+  tokenHash: text("token_hash").notNull().unique(),
+  tokenPrefix: varchar("token_prefix", { length: 12 }).notNull(),
+  commissionPct: integer("commission_pct").notNull().default(10),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  lastUsedAt: timestamp("last_used_at"),
+});
+
+export const shopOrders = pgTable("shop_orders", {
+  id: serial("id").primaryKey(),
+  email: varchar("email", { length: 254 }).notNull(),
+  productId: integer("product_id").references(() => shopProducts.id).notNull(),
+  provider: varchar("provider", { length: 16 }).notNull().default("manual"), // manual | stripe
+  providerRef: text("provider_ref"), // stripe checkout session id
+  providerSub: text("provider_sub"), // stripe subscription id (renewals)
+  status: varchar("status", { length: 16 }).notNull().default("pending"), // pending | paid | fulfilled | cancelled
+  amountCents: integer("amount_cents").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default("usd"),
+  couponId: integer("coupon_id").references(() => shopCoupons.id),
+  resellerId: integer("reseller_id").references(() => shopResellers.id),
+  commissionCents: integer("commission_cents"),
+  licenseKeyId: integer("license_key_id").references(() => licenseKeys.id),
+  issuedKeyPlaintext: text("issued_key_plaintext"), // shown once to the buyer; emailed too
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  paidAt: timestamp("paid_at"),
+  fulfilledAt: timestamp("fulfilled_at"),
+});
+
 // ── License keys (master-panel licensing) ──────────────────────
 // This panel can act as the LICENSE SERVER: admins issue keys here and
 // other installations must present one to install. Only the SHA-256 hash
@@ -407,6 +468,7 @@ export const licenseKeys = pgTable("license_keys", {
   maxActivations: integer("max_activations").notNull().default(1),
   expiresAt: timestamp("expires_at"),
   revokedAt: timestamp("revoked_at"),
+  expiryNotifiedAt: timestamp("expiry_notified_at"),
   createdBy: integer("created_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

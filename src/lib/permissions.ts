@@ -187,6 +187,13 @@ export const PERMISSION_CATEGORIES = {
       "licenses.revoke":      "Revoke license keys",
     },
   },
+  shop: {
+    label: "Shop",
+    permissions: {
+      "shop.view":            "View shop products & orders",
+      "shop.manage":          "Manage shop products, approve orders",
+    },
+  },
   apikeys: {
     label: "API Keys",
     permissions: {

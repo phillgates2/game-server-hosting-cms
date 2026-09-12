@@ -54,7 +54,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { id } = await params;
     await ensureLicenseTables();
     const [key] = await db
-      .select({ id: licenseKeys.id, revokedAt: licenseKeys.revokedAt })
+      .select({ id: licenseKeys.id, revokedAt: licenseKeys.revokedAt, keyPrefix: licenseKeys.keyPrefix, label: licenseKeys.label })
       .from(licenseKeys)
       .where(eq(licenseKeys.id, Number(id)))
       .limit(1);
@@ -62,6 +62,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (key.revokedAt) return NextResponse.json({ error: "Already revoked" }, { status: 400 });
 
     await db.update(licenseKeys).set({ revokedAt: new Date() }).where(eq(licenseKeys.id, key.id));
+
+    // Tell the operator's channels the moment a key is revoked.
+    try {
+      const { notifyLicenseEvent } = await import("@/lib/license-expiry");
+      await notifyLicenseEvent("revoked", key.keyPrefix, key.label);
+    } catch { /* notifications never break revocation */ }
 
     try {
       const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";

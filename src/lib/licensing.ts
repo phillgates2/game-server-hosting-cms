@@ -164,6 +164,7 @@ export async function ensureLicenseTables(): Promise<void> {
       max_activations INTEGER NOT NULL DEFAULT 1,
       expires_at TIMESTAMP,
       revoked_at TIMESTAMP,
+      expiry_notified_at TIMESTAMP,
       created_by INTEGER REFERENCES users(id),
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     )
@@ -180,4 +181,6 @@ export async function ensureLicenseTables(): Promise<void> {
       last_seen_at TIMESTAMP NOT NULL DEFAULT NOW()
     )
   `);
+  // Upgrades: pre-existing databases miss columns added by later stages.
+  await db.execute(sql`ALTER TABLE license_keys ADD COLUMN IF NOT EXISTS expiry_notified_at TIMESTAMP`);
 }

@@ -3495,6 +3495,217 @@ console.log("\nLICOFF offline-token rails");
   );
 }
 
+// ── LICTRF: activation transfer rails ───────────────────────────────────────
+console.log("\nLICTRF transfer rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const route = read("../src/app/api/license/activations/[id]/route.ts");
+  check(
+    "transfer is permission-gated, deletes exactly the target row, and is audited",
+    /hasPermission\(auth\.userId, "licenses\.revoke"\)/.test(route) &&
+      /db\.delete\(licenseActivations\)\.where\(eq\(licenseActivations\.id, act\.id\)\)/.test(route) &&
+      /action: "license\.transfer"/.test(route) &&
+      /if \(!act\) return NextResponse\.json\(\{ error: "Not found" \}, \{ status: 404 \}\)/.test(route)
+  );
+}
+
+// ── LICPORTAL: self-service check rails ─────────────────────────────────────
+console.log("\nLICPORTAL public-check rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const route = read("../src/app/api/license/public/check/route.ts");
+  check(
+    "public check is rate-limited, hash-looked-up, and never leaks hostnames/labels",
+    /checkRateLimit\(hits, ip, Date\.now\(\), RATE_WINDOW_MS, RATE_MAX\)/.test(route) &&
+      /RATE_MAX = 5/.test(route) &&
+      /const keyHash = await hashLicenseKey\(key as string\)/.test(route) &&
+      /where\(eq\(licenseKeys\.keyHash, keyHash\)\)/.test(route) &&
+      !/select\(\{[^}]*hostname/.test(route) &&
+      !/hostnames?\s*:/.test(route) &&
+      !/licenseKeys\.label/.test(route)
+  );
+  check(
+    "failure classes answer identically-shaped responses (no existence oracle)",
+    /licenseCheckMessage\("invalid"\)/.test(route) &&
+      /status: "invalid", message: licenseCheckMessage\("invalid"\)\s*\}, \{ status: 402 \}\)/.test(route) &&
+      /status: "rate-limited"/.test(route)
+  );
+}
+
+// ── LICNOTIFY: revocation & expiry notification rails ───────────────────────
+console.log("\nLICNOTIFY notification rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const revoke = read("../src/app/api/license/keys/[id]/route.ts");
+  const expiry = read("../src/lib/license-expiry.ts");
+  const sched = read("../src/lib/scheduler.ts");
+  check(
+    "revocation notifies both channels without ever breaking the revoke itself",
+    /notifyLicenseEvent\("revoked", key\.keyPrefix, key\.label\)/.test(revoke) &&
+      /notifications never break revocation/.test(revoke)
+  );
+  check(
+    "expiry sweep: one notice per expiry instant, master-only, marks as notified",
+    /return k\.expiryNotifiedAtMs < k\.expiresAtMs/.test(expiry) &&
+      /if \(!isLicenseMasterMode\(\)\) return 0/.test(expiry) &&
+      /set\(\{ expiryNotifiedAt: new Date\(nowMs\) \}\)/.test(expiry) &&
+      /await notifyLicenseEvent\("expired", key\.keyPrefix, key\.label\)/.test(expiry)
+  );
+  check(
+    "scheduler runs the sweep on an hourly throttle, best-effort",
+    /LICENSE_EXPIRY_SWEEP_INTERVAL_MS/.test(sched) &&
+      /await runLicenseExpirySweep\(\)/.test(sched) &&
+      /license expiry sweep failed/.test(sched)
+  );
+}
+
+// ── SHOP: ecommerce rails ───────────────────────────────────────────────────
+console.log("\nSHOP ecommerce rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const webhook = read("../src/app/api/shop/stripe-webhook/route.ts");
+  const orders = read("../src/app/api/shop/orders/route.ts");
+  const orderView = read("../src/app/api/shop/orders/[id]/route.ts");
+  const fulfil = read("../src/lib/shop.ts");
+  const stripe = read("../src/lib/shop-stripe.ts");
+  const adminProducts = read("../src/app/api/shop/admin/products/route.ts");
+  check(
+    "webhook verifies the signature BEFORE parsing and only completes sessions",
+    /if \(!verifyStripeSignature\(\{ header, payload, secret, nowMs: Date\.now\(\) \}\)\)/.test(webhook) &&
+      /event\.type !== "checkout\.session\.completed"/.test(webhook) &&
+      /status: "paid",\n        paidAt: new Date\(\),/.test(webhook) &&
+      /await fulfilOrder\(order\.id\)/.test(webhook)
+  );
+  check(
+    "orders are rate-limited, email-validated, and priced from the PRODUCT (never the client)",
+    /checkRateLimit\(hits, ip, Date\.now\(\), RATE_WINDOW_MS, RATE_MAX\)/.test(orders) &&
+      /isValidOrderEmail\(email\)/.test(orders) &&
+      /let amountCents = product\.priceCents/.test(orders) &&
+      /status: "pending",\n        amountCents,\n        currency: product\.currency/.test(orders) &&
+      /currency: product\.currency/.test(orders)
+  );
+  check(
+    "order view reveals the key only to the buyer's exact email; identical 404 for wrong email vs missing order",
+    /order\.email\.toLowerCase\(\) !== email/.test(orderView) &&
+      /No order matches that ID and email/.test(orderView) &&
+      /order\.status === "fulfilled" \? order\.issuedKeyPlaintext : null/.test(orderView)
+  );
+  check(
+    "fulfilment is idempotent and keys inherit product activations/expiry",
+    /if \(order\.status === "fulfilled" && order\.issuedKeyPlaintext\)/.test(fulfil) &&
+      /maxActivations: product\.maxActivations/.test(fulfil) &&
+      /product\.durationDays/.test(fulfil) &&
+      /orderCanFulfil\(order\.status as ShopOrderStatus\)/.test(fulfil)
+  );
+  check(
+    "stripe signature verification is HMAC-SHA256 with timing-safe compare and replay window",
+    /createHmac\("sha256", secret\)\.update\(`\$\{tRaw\}\.\$\{payload\}`\)/.test(stripe) &&
+      /timingSafeEqual\(a, b\)/.test(stripe) &&
+      /Math\.abs\(nowMs - tSec \* 1000\) > tolerance/.test(stripe)
+  );
+  check(
+    "shop admin routes are permission-gated",
+    /hasPermission\(auth\.userId, "shop\.manage"\)/.test(adminProducts)
+  );
+}
+
+// ── COUPON rails ────────────────────────────────────────────────────────────
+console.log("\nCOUPON rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const orders = read("../src/app/api/shop/orders/route.ts");
+  const checkRoute = read("../src/app/api/shop/coupons/check/route.ts");
+  const admin = read("../src/app/api/shop/admin/coupons/route.ts");
+  check(
+    "coupons apply server-side to the PRODUCT price, scope-checked, and increment once",
+    /amountCents = applyCoupon\(\{ kind: coupon\.kind as CouponKind, value: coupon\.value \}, product\.priceCents\)/.test(orders) &&
+      /coupon\.productId !== null && coupon\.productId !== product\.id/.test(orders) &&
+      /usedCount: coupon\.usedCount \+ 1/.test(orders) &&
+      /couponUsable\(\{/.test(orders)
+  );
+  check(
+    "coupon endpoints rate-limited, oracle-safe, admin-gated",
+    /checkRateLimit\(hits, ip, Date\.now\(\), 60_000, 20\)/.test(checkRoute) &&
+      /That coupon is not valid/.test(checkRoute) &&
+      /hasPermission\(auth\.userId, "shop\.manage"\)/.test(admin) &&
+      /That code already exists/.test(admin)
+  );
+}
+
+// ── SUBSCRIPTION rails ──────────────────────────────────────────────────────
+console.log("\nSUBSCR subscription rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const webhook = read("../src/app/api/shop/stripe-webhook/route.ts");
+  const orders = read("../src/app/api/shop/orders/route.ts");
+  const shopLib = read("../src/lib/shop.ts");
+  const stripe = read("../src/lib/shop-stripe.ts");
+  check(
+    "webhook handles renewal (invoice.paid -> extend) and cancellation (deleted -> revoke)",
+    /if \(event\.type === "invoice\.paid"\)/.test(webhook) &&
+      /renewSubscriptionByKey\(sub, intervalMs\)/.test(webhook) &&
+      /if \(event\.type === "customer\.subscription\.deleted"\)/.test(webhook) &&
+      /cancelSubscriptionByKey\(subId\)/.test(webhook) &&
+      /providerSub: subIdFromSession/.test(webhook)
+  );
+  check(
+    "subscriptions require stripe; sessions use recurring prices",
+    /product\.kind === "subscription" && provider !== "stripe"/.test(orders) &&
+      /mode: product\.kind === "subscription" \? "subscription" : "onetime"/.test(orders) &&
+      /recurring\]\[interval\]"\] = input\.interval === "year" \? "year" : "month"/.test(stripe)
+  );
+  check(
+    "renewals stack forward-only and clear the expiry notice re-arm",
+    /input\.currentExpiryMs !== null && input\.currentExpiryMs > input\.nowMs/.test(shopLib) &&
+      /revokedAt: null, expiryNotifiedAt: null/.test(shopLib) &&
+      /set\(\{ revokedAt: new Date\(\) \}\)/.test(shopLib)
+  );
+}
+
+// ── RESELLER rails ──────────────────────────────────────────────────────────
+console.log("\nRESELL reseller rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const orders = read("../src/app/api/shop/orders/route.ts");
+  const me = read("../src/app/api/shop/reseller/me/route.ts");
+  const admin = read("../src/app/api/shop/admin/resellers/route.ts");
+  const shopLib = read("../src/lib/shop.ts");
+  check(
+    "reseller attribution is hash-looked-up, active-only, commission from the SERVER rate",
+    /const resellerHash = await hashResellerToken\(resellerToken\)/.test(orders) &&
+      /if \(reseller && reseller\.active\)/.test(orders) &&
+      /commissionCents = commissionFor\(amountCents, reseller\.commissionPct\)/.test(orders)
+  );
+  check(
+    "reseller self-service: token header, no existence oracle, lastUsed stamped",
+    /normalizeResellerToken\(req\.headers\.get\("x-reseller-token"\)\)/.test(me) &&
+      /That reseller token is not valid/.test(me) &&
+      /set\(\{ lastUsedAt: new Date\(\) \}\)/.test(me) &&
+      /totalCommission\(settled\)/.test(me)
+  );
+  check(
+    "admin reseller routes gated; tokens hash-only in storage; commission clamped",
+    /hasPermission\(auth\.userId, "shop\.manage"\)/.test(admin) &&
+      /const tokenHash = await hashResellerToken\(token\)/.test(admin) &&
+      /pct > COMMISSION_MAX_PCT/.test(admin) &&
+      /Math\.max\(0, Math\.min\(COMMISSION_MAX_PCT, Math\.floor\(pct\)\)\)/.test(shopLib)
+  );
+}
+
 console.log(`\n${checks - failures}/${checks} checks passed`);
 if (failures > 0) {
   console.error(`${failures} security check(s) FAILED`);

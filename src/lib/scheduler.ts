@@ -33,6 +33,7 @@ const TICK_MS = 30_000;
 const EPHEMERAL_SWEEP_INTERVAL_MS = 5 * 60_000;
 let lastEphemeralSweep = 0;
 let lastLicenseHeartbeat = 0;
+let lastLicenseExpirySweep = 0;
 /** A tick executes at most this many tasks; the next tick picks up the rest. */
 const MAX_TASKS_PER_TICK = 20;
 /** Command tasks are shell commands; cap them so a paste cannot grow unbounded. */
@@ -84,6 +85,18 @@ export async function tickOnce(): Promise<void> {
     // task is due. Best-effort: never disturbs the schedule on failure.
     await runThresholdAlerts();
     await markStaleNodesOffline();
+
+    // Master-panel chore: announce licenses that lapsed since the last sweep.
+    const { LICENSE_EXPIRY_SWEEP_INTERVAL_MS } = await import("./license-expiry");
+    if (Date.now() - lastLicenseExpirySweep >= LICENSE_EXPIRY_SWEEP_INTERVAL_MS) {
+      lastLicenseExpirySweep = Date.now();
+      try {
+        const { runLicenseExpirySweep } = await import("./license-expiry");
+        await runLicenseExpirySweep();
+      } catch (e: unknown) {
+        log.warn("license expiry sweep failed", { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
 
     // License heartbeat: licensed panels re-prove their activation against
     // the master panel on a throttle. Best-effort like every other chore.
