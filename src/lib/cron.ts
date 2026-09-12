@@ -149,3 +149,26 @@ export function nextCronRun(expr: string, from: Date = new Date()): Date | null 
 export function isValidCron(expr: string): boolean {
   return parseCron(expr) !== null;
 }
+
+/** Cap so a hostile expression can never spin the preview loop forever. */
+export const CRON_PREVIEW_MAX_RUNS = 10;
+
+/**
+ * The next `count` fire times for an expression (pure: pass `from`).
+ * Invalid expressions and impossible schedules yield []. Runs are strictly
+ * ascending; each step advances from the previous result.
+ */
+export function nextCronRuns(expr: string, from: Date, count: number): Date[] {
+  const schedule = parseCron(expr);
+  if (!schedule) return [];
+  const wanted = Math.max(0, Math.min(Math.floor(count), CRON_PREVIEW_MAX_RUNS));
+  const runs: Date[] = [];
+  let cursor = from;
+  for (let i = 0; i < wanted; i++) {
+    const next = nextRunAfter(schedule, cursor);
+    if (!next) break;
+    runs.push(next);
+    cursor = next;
+  }
+  return runs;
+}

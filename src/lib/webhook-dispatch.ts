@@ -53,11 +53,18 @@ export async function upsertSetting(key: string, value: string | null): Promise<
  * configured, valid URL; callers treat every outcome as informational.
  */
 export async function dispatchWebhookEvent(event: WebhookEventInput): Promise<boolean> {
+  const { recordWebhookDelivery } = await import("./webhook-delivery-log");
   try {
     const { url, secret } = await getWebhookConfig();
-    if (!url) return false;
+    if (!url) {
+      recordWebhookDelivery({ atMs: Date.now(), action: event.action, attempted: false, ok: false, status: null, error: "no webhook URL configured" });
+      return false;
+    }
     const valid = validateWebhookUrl(url);
-    if (!valid.ok || !valid.url) return false;
+    if (!valid.ok || !valid.url) {
+      recordWebhookDelivery({ atMs: Date.now(), action: event.action, attempted: false, ok: false, status: null, error: "configured URL failed validation" });
+      return false;
+    }
 
     const body = JSON.stringify(
       buildWebhookPayload(event, { panel: "GameServer Manager", version: "1.43" }, new Date().toISOString())
@@ -67,13 +74,17 @@ export async function dispatchWebhookEvent(event: WebhookEventInput): Promise<bo
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
+    let status: number | null = null;
     try {
-      await fetch(valid.url, { method: "POST", headers, body, signal: controller.signal });
+      const res = await fetch(valid.url, { method: "POST", headers, body, signal: controller.signal });
+      status = res.status;
+      recordWebhookDelivery({ atMs: Date.now(), action: event.action, attempted: true, ok: res.ok, status, error: res.ok ? null : `HTTP ${res.status}` });
+      return true;
     } finally {
       clearTimeout(timeout);
     }
-    return true;
-  } catch {
+  } catch (e: unknown) {
+    recordWebhookDelivery({ atMs: Date.now(), action: event.action, attempted: true, ok: false, status: null, error: e instanceof Error ? e.message : "network error" });
     return false;
   }
 }

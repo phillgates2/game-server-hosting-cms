@@ -19,10 +19,12 @@ import {
   isValidAccessKeyFormat,
   normalizeAccessKey,
 } from "./access-keys";
+export { checkInstallAccessKey } from "./access-keys";
 
 export const ACCESS_GATE_ENV = "GSM_ACCESS_GATE";
 export const PANEL_MASTER_KEY_ENV = "GSM_PANEL_MASTER_KEY";
-export const PANEL_MASTER_KEY_MIN_LENGTH = 16;
+import { INSTALL_KEY_MIN_LENGTH } from "./access-keys";
+export const PANEL_MASTER_KEY_MIN_LENGTH = INSTALL_KEY_MIN_LENGTH;
 
 export const ACCESS_GATE_ERROR =
   "A valid panel access key is required. Ask the operator for one.";

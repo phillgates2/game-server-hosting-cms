@@ -14,6 +14,7 @@ export default function InstallWizard({ onComplete }: Props) {
     adminPassword: "",
     databasePassword: "",
     panelName: "GameServer Manager",
+    accessKey: "",
   });
   const [installing, setInstalling] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
@@ -150,6 +151,18 @@ export default function InstallWizard({ onComplete }: Props) {
                     onChange={(e) => setForm({ ...form, adminEmail: e.target.value })}
                     className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
                   />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-text-secondary mb-1">Panel Access Key <span className="text-text-muted font-normal">(required when the operator set one)</span></label>
+                  <input
+                    type="password"
+                    value={form.accessKey}
+                    onChange={(e) => setForm({ ...form, accessKey: e.target.value })}
+                    placeholder="Leave blank unless this install is key-protected"
+                    autoComplete="off"
+                    className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent"
+                  />
+                  <p className="mt-1 text-[11px] text-text-muted">If the server runs with GSM_PANEL_MASTER_KEY, the install only proceeds with that key — nobody can claim a fresh panel without it.</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-text-secondary mb-1">Admin Password</label>

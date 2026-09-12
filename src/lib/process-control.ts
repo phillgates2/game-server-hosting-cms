@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { access, constants } from "node:fs/promises";
+import { join } from "node:path";
 
 export async function findBash(): Promise<string> {
   for (const p of ["/usr/bin/bash", "/bin/bash", "/usr/local/bin/bash"]) {
@@ -66,12 +67,38 @@ export function killProcess(pid: number): Promise<boolean> {
   });
 }
 
-export async function startDetachedScript(scriptPath: string): Promise<{ pid: number | null; alive: boolean }> {
+export async function startDetachedScript(
+  scriptPath: string,
+  logFile?: string
+): Promise<{ pid: number | null; alive: boolean }> {
   const bashPath = await findBash();
+
+  // Optional console capture: stdout/stderr of the game server land in a
+  // per-server log file so the panel can tail it live.
+  let logFd: number | "ignore" = "ignore";
+  if (logFile) {
+    try {
+      const { openSync } = await import("node:fs");
+      const { dirname } = await import("node:path");
+      const { mkdirSync } = await import("node:fs");
+      mkdirSync(dirname(logFile), { recursive: true });
+      // Rotate an oversized log before appending to it.
+      try {
+        const { statSync, renameSync } = await import("node:fs");
+        const { shouldRotateLog, CONSOLE_LOG_ROTATED_NAME } = await import("./console-log");
+        if (shouldRotateLog(statSync(logFile).size)) {
+          renameSync(logFile, join(dirname(logFile), CONSOLE_LOG_ROTATED_NAME));
+        }
+      } catch { /* no existing log: nothing to rotate */ }
+      logFd = openSync(logFile, "a");
+    } catch {
+      logFd = "ignore"; // console capture must never block a start
+    }
+  }
 
   const child = spawn(bashPath, [scriptPath], {
     detached: true,
-    stdio: ["ignore", "ignore", "ignore"],
+    stdio: ["ignore", logFd, logFd],
     env: {
       NODE_ENV: process.env.NODE_ENV || "production",
       HOME: process.env.HOME || "/root",
@@ -82,6 +109,12 @@ export async function startDetachedScript(scriptPath: string): Promise<{ pid: nu
   });
 
   child.unref();
+  if (typeof logFd === "number") {
+    try {
+      const { closeSync } = await import("node:fs");
+      closeSync(logFd); // the child inherited its own copy
+    } catch { /* best-effort */ }
+  }
 
   const pid = child.pid || null;
   await new Promise((r) => setTimeout(r, 1500));

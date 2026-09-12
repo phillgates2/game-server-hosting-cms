@@ -118,6 +118,16 @@ export async function POST(
       }
     }
 
+    // Changelog entry: every update lands in the server's event history
+    // with its backup name and file-report summary.
+    try {
+      const { recordServerEvent } = await import("@/lib/server-events");
+      const { formatUpdateEventDetail } = await import("@/lib/update-history");
+      await recordServerEvent(server.id, "updated", formatUpdateEventDetail({ backupName, report }));
+    } catch {
+      /* best-effort */
+    }
+
     const backupNote = backupName ? ` (pre-update backup: ${backupName})` : "";
     const configNote = report && report.configsChanged.length > 0 ? ` — heads-up: ${report.configsChanged.length} config file(s) changed` : "";
     return NextResponse.json({ ok: true, backup: backupName, report, message: `${server.gameName} updated successfully${backupNote}${configNote}`, output: result.stdout.slice(-4000) });

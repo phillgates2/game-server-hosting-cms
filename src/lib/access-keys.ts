@@ -17,6 +17,9 @@ export const ACCESS_KEY_GROUP_LENGTH = 4;
 export const ACCESS_KEY_PREFIX_LABEL = "GSM";
 export const ACCESS_KEY_BODY_LENGTH = ACCESS_KEY_GROUPS * ACCESS_KEY_GROUP_LENGTH;
 
+/** Master/install keys shorter than this are never accepted. */
+export const INSTALL_KEY_MIN_LENGTH = 16;
+
 export const ACCESS_GATE_SETTING_KEY = "accessGateEnabled";
 
 /**
@@ -86,3 +89,29 @@ export function normalizeAccessKeyLabel(value: unknown): string | null {
   if (trimmed.length === 0) return null;
   return trimmed.slice(0, ACCESS_KEY_LABEL_MAX);
 }
+
+/**
+ * First-run install access check (pure — the route passes env values in).
+ *
+ * Fresh installs have no database keys yet, so the ONLY key that can gate
+ * an install is the operator's master key from the environment. When no
+ * master key is configured there is nothing to require, and the first
+ * install stays open (exactly the pre-gate behaviour). Re-installs are
+ * already protected by login + panel.install permission.
+ */
+export function checkInstallAccessKey(input: {
+  masterKeyConfigured: boolean;
+  masterKey: string | null;
+  presented: unknown;
+}): { ok: boolean; reason?: string } {
+  if (!input.masterKeyConfigured) return { ok: true };
+  const presented = typeof input.presented === "string" ? input.presented.trim() : "";
+  if (presented.length < INSTALL_KEY_MIN_LENGTH) {
+    return { ok: false, reason: "A panel access key is required to install this panel. Enter the operator master key." };
+  }
+  if (input.masterKey === null || presented !== input.masterKey) {
+    return { ok: false, reason: "That access key does not open this panel. Check the operator master key and try again." };
+  }
+  return { ok: true };
+}
+

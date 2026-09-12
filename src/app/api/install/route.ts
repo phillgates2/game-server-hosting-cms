@@ -85,6 +85,23 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
+
+    // CD-key gate for the installer itself: when the operator configured a
+    // master key, a fresh install requires it. Without one there is nothing
+    // to check, so first installs keep working exactly as before.
+    if (!alreadyInstalled) {
+      const { checkInstallAccessKey, PANEL_MASTER_KEY_ENV, PANEL_MASTER_KEY_MIN_LENGTH } = await import("@/lib/access-gate");
+      const masterKey = process.env[PANEL_MASTER_KEY_ENV] ?? null;
+      const gate = checkInstallAccessKey({
+        masterKeyConfigured: masterKey !== null && masterKey.length >= PANEL_MASTER_KEY_MIN_LENGTH,
+        masterKey,
+        presented: (body as Record<string, unknown>).accessKey,
+      });
+      if (!gate.ok) {
+        return NextResponse.json({ error: gate.reason }, { status: 403 });
+      }
+    }
+
     const { adminUsername, adminEmail, adminPassword, panelName, databasePassword } = body;
     let pendingDatabaseUrlUpdate: string | null = null;
 

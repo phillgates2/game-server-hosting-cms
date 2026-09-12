@@ -58,11 +58,22 @@ export async function POST(req: NextRequest) {
 
   try {
     if (b.test === true) {
-      const urlCheck = validateWebhookUrl(b.url);
+      // No URL supplied? Test the SAVED configuration end to end.
+      let testUrl: unknown = b.url;
+      let testSecret: unknown = b.secret;
+      if (b.url === undefined) {
+        const saved = await getWebhookConfig();
+        if (!saved.url) {
+          return NextResponse.json({ error: "No webhook is configured yet — save one first or pass a url to test." }, { status: 400 });
+        }
+        testUrl = saved.url;
+        testSecret = b.secret === undefined ? saved.secret : b.secret;
+      }
+      const urlCheck = validateWebhookUrl(testUrl);
       if (!urlCheck.ok || !urlCheck.url) {
         return NextResponse.json({ error: urlCheck.error || "Invalid webhook URL" }, { status: 400 });
       }
-      const secretCheck = normalizeWebhookSecret(b.secret === undefined ? null : b.secret);
+      const secretCheck = normalizeWebhookSecret(testSecret === undefined ? null : testSecret);
       if (!secretCheck.ok) {
         return NextResponse.json({ error: secretCheck.error }, { status: 400 });
       }
@@ -85,6 +96,15 @@ export async function POST(req: NextRequest) {
           headers,
           body: payload,
           signal: controller.signal,
+        });
+        const { recordWebhookDelivery } = await import("@/lib/webhook-delivery-log");
+        recordWebhookDelivery({
+          atMs: Date.now(),
+          action: "webhook.test",
+          attempted: true,
+          ok: delivered.ok,
+          status: delivered.status,
+          error: delivered.ok ? null : `HTTP ${delivered.status}`,
         });
         return NextResponse.json({ delivered: delivered.ok, status: delivered.status });
       } catch (e: unknown) {

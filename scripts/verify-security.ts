@@ -2794,7 +2794,7 @@ console.log("\nIDLEUPD idle-aware update guardrails");
     /idleFor === null \|\| idleFor < idleThresholdMs/.test(scheduler) &&
       /players may be online/.test(scheduler) &&
       /wasRunning/.test(scheduler) &&
-      /startDetachedScript\(join\([^)]*installPath, "gsm-start\.sh"\)\)/.test(scheduler) &&
+      /startDetachedScript\(join\([^)]*installPath, "gsm-start\.sh"\), consoleLogPath\(installPath\)\)/.test(scheduler) &&
       /if \(wasRunning\) \{/.test(scheduler) &&
       /\(idleBackupPref\?\.value \?\? "true"\) !== "false"/.test(scheduler)
   );
@@ -3038,6 +3038,277 @@ console.log("\nPALERT player-alert rails");
     /parsePlayerAlertThreshold\(updates\.playerAlertThreshold\)/.test(patch) &&
       /updates\.playerAlertAbove = false/.test(patch) &&
       /playerAlertThreshold must be a whole number between 1 and 1000/.test(patch)
+  );
+}
+
+// ── CONSOLE: live log tail rails ────────────────────────────────────────────
+console.log("\nCONSOLE live-console rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const route = read("../src/app/api/servers/[id]/console/route.ts");
+  const lib = read("../src/lib/console-log.ts");
+  const pc = read("../src/lib/process-control.ts");
+  const proc = read("../src/app/api/servers/[id]/process/route.ts");
+  check(
+    "console is gated: viewers blocked, operators allowed, read window capped",
+    /collabRole !== "operator"/.test(route) &&
+      /READ_WINDOW_BYTES/.test(route) &&
+      /Math\.min\(size, READ_WINDOW_BYTES\)/.test(route)
+  );
+  check(
+    "pure tail never serves a partial first line from a window",
+    /return chunkIsWholeFile \? lines : lines\.slice\(1\)/.test(lib) &&
+      /return Math\.min\(v, CONSOLE_MAX_TAIL_LINES\)/.test(lib) &&
+      /return sizeBytes > CONSOLE_MAX_BYTES/.test(lib)
+  );
+  check(
+    "starts capture console output via startDetachedScript's log fd",
+    /stdio: \["ignore", logFd, logFd\]/.test(pc) &&
+      /closeSync\(logFd\)/.test(pc) &&
+      /startDetachedScript\(startScript, consoleLogPath\(installPath\)\)/.test(proc)
+  );
+}
+
+// ── UPDHIST: update changelog rails ─────────────────────────────────────────
+console.log("\nUPDHIST update-changelog rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const route = read("../src/app/api/servers/[id]/update/route.ts");
+  const hist = read("../src/app/api/servers/[id]/updates/route.ts");
+  const lib = read("../src/lib/update-history.ts");
+  check(
+    "every update records a changelog event with backup + file report",
+    /recordServerEvent\(server\.id, "updated", formatUpdateEventDetail\(\{ backupName, report \}\)\)/.test(route)
+  );
+  check(
+    "history endpoint is access-gated and limited to update kinds",
+    /getCollaboratorRole\(server\.id, auth\.userId\)/.test(hist) &&
+      /inArray\(serverEvents\.kind, \["updated", "update-report"\]\)/.test(hist) &&
+      /UPDATE_HISTORY_MAX/.test(hist)
+  );
+  check(
+    "changelog detail includes backup, counts, configs and is capped",
+    /backup=\$\{input\.backupName\}/.test(lib) &&
+      /configs touched: /.test(lib) &&
+      /slice\(0, UPDATE_DETAIL_MAX\)/.test(lib)
+  );
+}
+
+// ── CAPACITY: what-if planner rails ─────────────────────────────────────────
+console.log("\nCAPACITY planner rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const lib = read("../src/lib/capacity-planner.ts");
+  const route = read("../src/app/api/nodes/[id]/capacity/route.ts");
+  check(
+    "planner floors headroom at zero and reports every binding limiter",
+    /Math\.max\(0, node\.maxServers - node\.serverCount\)/.test(lib) &&
+      /headrooms\.filter\(\(h\) => h\.count === min\)/.test(lib) &&
+      /Math\.floor\(\(node\.maxRamMb - used\) \/ footprint\.ramMb\)/.test(lib)
+  );
+  check(
+    "missing usage data is marked approximate, never assumed full",
+    /approximate = true/.test(lib) &&
+      /if \(node\.usedRamMb === null\) approximate = true/.test(lib)
+  );
+  check(
+    "capacity route is gated on nodes.view",
+    /hasPermission\(auth\.userId, "nodes\.view"\)/.test(route) &&
+      /footprintForSlug\(slug\)/.test(route)
+  );
+}
+
+// ── LEADERBOARD: busiest-server rails ───────────────────────────────────────
+console.log("\nLBOARD leaderboard rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const lib = read("../src/lib/player-leaderboard.ts");
+  const route = read("../src/app/api/leaderboard/route.ts");
+  check(
+    "aggregation ignores garbage samples and keeps exact peak/avg",
+    /!Number\.isFinite\(s\.players\) \|\| s\.players < 0/.test(lib) &&
+      /cur\.peak = Math\.max\(cur\.peak, s\.players\)/.test(lib) &&
+      /Math\.round\(\(v\.sum \/ v\.count\) \* 10\) \/ 10/.test(lib)
+  );
+  check(
+    "ranking is descending with stable tie-breaks and a top-N cap",
+    /return b\.peakPlayers - a\.peakPlayers/.test(lib) &&
+      /return sorted\.slice\(0, Math\.max\(0, topN\)\)/.test(lib) &&
+      /return Math\.min\(Math\.floor\(n\), LEADERBOARD_MAX_DAYS\)/.test(lib)
+  );
+  check(
+    "route caps the sample window and hides servers the caller can't see",
+    /limit\(MAX_SAMPLES\)/.test(route) &&
+      /sharedServerIdsFor\(auth\.userId\)/.test(route) &&
+      /visibleIds\.has\(r\.serverId\)/.test(route)
+  );
+}
+
+// ── RESTORE: verified swap rails ────────────────────────────────────────────
+console.log("\nRESTORE backup-restore rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const route = read("../src/app/api/servers/[id]/restore/route.ts");
+  const lib = read("../src/lib/backup-restore.ts");
+  check(
+    "restore verifies the archive in scratch BEFORE touching live files",
+    /await runCmd\("tar", \["xzf", backupPath, "-C", staging\], staging, 900_000\)/.test(route) &&
+      /const verdict = assessDrill\(entries\)/.test(route) &&
+      /if \(!verdict\.ok\) \{/.test(route) &&
+      /live files untouched/.test(route)
+  );
+  check(
+    "precheck blocks running/installing/alive/remote restores",
+    /input\.status === "running" \|\| input\.status === "installing"/.test(lib) &&
+      /if \(input\.processAlive\)/.test(lib) &&
+      /if \(input\.nodeIsLocal === false\)/.test(lib) &&
+      /precheckRestore\(\{ status: server\.status, processAlive: alive, nodeIsLocal: server\.nodeIsLocal \}\)/.test(route)
+  );
+  check(
+    "swap keeps restore points and only deletes the old tree once verified",
+    /await rename\(backupDir, backupsKept\)/.test(route) &&
+      /if \(check\.length > 0\) await rm\(oldPath/.test(route) &&
+      /RESTORE_BACKUP_NAME/.test(lib) &&
+      /!full\.startsWith\(base \+ sep\)/.test(lib)
+  );
+}
+
+// ── CRONPREVIEW: honest next-run previews ───────────────────────────────────
+console.log("\nCRONPV cron preview rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const cron = read("../src/lib/cron.ts");
+  const panel = read("../src/components/panels/SchedulerPanel.tsx");
+  check(
+    "preview runs are ascending, capped, and refuse invalid schedules",
+    /Math\.min\(Math\.floor\(count\), CRON_PREVIEW_MAX_RUNS\)/.test(cron) &&
+      /cursor = next/.test(cron) &&
+      /if \(!schedule\) return \[\]/.test(cron) &&
+      /if \(!next\) break/.test(cron)
+  );
+  check(
+    "SchedulerPanel previews the form expression and every task row",
+    /nextCronRuns\(form\.cronExpression, new Date\(\), 3\)/.test(panel) &&
+      /nextCronRuns\(task\.cronExpression \?\? "", new Date\(\), 1\)/.test(panel) &&
+      /doesn&apos;t parse/.test(panel)
+  );
+}
+
+// ── CLEANUP: advisory-only abandoned-server spotting ────────────────────────
+console.log("\nCLEANUP advisor rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const lib = read("../src/lib/cleanup-advisor.ts");
+  const route = read("../src/app/api/cleanup/route.ts");
+  check(
+    "advisor never flags running/installing/ephemeral/recently-played servers",
+    /if \(input\.isEphemeral\)/.test(lib) &&
+      /input\.status === "running" \|\| input\.status === "installing"/.test(lib) &&
+      /if \(hadRecentPlayers\)/.test(lib) &&
+      /stoppedDays >= CLEANUP_CANDIDATE_STOPPED_DAYS/.test(lib)
+  );
+  check(
+    "unknown stop times are treated conservatively",
+    /const stoppedMs = input\.lastStoppedMs \?\? nowMs/.test(lib)
+  );
+  check(
+    "route is visibility-scoped and advisory-only",
+    /sharedServerIdsFor\(auth\.userId\)/.test(route) &&
+      /Purely informational: the panel never auto-deletes on this signal/.test(route) &&
+      /assessServerForCleanup\(/.test(route)
+  );
+}
+
+// ── WHLOG: webhook delivery observability ───────────────────────────────────
+console.log("\nWHLOG delivery-log rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const lib = read("../src/lib/webhook-delivery-log.ts");
+  const dispatch = read("../src/lib/webhook-dispatch.ts");
+  const deliv = read("../src/app/api/settings/webhook/deliveries/route.ts");
+  const wh = read("../src/app/api/settings/webhook/route.ts");
+  check(
+    "ring buffer is capped, append-only and never mutates its input",
+    /next\.length > max \? next\.slice\(next\.length - max\) : next/.test(lib) &&
+      /const next = \[\.\.\.entries, entry\]/.test(lib)
+  );
+  check(
+    "every dispatch path records an outcome (skipped, delivered, failed)",
+    /recordWebhookDelivery\(\{ atMs: Date\.now\(\), action: event\.action, attempted: false/.test(dispatch) &&
+      /attempted: true, ok: res\.ok, status/.test(dispatch) &&
+      /attempted: true, ok: false, status: null, error: e instanceof Error/.test(dispatch)
+  );
+  check(
+    "deliveries endpoint is admin-only; saved-config test refuses when nothing is saved",
+    /auth\.role !== "admin"/.test(deliv) &&
+      /No webhook is configured yet/.test(wh) &&
+      /action: "webhook\.test"/.test(wh)
+  );
+}
+
+// ── INSTALLGATE: key-protected first install ────────────────────────────────
+console.log("\nINSTKEY install gate rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const install = read("../src/app/api/install/route.ts");
+  const keys = read("../src/lib/access-keys.ts");
+  check(
+    "first-run install is gated when a master key is configured",
+    /if \(!alreadyInstalled\) \{/.test(install) &&
+      /checkInstallAccessKey\(\{/.test(install) &&
+      /masterKeyConfigured: masterKey !== null && masterKey\.length >= PANEL_MASTER_KEY_MIN_LENGTH/.test(install) &&
+      /return NextResponse\.json\(\{ error: gate\.reason \}, \{ status: 403 \}\)/.test(install)
+  );
+  check(
+    "install key check is fail-closed and exact",
+    /if \(!input\.masterKeyConfigured\) return \{ ok: true \}/.test(keys) &&
+      /presented\.length < INSTALL_KEY_MIN_LENGTH/.test(keys) &&
+      /input\.masterKey === null \|\| presented !== input\.masterKey/.test(keys)
+  );
+}
+
+// ── INSTALLSH: shell installer carries the key ──────────────────────────────
+console.log("\nINSTSH installer-script rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const sh = read("../public/install.sh");
+  check(
+    "install.sh supports --access-key/--access-gate/--no-access-key",
+    /--access-key\)\s+ACCESS_KEY="\$2"/.test(sh) &&
+      /--access-gate\)\s+ACCESS_GATE="\$2"/.test(sh) &&
+      /--no-access-key\)\s+ACCESS_KEY="__none__"/.test(sh)
+  );
+  check(
+    "key is validated (>=16), auto-generated, and written to .env with the gate",
+    /\$\{#ACCESS_KEY\} -lt 16/.test(sh) &&
+      /GSM-\$\(openssl rand -hex 16\)/.test(sh) &&
+      /GSM_ACCESS_GATE=\$ACCESS_GATE/.test(sh) &&
+      /GSM_PANEL_MASTER_KEY=\$ACCESS_KEY/.test(sh)
+  );
+  check(
+    "gate-on without a key dies; the key is printed once in the summary",
+    /--access-gate on requires an access key/.test(sh) &&
+      /Panel Access Key — save this now, it is shown only once/.test(sh)
   );
 }
 

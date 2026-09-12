@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useToast } from "@/components/ToastProvider";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { mutate } from "@/lib/api-client";
+import { nextCronRuns } from "@/lib/cron";
 
 interface Task {
   id: number; serverId: number | null; taskType: string; cronExpression: string | null;
@@ -108,6 +109,14 @@ export default function SchedulerPanel() {
               <div className="flex gap-1.5 mt-2 flex-wrap">
                 {CRON_PRESETS.map((p) => <button key={p.value} type="button" onClick={() => setForm({ ...form, cronExpression: p.value })} className="px-2 py-1 bg-bg-secondary border border-border rounded text-[10px] hover:border-accent/30">{p.label}</button>)}
               </div>
+              {(() => {
+                const runs = nextCronRuns(form.cronExpression, new Date(), 3);
+                return runs.length > 0 ? (
+                  <p className="mt-2 text-[10px] text-text-muted">🔮 Next runs: {runs.map((r) => r.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })).join(" · ")}</p>
+                ) : (
+                  <p className="mt-2 text-[10px] text-danger">That cron expression doesn&apos;t parse — the task would never fire.</p>
+                );
+              })()}
             </div>
             {form.taskType === "command" && (
               <div><label className="block text-xs font-medium text-text-secondary mb-1.5">Command</label>
@@ -143,6 +152,10 @@ export default function SchedulerPanel() {
                     <p className="text-sm text-text-secondary">{task.serverName || `Server #${task.serverId}`}</p>
                     <div className="flex gap-3 mt-1 text-xs text-text-muted">
                       <span className="font-mono">{task.cronExpression}</span>
+                      {(() => {
+                        const next = nextCronRuns(task.cronExpression ?? "", new Date(), 1)[0];
+                        return next ? <span className="text-text-muted"> → next {next.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span> : null;
+                      })()}
                       {task.lastRun && <span>Last: {new Date(task.lastRun).toLocaleString()}</span>}
                       {task.nextRun && <span>Next: {new Date(task.nextRun).toLocaleString()}</span>}
                     </div>

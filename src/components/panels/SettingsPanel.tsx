@@ -152,6 +152,7 @@ export default function SettingsPanel() {
   const [hookSecret, setHookSecret] = useState("");
   const [hookState, setHookState] = useState<{ url: string | null; secretConfigured: boolean; secretMasked: string | null } | null>(null);
   const [hookBusy, setHookBusy] = useState(false);
+  const [hookDeliveries, setHookDeliveries] = useState<Array<{ line: string; ok: boolean; attempted: boolean }>>([]);
   const [drBusy, setDrBusy] = useState(false);
   const [idlePolicy, setIdlePolicy] = useState<{ enabled: boolean; hours: number } | null>(null);
   const [idleBusy, setIdleBusy] = useState(false);
@@ -197,6 +198,11 @@ export default function SettingsPanel() {
           const data = await res.json();
           setHookState(data);
           setHookUrl(data.url || "");
+        }
+        const delRes = await fetch("/api/settings/webhook/deliveries");
+        if (delRes.ok) {
+          const delData = await delRes.json().catch(() => null);
+          setHookDeliveries(delData?.deliveries ?? []);
         }
       } catch { /* non-admins simply see nothing */ }
     }, 0);
@@ -730,8 +736,17 @@ export default function SettingsPanel() {
             <div className="flex items-center gap-2 flex-wrap">
               <button onClick={() => void saveWebhook(false)} disabled={hookBusy} className="px-4 py-2 bg-accent hover:bg-accent-hover disabled:opacity-40 text-white rounded-lg text-sm font-medium">{hookBusy ? "Working…" : "Save webhook"}</button>
               <button onClick={() => void saveWebhook(true)} disabled={hookBusy || !hookUrl.trim()} className="px-4 py-2 bg-bg-tertiary hover:bg-bg-hover disabled:opacity-40 text-text-secondary rounded-lg text-sm font-medium">Send test event</button>
+              {hookState.url && <button onClick={() => { void (async () => { setHookBusy(true); try { const res = await fetch("/api/settings/webhook", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ test: true }) }); const data = await res.json().catch(() => null); if (res.ok && data?.delivered) toast.success("Saved config works", `Endpoint answered HTTP ${data.status}.`); else toast.error("Test failed", data?.error || `Endpoint answered HTTP ${data?.status ?? "?"}.`); const delRes = await fetch("/api/settings/webhook/deliveries"); if (delRes.ok) { const delData = await delRes.json().catch(() => null); setHookDeliveries(delData?.deliveries ?? []); } } finally { setHookBusy(false); } })(); }} disabled={hookBusy} className="px-4 py-2 bg-bg-tertiary hover:bg-bg-hover disabled:opacity-40 text-text-secondary rounded-lg text-sm font-medium">Test saved config</button>}
               {hookState.url && <button onClick={() => { setHookUrl(""); void (async () => { setHookBusy(true); try { const res = await fetch("/api/settings/webhook", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: null }) }); if (res.ok) { setHookState(await res.json()); setHookUrl(""); toast.success("Webhook disabled", ""); } } finally { setHookBusy(false); } })(); }} disabled={hookBusy} className="px-4 py-2 text-sm text-text-muted hover:text-danger">Disable</button>}
             </div>
+            {hookDeliveries.length > 0 && (
+              <div className="rounded-lg border border-border bg-bg-secondary/60 p-3 space-y-1">
+                <p className="text-[10px] uppercase tracking-wider text-text-muted mb-1">Recent deliveries (newest first, kept until restart)</p>
+                {hookDeliveries.map((d, i) => (
+                  <p key={i} className={`font-mono text-[11px] ${d.attempted && d.ok ? "text-success" : d.attempted ? "text-danger" : "text-text-muted"}`}>{d.line}</p>
+                ))}
+              </div>
+            )}
             <p className="text-[11px] text-text-muted">
               Deliveries are fire-and-forget and never block panel actions. Local/private addresses are rejected (SSRF guard).
             </p>

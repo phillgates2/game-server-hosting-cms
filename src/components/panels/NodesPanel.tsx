@@ -59,6 +59,9 @@ interface AuthUser {
   role: string;
 }
 
+interface GameInfo { id: number; name: string; slug: string; iconEmoji: string | null }
+interface CapacityAnswer { fits: number | null; limiters: string[]; approximate: boolean; answer: string; serverCount: number }
+
 interface MaintenanceWindowInfo {
   id: number;
   nodeId: number;
@@ -107,6 +110,34 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
   const [mwEnd, setMwEnd] = useState("");
   const [mwReason, setMwReason] = useState("");
   const [mwBusy, setMwBusy] = useState(false);
+  const [capGames, setCapGames] = useState<GameInfo[]>([]);
+  const [capSlug, setCapSlug] = useState<string>("");
+  const [capResult, setCapResult] = useState<Record<number, CapacityAnswer | null>>({});
+  const [capBusy, setCapBusy] = useState(false);
+
+  async function loadCapacityGames() {
+    try {
+      const res = await fetch("/api/games");
+      const data = await res.json().catch(() => null);
+      if (res.ok) {
+        const games = (data?.games ?? []) as GameInfo[];
+        setCapGames(games);
+        setCapSlug((cur) => cur || (games[0]?.slug ?? ""));
+      }
+    } catch { /* widget stays hidden */ }
+  }
+
+  async function checkCapacity(nodeId: number, slug: string) {
+    if (!slug || capBusy) return;
+    setCapBusy(true);
+    try {
+      const res = await fetch(`/api/nodes/${nodeId}/capacity?slug=${encodeURIComponent(slug)}`);
+      const data = await res.json().catch(() => null);
+      if (res.ok) setCapResult((r) => ({ ...r, [nodeId]: data }));
+      else setCapResult((r) => ({ ...r, [nodeId]: null }));
+    } catch { setCapResult((r) => ({ ...r, [nodeId]: null })); }
+    finally { setCapBusy(false); }
+  }
 
   async function loadMaintenanceWindows() {
     try {
@@ -196,6 +227,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
     const timer = window.setTimeout(() => {
       void loadNodes();
       void loadMaintenanceWindows();
+      void loadCapacityGames();
     }, 0);
 
     const interval = window.setInterval(() => {
@@ -736,6 +768,28 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
               {testResult.ok ? "✅ " : "❌ "}{testResult.text}
             </div>
           )}
+          {/* Capacity planner */}
+          {capGames.length > 0 && (
+            <div className="mb-4 rounded-lg border border-border bg-bg-secondary/40 p-3 space-y-2">
+              <h4 className="font-semibold text-sm">🧮 Capacity planner</h4>
+              <div className="flex items-center gap-2 flex-wrap">
+                <label className="text-xs text-text-muted">How many more fit of</label>
+                <select value={capSlug} onChange={(e) => setCapSlug(e.target.value)} className="rounded-lg border border-border bg-bg-card px-2 py-1.5 text-xs text-text-secondary">
+                  {capGames.map((g) => <option key={g.id} value={g.slug}>{g.iconEmoji ?? ""} {g.name}</option>)}
+                </select>
+                <button
+                  onClick={() => void checkCapacity(selectedNode.id, capSlug)}
+                  disabled={capBusy || !capSlug}
+                  className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-40"
+                >{capBusy ? "Checking…" : "Check capacity"}</button>
+              </div>
+              {capResult[selectedNode.id] ? (
+                <p className="text-xs text-text-secondary">{capResult[selectedNode.id]!.answer}</p>
+              ) : null}
+              <p className="text-[10px] text-text-muted">Estimates use conservative per-game footprints (RAM/disk) against the node's real usage — a planning aid, not a guarantee.</p>
+            </div>
+          )}
+
           {/* Maintenance windows */}
           <div className="mb-4 rounded-lg border border-border bg-bg-secondary/40 p-3 space-y-2">
             <div className="flex items-center justify-between flex-wrap gap-2">

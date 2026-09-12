@@ -16,7 +16,7 @@ Deploy, configure, and monitor game servers across multiple machines from one da
 
 <br>
 
-<samp>**34** games · **1,753** config options · **102** API routes · **1,003** tests · **311** security checks</samp>
+<samp>**34** games · **1,753** config options · **124** API routes · **1,188** tests · **384** security checks · **25** shipped feature stages</samp>
 
 <br>
 
@@ -78,9 +78,19 @@ bash <(curl -fsSL https://raw.githubusercontent.com/phillgates2/game-server-host
 | `--steamcmd-dir` | SteamCMD path | `/opt/steamcmd` |
 | `--gameservers-dir` | Game servers directory | `/opt/gameservers` |
 | `--jwt-secret` | JWT signing secret, min 32 chars | *auto-generated* |
+| `--access-key` | Panel access key (CD-key gate), min 16 chars — guards the web installer and, with the gate on, every login | *auto-generated, printed once* |
+| `--access-gate` | Force the login gate `on`/`off` | `on` when a key exists |
+| `--no-access-key` | Skip the access key entirely (open install, no gate) | off |
 | `--caddy` | Set up Caddy with automatic HTTPS | off |
 | `--no-steamcmd` | Skip SteamCMD entirely | off |
 | `-y`, `--noninteractive` | Skip all prompts | off |
+
+> 🔑 **Access key:** by default the installer generates a master access key,
+> writes it to `.env` (`GSM_PANEL_MASTER_KEY`) and **prints it once** at the
+> end of the install. The web installer refuses to run without it, so nobody
+> can claim a fresh panel; with the gate on, logins/registrations need it too
+> (mint per-person keys later in Settings → Access Gate). Pass
+> `--no-access-key` for a fully open install.
 
 </details>
 
@@ -198,9 +208,39 @@ Then visit `http://your-server:3000` to finish setup in the install wizard.
 
 </td>
 </tr>
+<tr>
+<td colspan="3" valign="top">
+
+#### 🚀 Fleet Operations Suite
+- **👥 Live rosters & peak-hours heatmap** — who is on each server right now, plus a 7-day play-pattern heatmap per server
+- **🪜 Staged rollouts** — update one canary, *boot-verify it for 10 seconds*, then sweep the fleet; a bad canary halts everything
+- **🔁 Rolling restarts** — one server at a time, each verified alive before the next is touched; one dark server beats a dark fleet
+- **🌙 Idle-aware updates** — scheduled Steam updates that only fire after a server has been empty for hours, then auto-restart it
+- **🧪 Update snapshot diffing** — every update reports `+added ~changed -removed` files and warns when configs were touched
+- **📥 Update changelog** — durable per-server history of every update with its backup name and file report
+- **🛡️ Verified backup restore** — scratch-extract + verify before the swap; restore points survive the restore itself
+- **🗓️ Scheduled maintenance windows** — drain a node at a planned time, release it automatically; missed windows never flip anything late
+- **📊 Anomaly detection** — z-score spike/drop/flatline alerts on node CPU/RAM history
+- **📬 Weekly fleet digest** — Monday summary to Discord + outbound webhooks: uptime worst-first, crash/idle counts
+- **🤝 Server sharing** — viewer (read-only) and operator (start/stop) collaborators per server, webhook secrets redacted
+- **🧬 Blueprints** — one-click multi-server deploys from presets (10 entries, 15 servers), port-aware, stops at first failure
+- **⏱️ Ephemeral test servers** — TTL clones that the sweeper removes automatically
+- **🧾 Change history** — who changed what, per server, with before → after values
+- **📤 Metrics CSV export** — per-server and per-node history, ready for spreadsheets
+- **📣 Player-count alerts** — "tell me at 24 players", edge-triggered so busy servers never spam
+- **📟 Live console** — captured stdout/stderr with 10 MB rotation, tailed in-panel every 3s (operator-and-above only)
+- **🧮 Capacity planner** — "how many more TF2 servers fit on this node?" with the binding limiter named
+- **🏆 Player leaderboard** — busiest servers by peak/average players over 24h/7d/30d, scoped to what you can see
+- **🧹 Cleanup advisor** — advisory list of abandoned-looking servers; nothing is ever auto-deleted
+- **🔮 Cron preview** — the scheduler shows the next three fire times as you type and warns when an expression can never match
+- **📡 Webhook delivery log** — every outbound delivery outcome (skipped/delivered/failed) inspectable in Settings, with a saved-config test button
+- **🔐 Session manager & IP allowlist** — revoke any login session; lock the panel to your CIDR ranges
+
+</td>
+</tr>
 </table>
 
-**Security & access** — TOTP two-factor auth · CSRF protection · granular role-based permissions · **scoped API keys** *(a read-only key really is read-only)* · per-user server quotas · login throttling · full audit trail
+**Security & access** — TOTP two-factor auth · CSRF protection · granular role-based permissions · **scoped API keys** *(a read-only key really is read-only)* · per-user server quotas · login throttling · full audit trail · **🔑 CD-key access gate** — `install.sh` generates a master key that guards the web installer *and* every login/register; mint per-person `GSM-XXXX-…` keys in Settings → Access Gate, revoke anytime, and `GSM_PANEL_MASTER_KEY` is the never-lock-yourself-out escape hatch (env overrides: `GSM_ACCESS_GATE=on|off`) · **tracked sessions** with per-device revocation · **IP allowlist** with CIDR rules and your-current-IP preview
 
 **Notifications** — Discord on start, stop, restart, crash, auto-restart, update and delete, **each with a 🟢/🔴 status dot and the live player count** *(probed straight from the game: Steam A2S, Minecraft ping, Bedrock RakNet, Quake3)* · **a channel per server**, created automatically · **live status boards** — a message per server that keeps itself updated with status, map and the roster, with verified players annotated with their Discord role color name *(`• Rifleman [12ms] 🎨 Vivid Azurite`)* · **a WolfET-style chat bot** matching the community bot 1:1 — `!etwho` (with a 3-minute status cache and Python-identical difflib name matching), `!etallofoz` *(which takes a configured extra-server list and optional master-server discovery, so it can also report ET servers that are not installed in the panel — those get a 🌐 label in the same embed)*, `!stats`, `!ettop10`, `!etverify` (DM-only, message deleted, ET Verified role), `!etsync` (owner gets a DM button), `!desync`, `⌛` progress-and-edit messages, pings in the roster and `sv_hostname` in the output, plus 🟢/🔴 channel-name status and a 10-minute XP nickname sync · SMTP email via Nodemailer
 
@@ -306,6 +346,8 @@ Only running non-Steam games? Skip it entirely with `--no-steamcmd`.
 | `DISCORD_WEBHOOK_URL` | optional | Panel-wide fallback webhook, used for any server without its own. Notifies on start, stop, restart, **crash**, auto-restart, update and delete |
 | `DISCORD_BOT_TOKEN` | optional | Bot token, required only for automatic per-server channels *(webhooks cannot create channels)* |
 | `DISCORD_GUILD_ID` | optional | Discord server ID the bot creates channels in |
+| `GSM_ACCESS_GATE` | optional | Force the CD-key login gate `on` or `off`, overriding the stored setting. When unset, the toggle in Settings → Access Gate decides |
+| `GSM_PANEL_MASTER_KEY` | optional | Master access key, **min 16 chars**. Opens the web installer on fresh panels and always opens the login gate — the never-lock-yourself-out key. `install.sh` generates one by default |
 | `GSM_DISABLE_AUTOSTART` | optional | Set `true` to stop servers marked *Start on node boot* from launching when the panel starts |
 | `GSM_LOG_FORMAT` | optional | `text` *(default)* or `json` for machine-readable logs |
 | `GSM_LOG_LEVEL` | optional | `debug`, `info` *(default)*, `warn` or `error` |
@@ -502,7 +544,7 @@ Two places to configure things, split by who they are for:
 
 | Where | What |
 |:--|:--|
-| **Settings** *(Administration)* | Data retention, default server quota, self-registration, age verification (minimum age, Australian 16+ default), pre-update auto-backup, login attempt limit, session length, and everything Discord — webhook, bot, and channel backfill |
+| **Settings** *(Administration)* | Data retention, default server quota, self-registration, age verification (minimum age, Australian 16+ default), pre-update auto-backup, login attempt limit, session length, **🔑 Access Gate** (require CD-keys to log in, mint/revoke keys), **idle auto-stop policy**, **alert mute windows**, **weekly fleet digest schedule**, **outbound webhook with delivery log**, IP allowlist, and everything Discord — webhook, bot, and channel backfill |
 | **Site Editor** *(✏️ on the public site)* | Panel name, hero text, footer, announcements, navigation links, chat widget, and **custom CSS** |
 
 Everything in **Settings** overrides the matching environment variable, so you
@@ -662,15 +704,21 @@ One command chains every check, exiting non-zero on the first failure — drop i
 
 | Script | Checks |
 |:--|:--|
-| `npm test` | 1,003 tests over the config renderer, path guard, auth, age verification, panel settings, pagination, API key scopes, server lifecycle rules, and **database integrity, end-to-end installer round-trips, and multi-write atomicity against a real PostgreSQL** *(see below)* |
+| `npm test` | 1,188 tests over the config renderer, path guard, auth, age verification, panel settings, pagination, API key scopes, server lifecycle rules, cron engine, idle math, fleet digests, capacity planning, leaderboards, restore guards and the CD-key gate, plus **database integrity, end-to-end installer round-trips, and multi-write atomicity against a real PostgreSQL** *(see below)* |
 | `npm run typecheck` | `tsc --noEmit` across the project |
 | `npm run lint` | ESLint, including React hooks rules |
 | `npm run verify:templates` | All 1,753 template options — types, enums, defaults, and that every declared variable is actually consumed |
 | `npm run verify:installers` | Renders every game's install script, runs `bash -n` + shellcheck, then **executes** it in a sandbox with SteamCMD/curl/apt mocked, and asserts the artifacts the panel needs were produced |
-| `npm run verify:security` | 311 regression checks pinning the security audit fixes: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, the 16+ age gate, the pre-update backup safety net, backup retention & disk guard, the crash-loop breaker, the resource-limit watchdog, password-reset token handling, host threshold alerts, Source modding wiring, Discord OAuth sign-in rules, metrics-history access control, the anonymous status-link whitelist, scheduler webhook wiring, and a sweep for leaked exception messages |
+| `npm run verify:security` | 384 regression checks pinning the security audit fixes and every feature stage since: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, the 16+ age gate, the pre-update backup safety net, backup retention & disk guard, the crash-loop breaker, the resource-limit watchdog, password-reset token handling, host threshold alerts, Source modding wiring, Discord OAuth sign-in rules, metrics-history access control, the anonymous status-link whitelist, scheduler webhook wiring, **the CD-key gate at install *and* login, installer-script key wiring, staged-rollout halt rails, restore verification gates, collaborator permission matrix, blueprint caps, maintenance-window release rules, idle-update busy guards, console read windows, leaderboard visibility, and the webhook delivery log** — plus a sweep for leaked exception messages |
 
 All of these run automatically in CI on every push and pull request, along
 with a production build and a high-severity dependency audit.
+
+**Mutation testing.** Every feature stage also ships with a mutation round:
+deliberate sabotage (halt rails removed, gates deleted, caps lifted, garbage
+accepted) is applied one at a time and must be caught by the test suite or the
+security pins before the stage may land — 75+ meaningful mutants caught so far,
+3 per stage.
 
 **Database tests need no database.** `tests/db-integrity.test.ts` runs the
 installer's own `CREATE TABLE` statements — extracted from the route source, so

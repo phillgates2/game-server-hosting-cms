@@ -15,7 +15,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { parseCron, nextRunAfter, nextCronRun, isValidCron } from "../src/lib/cron";
+import { parseCron, nextRunAfter, nextCronRun, isValidCron, nextCronRuns, CRON_PREVIEW_MAX_RUNS} from "../src/lib/cron";
 
 describe("parseCron", () => {
   test("accepts the standard daily schedule", () => {
@@ -119,5 +119,31 @@ describe("nextRunAfter", () => {
   test("nextCronRun combines parse and compute", () => {
     assert.equal(fmt(nextCronRun("0 4 * * *", at(2026, 8, 26, 3, 0))), "2026-8-26 4:00");
     assert.equal(nextCronRun("not cron", at(2026, 8, 26, 3, 0)), null);
+  });
+});
+
+describe("nextCronRuns", () => {
+  const at = (y: number, mo: number, d: number, h: number, mi: number) => new Date(y, mo - 1, d, h, mi, 0, 0);
+  const fmt = (d: Date | null) =>
+    d ? `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}` : null;
+
+  test("returns ascending runs, each after the previous", () => {
+    const runs = nextCronRuns("0 4 * * *", at(2026, 8, 26, 12, 0), 3);
+    assert.equal(runs.length, 3);
+    assert.equal(fmt(runs[0]), "2026-8-27 4:00");
+    assert.equal(fmt(runs[1]), "2026-8-28 4:00");
+    assert.equal(fmt(runs[2]), "2026-8-29 4:00");
+  });
+
+  test("invalid expressions and impossible schedules yield []", () => {
+    assert.deepEqual(nextCronRuns("not cron", at(2026, 8, 26, 12, 0), 3), []);
+    assert.deepEqual(nextCronRuns("0 0 31 2 *", at(2026, 8, 26, 12, 0), 3), []);
+  });
+
+  test("count is clamped to the preview cap and never negative", () => {
+    const runs = nextCronRuns("* * * * *", at(2026, 8, 26, 12, 0), 9999);
+    assert.equal(runs.length, CRON_PREVIEW_MAX_RUNS);
+    assert.deepEqual(nextCronRuns("* * * * *", at(2026, 8, 26, 12, 0), -5), []);
+    assert.deepEqual(nextCronRuns("* * * * *", at(2026, 8, 26, 12, 0), 0), []);
   });
 });

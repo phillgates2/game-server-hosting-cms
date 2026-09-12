@@ -129,6 +129,11 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   const [bpDeployNode, setBpDeployNode] = useState<number | 0>(0);
   const [bpBusy, setBpBusy] = useState<number | "save" | null>(null);
   const [alertDrafts, setAlertDrafts] = useState<Record<number, string>>({});
+  const [consoleFor, setConsoleFor] = useState<number | null>(null);
+  const [consoleLines, setConsoleLines] = useState<string[]>([]);
+  const [consoleNote, setConsoleNote] = useState<string | null>(null);
+  const consoleTimer = useRef<number | null>(null);
+  const [updateHistory, setUpdateHistory] = useState<Record<number, Array<{ kind: string; detail: string | null; createdAt: string }> | undefined>>({});
   const [dailyRestart, setDailyRestart] = useState<{ scheduled: boolean; enabled: boolean; hour: number; minute: number } | null>(null);
   const [dailyRestartBusy, setDailyRestartBusy] = useState(false);
   const [dailyBackup, setDailyBackup] = useState<{ scheduled: boolean; enabled: boolean; hour: number; minute: number } | null>(null);
@@ -335,6 +340,38 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
       }
     } catch (e) { const msg = e instanceof Error ? e.message : "Failed"; setError(msg); toast.error("Error", msg); } finally { setLoading(false); }
   }
+
+  async function loadUpdateHistory(id: number) {
+    setUpdateHistory((h) => ({ ...h, [id]: h[id] ?? [] }));
+    try {
+      const res = await fetch(`/api/servers/${id}/updates`);
+      const data = await res.json().catch(() => null);
+      if (res.ok) setUpdateHistory((h) => ({ ...h, [id]: data?.updates ?? [] }));
+      else setUpdateHistory((h) => ({ ...h, [id]: [] }));
+    } catch { setUpdateHistory((h) => ({ ...h, [id]: [] })); }
+  }
+
+  async function fetchConsole(id: number) {
+    try {
+      const res = await fetch(`/api/servers/${id}/console?lines=200`);
+      const data = await res.json().catch(() => null);
+      if (res.ok) { setConsoleLines(data?.lines ?? []); setConsoleNote(data?.note ?? null); }
+      else { setConsoleLines([]); setConsoleNote(data?.error || "Console unavailable for this server."); }
+    } catch { /* transient: next tick retries */ }
+  }
+
+  function toggleConsole(id: number) {
+    if (consoleTimer.current !== null) { window.clearInterval(consoleTimer.current); consoleTimer.current = null; }
+    if (consoleFor === id) {
+      setConsoleFor(null); setConsoleLines([]); setConsoleNote(null);
+      return;
+    }
+    setConsoleFor(id); setConsoleLines([]); setConsoleNote(null);
+    void fetchConsole(id);
+    consoleTimer.current = window.setInterval(() => void fetchConsole(id), 3000);
+  }
+
+  useEffect(() => () => { if (consoleTimer.current !== null) window.clearInterval(consoleTimer.current); }, []);
 
   async function savePlayerAlert(id: number, disable = false) {
     const draft = (alertDrafts[id] ?? "").trim();
@@ -708,6 +745,27 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
       }
       loadData();
     } catch (e) { toast.error("Error", e instanceof Error ? e.message : "Failed"); }
+  }
+
+  async function restoreBackup(id: number) {
+    const srv = servers.find((s) => s.id === id);
+    if (srv?.status === "running" || srv?.status === "installing") {
+      toast.warning("Stop First", "Stop the server before restoring a backup.");
+      return;
+    }
+    const ok = await confirm({
+      title: "Restore from backup",
+      message: `Replace ALL files of "${srv?.name ?? "this server"}" with its NEWEST backup? The backup is verified in a scratch folder first, and current files are kept until the swap succeeds. This cannot be undone with another click — make sure you mean it.`,
+      confirmLabel: "Restore newest backup",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const res = await fetch(`/api/servers/${id}/restore`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const data = await res.json().catch(() => null);
+      if (res.ok) { toast.success("Restored", data?.message || "Backup restored."); loadData(); }
+      else toast.error("Restore failed", data?.error || "The backup could not be restored.");
+    } catch (e) { toast.error("Restore failed", e instanceof Error ? e.message : "Unknown error"); }
   }
 
   async function drillBackup(id: number) {
@@ -1607,6 +1665,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                         <Btn onClick={() => updateServer(server.id)} color="accent" icon="🔄" label="Update" />
                         <Btn onClick={() => backupServer(server.id)} color="muted" icon="💾" label="Backup" />
                         <Btn onClick={() => void drillBackup(server.id)} color="muted" icon="🧪" label="Drill" title="Test-restore the newest backup (proves it works; live files untouched)" />
+                        <Btn onClick={() => void restoreBackup(server.id)} color="danger" icon="🛡️" label="Restore" title="Replace the server files with the newest verified backup (server must be stopped)" />
                         <Btn onClick={() => openConsole(server.id)} color="muted" icon="📋" label="Console" />
                         <Btn onClick={() => cloneServer(server.id)} color="muted" icon="📑" label="Clone" />
                         <Btn onClick={() => void cloneWithTtl(server.id, 24)} color="muted" icon="⏳" label="24h" title="Ephemeral clone: auto stop+delete after 24 hours" />
@@ -1959,9 +2018,45 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                             {server.playerAlertThreshold ? (
                               <button onClick={() => void savePlayerAlert(server.id, true)} className="text-xs text-text-muted hover:text-danger">Disable</button>
                             ) : (
-                              <span className="text-[10px] text-text-muted">currently off — fires once per crossing via this server's Discord webhook</span>
+                              <span className="text-[10px] text-text-muted">currently off — fires once per crossing via the Discord webhook</span>
+                            )}
+                            <button
+                              onClick={() => toggleConsole(server.id)}
+                              className={`ml-auto rounded-lg px-3 py-1 text-xs font-medium ${consoleFor === server.id ? "bg-accent text-white" : "bg-bg-secondary text-text-secondary border border-border hover:border-accent/40"}`}
+                            >{consoleFor === server.id ? "📟 Hide console" : "📟 Console"}</button>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <label className="text-[11px] text-text-muted">📥 Update history</label>
+                            {updateHistory[server.id] === undefined ? (
+                              <button onClick={() => void loadUpdateHistory(server.id)} className="rounded-lg bg-bg-secondary border border-border px-3 py-1 text-xs text-text-secondary hover:border-accent/40">Load changelog</button>
+                            ) : updateHistory[server.id]!.length === 0 ? (
+                              <span className="text-xs text-text-muted">No updates recorded yet.</span>
+                            ) : (
+                              <div className="w-full space-y-1 max-h-32 overflow-y-auto">
+                                {updateHistory[server.id]!.map((u, i) => (
+                                  <p key={i} className="text-[11px] font-mono bg-bg-secondary rounded px-2 py-1 text-text-secondary">
+                                    <span className="text-text-muted">{new Date(u.createdAt).toLocaleString()}</span> · {u.kind === "updated" ? "📥" : "🧬"} {u.detail ?? ""}
+                                  </p>
+                                ))}
+                              </div>
                             )}
                           </div>
+                          {consoleFor === server.id && (
+                            <div className="rounded-lg border border-border bg-black/80 p-3">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-[10px] text-text-muted">Live console — refreshes every 3s · captures start with the next server start</span>
+                                <button onClick={() => void fetchConsole(server.id)} className="text-[10px] text-text-muted hover:text-text-primary">↻ Refresh</button>
+                              </div>
+                              {consoleNote ? (
+                                <p className="text-xs text-text-muted font-mono">{consoleNote}</p>
+                              ) : null}
+                              {consoleLines.length > 0 ? (
+                                <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-green-300">{consoleLines.join("\n")}</pre>
+                              ) : !consoleNote ? (
+                                <p className="text-xs text-text-muted font-mono">Loading…</p>
+                              ) : null}
+                            </div>
+                          )}
                         </div>
                       )}
 

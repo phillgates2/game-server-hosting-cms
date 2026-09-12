@@ -221,11 +221,12 @@ async function runTask(task: DueTask): Promise<void> {
     switch (task.taskType) {
       case "restart": {
         const { isProcessAlive, killProcess, startDetachedScript } = await import("@/lib/process-control");
+        const { consoleLogPath } = await import("@/lib/console-log");
         if (server.pid && isProcessAlive(server.pid)) {
           await killProcess(server.pid);
           await new Promise((r) => setTimeout(r, 500));
         }
-        const { pid, alive } = await startDetachedScript(join(/* turbopackIgnore: true */ installPath, "gsm-start.sh"));
+        const { pid, alive } = await startDetachedScript(join(/* turbopackIgnore: true */ installPath, "gsm-start.sh"), consoleLogPath(installPath));
         await db
           .update(gameServers)
           .set({
@@ -374,8 +375,9 @@ async function runTask(task: DueTask): Promise<void> {
         if (wasRunning) {
           // Bring it back: it only went down for the update.
           const { startDetachedScript } = await import("./process-control");
+          const { consoleLogPath } = await import("./console-log");
           const { join } = await import("node:path");
-          const restarted = await startDetachedScript(join(/* turbopackIgnore: true */ installPath, "gsm-start.sh"));
+          const restarted = await startDetachedScript(join(/* turbopackIgnore: true */ installPath, "gsm-start.sh"), consoleLogPath(installPath));
           await db
             .update(gameServers)
             .set({

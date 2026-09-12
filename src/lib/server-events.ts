@@ -7,7 +7,7 @@
  * pruned per server on write so the table cannot grow unbounded.
  */
 
-export const SERVER_EVENT_KINDS = ["crashed", "watchdog-stop", "auto-restarted", "idle-stopped", "update-report"] as const;
+export const SERVER_EVENT_KINDS = ["crashed", "watchdog-stop", "auto-restarted", "idle-stopped", "update-report", "updated", "restored"] as const;
 export type ServerEventKind = (typeof SERVER_EVENT_KINDS)[number];
 
 /** Events older than this are pruned on the next write for that server. */

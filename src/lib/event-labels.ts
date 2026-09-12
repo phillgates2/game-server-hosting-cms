@@ -19,6 +19,10 @@ export function eventLabel(kind: string): string {
       return "😴 Stopped automatically (idle — zero players)";
     case "update-report":
       return "🧬 Update file report";
+    case "updated":
+      return "📥 Updated via Steam";
+    case "restored":
+      return "🛡️ Restored from backup";
     default:
       return kind;
   }

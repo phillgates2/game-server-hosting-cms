@@ -315,8 +315,9 @@ export async function POST(
         autoRestarting.add(server.id);
         try {
           const { startDetachedScript } = await import("@/lib/process-control");
+          const { consoleLogPath } = await import("@/lib/console-log");
           const startScript = join(/* turbopackIgnore: true */ String(server.installPath), "gsm-start.sh");
-          const { pid, alive: back } = await startDetachedScript(startScript);
+          const { pid, alive: back } = await startDetachedScript(startScript, consoleLogPath(String(server.installPath)));
 
           await db.update(gameServers).set({
             status: back ? "running" : "crashed",
@@ -470,8 +471,9 @@ export async function POST(
       }
 
       const installPath = String(server.installPath);
+      const { consoleLogPath } = await import("@/lib/console-log");
       const startScript = join(/* turbopackIgnore: true */ installPath, "gsm-start.sh");
-      const { pid, alive } = await startDetachedScript(startScript);
+      const { pid, alive } = await startDetachedScript(startScript, consoleLogPath(installPath));
 
       await db.update(gameServers).set({
         status: alive ? "running" : "stopped",

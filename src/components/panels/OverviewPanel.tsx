@@ -137,6 +137,36 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
     return () => window.clearTimeout(timer);
   }, [loadData]);
 
+  // 🏆 Player leaderboard (7 days by default, peak players).
+  const [lbRows, setLbRows] = useState<Array<{ rank: number; serverId: number; name: string; peakPlayers: number; avgPlayers: number; sampleCount: number }>>([]);
+  const [cleanupRows, setCleanupRows] = useState<Array<{ id: number; name: string; assessment: { level: string; reason: string } }>>([]);
+  const [lbDays, setLbDays] = useState(7);
+  const [lbSort, setLbSort] = useState<"peak" | "average">("peak");
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/leaderboard?days=${lbDays}&sortBy=${lbSort}`);
+        const data = await res.json().catch(() => null);
+        if (!cancelled && res.ok) setLbRows(data?.leaderboard ?? []);
+      } catch { /* dashboard keeps working */ }
+    }, 0);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [lbDays, lbSort]);
+
+  // 🧹 Cleanup advisor (advisory only — nothing is ever auto-deleted).
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch("/api/cleanup");
+        const data = await res.json().catch(() => null);
+        if (!cancelled && res.ok) setCleanupRows(data?.candidates ?? []);
+      } catch { /* dashboard keeps working */ }
+    }, 0);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, []);
+
   useEffect(() => {
     const timer = window.setTimeout(async () => {
       try {
@@ -491,6 +521,60 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
                 </div>
               )) : <p className="rounded-lg bg-bg-secondary px-3 py-2 text-sm text-text-secondary">No recent activity yet.</p>}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Player leaderboard */}
+      <div className="gaming-surface rounded-xl p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="heading-font text-lg font-semibold uppercase tracking-[0.06em]">🏆 Busiest servers</h3>
+            <p className="text-sm text-text-secondary">Player-count leaderboard from live probes — only servers you can see.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <select value={lbSort} onChange={(e) => setLbSort(e.target.value as "peak" | "average")} className="rounded-lg border border-border bg-bg-secondary px-2 py-1.5 text-xs text-text-secondary">
+              <option value="peak">by peak players</option>
+              <option value="average">by average players</option>
+            </select>
+            <select value={lbDays} onChange={(e) => setLbDays(Number(e.target.value))} className="rounded-lg border border-border bg-bg-secondary px-2 py-1.5 text-xs text-text-secondary">
+              <option value={1}>last 24h</option>
+              <option value={7}>last 7 days</option>
+              <option value={30}>last 30 days</option>
+            </select>
+          </div>
+        </div>
+        {lbRows.length === 0 ? (
+          <p className="mt-4 rounded-lg bg-bg-secondary px-3 py-2 text-sm text-text-secondary">No player samples in this window yet — running, probeable servers fill this in.</p>
+        ) : (
+          <div className="mt-4 space-y-1.5">
+            {lbRows.map((row) => (
+              <div key={row.serverId} className="flex items-center gap-3 rounded-lg border border-border bg-bg-secondary/70 px-3 py-2">
+                <span className={`heading-font w-8 text-center text-lg font-bold ${row.rank === 1 ? "text-warning" : row.rank === 2 ? "text-text-secondary" : row.rank === 3 ? "text-accent" : "text-text-muted"}`}>{row.rank <= 3 ? ["🥇", "🥈", "🥉"][row.rank - 1] : `#${row.rank}`}</span>
+                <span className="flex-1 truncate text-sm font-medium text-text-primary">{row.name}</span>
+                <span className="text-xs text-text-secondary" title="Peak players in window">peak {row.peakPlayers}</span>
+                <span className="text-xs text-text-muted" title="Average players across samples">avg {row.avgPlayers}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Cleanup advisor */}
+      {cleanupRows.length > 0 && (
+        <div className="gaming-surface rounded-xl p-5">
+          <div>
+            <h3 className="heading-font text-lg font-semibold uppercase tracking-[0.06em]">🧹 Cleanup advisor</h3>
+            <p className="text-sm text-text-secondary">Servers that look abandoned — long stopped, no players sampled. Advice only: nothing is deleted automatically.</p>
+          </div>
+          <div className="mt-4 space-y-1.5">
+            {cleanupRows.map((row) => (
+              <div key={row.id} className="flex items-center gap-3 rounded-lg border border-border bg-bg-secondary/70 px-3 py-2">
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${row.assessment.level === "candidate" ? "bg-danger/15 text-danger" : "bg-warning/15 text-warning"}`}>{row.assessment.level === "candidate" ? "candidate" : "review"}</span>
+                <span className="flex-1 truncate text-sm font-medium text-text-primary">{row.name}</span>
+                <span className="text-xs text-text-muted">{row.assessment.reason}</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
