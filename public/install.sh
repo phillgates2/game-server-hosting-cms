@@ -935,6 +935,26 @@ fi
 chown -R "$GSM_USER:$GSM_USER" "$INSTALL_DIR"
 ok "Source code ready at $INSTALL_DIR"
 
+# ── Stale-file reaper ────────────────────────────────────────────────────────
+# Paths deleted by later releases. When sources arrive through a sync that
+# does NOT propagate deletions (rsync without --delete, zip copies, or a git
+# pull that silently failed above), the leftovers break the build — e.g. the
+# Stage-42 access-key routes importing helpers that no longer exist. Every
+# known-dead path is removed before dependencies are installed or built.
+STALE_PATHS=(
+  # Stage 42 — CD-key panel access gate removed
+  "src/app/api/access-keys"
+  "src/app/api/auth/access-gate"
+  "src/components/panels/AccessGateSection.tsx"
+  "tests/access-keys.test.ts"
+)
+for stale in "${STALE_PATHS[@]}"; do
+  if [[ -e "$INSTALL_DIR/$stale" ]]; then
+    rm -rf -- "$INSTALL_DIR/$stale"
+    log "Removed stale path from an older release: $stale"
+  fi
+done
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  STEP 7: Configure environment & install dependencies
 # ═══════════════════════════════════════════════════════════════════════════════

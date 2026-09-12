@@ -3300,6 +3300,14 @@ console.log("\nINSTSH installer-script rails");
     /Master Key \(install key\) — save this now, it is shown only once/.test(sh) &&
       /there is no panel access gate/.test(sh)
   );
+  check(
+    "stale-file reaper purges deleted release paths before the build",
+    /STALE_PATHS=\(/.test(sh) &&
+      /"src\/app\/api\/access-keys"/.test(sh) &&
+      /"src\/app\/api\/auth\/access-gate"/.test(sh) &&
+      /"src\/components\/panels\/AccessGateSection\.tsx"/.test(sh) &&
+      /rm -rf -- "\$INSTALL_DIR\/\$stale"/.test(sh)
+  );
 }
 
 // ── LICENSE: master-panel key desk rails ────────────────────────────────────
