@@ -77,6 +77,11 @@ JWT_SECRET=""
 ACCESS_KEY=""
 ACCESS_KEY_PROVIDED="false"
 ACCESS_GATE="auto"
+LICENSE_KEY=""
+LICENSE_SERVER=""
+LICENSE_TOKEN=""
+LICENSE_PUBKEY_FILE=""
+MASTER_PANEL="false"
 SETUP_CADDY="false"
 SKIP_STEAMCMD="false"
 STEAMCMD_DIR="/opt/steamcmd"
@@ -101,6 +106,11 @@ while [[ $# -gt 0 ]]; do
     --access-key)       ACCESS_KEY="$2"; ACCESS_KEY_PROVIDED="true"; shift 2 ;;
     --access-gate)      ACCESS_GATE="$2";     shift 2 ;;
     --no-access-key)    ACCESS_KEY="__none__"; shift  ;;
+    --license-key)      LICENSE_KEY="$2";     shift 2 ;;
+    --license-server)   LICENSE_SERVER="$2";  shift 2 ;;
+    --license-token)    LICENSE_TOKEN="$2";   shift 2 ;;
+    --license-pubkey)   LICENSE_PUBKEY_FILE="$2"; shift 2 ;;
+    --master-panel)     MASTER_PANEL="true";  shift   ;;
     --steamcmd-dir)     STEAMCMD_DIR="$2";    shift 2 ;;
     --gameservers-dir)  GAMESERVERS_DIR="$2"; shift 2 ;;
     --caddy)            SETUP_CADDY="true";   shift   ;;
@@ -128,6 +138,11 @@ while [[ $# -gt 0 ]]; do
       echo "  --access-key       KEY         Panel access key / master key (min 16 chars; default: auto-generated)"
       echo "  --access-gate      on|off      Force the login gate on/off (default: on when a key exists)"
       echo "  --no-access-key                Skip the access key entirely (open install, no gate)"
+      echo "  --license-key      KEY         Installation license key issued by the master panel (required)"
+      echo "  --license-server   URL         Master panel URL that validates the key (required unless --master-panel)"
+      echo "  --license-token    TOKEN       Offline pre-signed token (air-gapped installs; skips network validation)"
+      echo "  --license-pubkey   FILE        Public key file that signed the offline token (PEM)"
+      echo "  --master-panel                 Install as the master panel (the key desk); skips license validation"
       echo "  --caddy                        Set up Caddy reverse proxy with automatic HTTPS"
       echo "  --no-steamcmd                  Skip SteamCMD installation"
       echo "  --noninteractive, -y           Skip all prompts; use defaults/flags"
@@ -514,6 +529,41 @@ esac
 
 if [[ "$ACCESS_GATE" == "on" && -z "$ACCESS_KEY" ]]; then
   die "--access-gate on requires an access key (drop --no-access-key or pass --access-key)"
+fi
+
+# ── License validation (fail closed) ─────────────────────────────────────────
+# Normal installations must present a key issued by the master panel. The
+# master panel itself installs with --master-panel (it IS the key desk).
+# Air-gapped boxes use --license-token + --license-pubkey: the web installer
+# verifies the Ed25519 signature locally (no network needed).
+LICENSE_PUBKEY_B64=""
+if [[ "$MASTER_PANEL" != "true" && -n "$LICENSE_TOKEN" ]]; then
+  if [[ -z "$LICENSE_PUBKEY_FILE" || ! -f "$LICENSE_PUBKEY_FILE" ]]; then
+    die "--license-token needs --license-pubkey FILE (the master panel's public key, PEM)."
+  fi
+  LICENSE_PUBKEY_B64="$(base64 -w0 "$LICENSE_PUBKEY_FILE" 2>/dev/null || base64 "$LICENSE_PUBKEY_FILE" | tr -d '\n')"
+  log "Offline license token supplied — the web installer will verify its signature locally."
+elif [[ "$MASTER_PANEL" != "true" ]]; then
+  if [[ -z "$LICENSE_SERVER" ]]; then
+    die "No license server configured. Pass --license-server https://your-master-panel (or --master-panel if THIS box is the key desk)."
+  fi
+  LICENSE_SERVER="${LICENSE_SERVER%/}"
+  if [[ -z "$LICENSE_KEY" && "$NONINTERACTIVE" != "true" ]]; then
+    read -rp "License key (issued by the master panel): " LICENSE_KEY
+  fi
+  if [[ -z "$LICENSE_KEY" ]]; then
+    die "A license key is required to install this panel. Get one from the panel provider, then pass --license-key."
+  fi
+  log "Validating license key against $LICENSE_SERVER ..."
+  VALIDATE_BODY=$(printf '{"key":"%s","hostname":"%s","panelUrl":"%s"}' \
+    "$LICENSE_KEY" "$(hostname 2>/dev/null || echo unknown)" "http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo localhost):$PANEL_PORT")
+  VALIDATE_RESP=$(curl -fsS -m 15 -X POST "$LICENSE_SERVER/api/license/validate" \
+    -H 'content-type: application/json' -d "$VALIDATE_BODY" 2>/dev/null || true)
+  if ! printf '%s' "$VALIDATE_RESP" | grep -q '"ok":true'; then
+    LICENSE_ERR=$(printf '%s' "$VALIDATE_RESP" | sed -n 's/.*"error"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    die "License validation failed: ${LICENSE_ERR:-the license server could not be reached ($LICENSE_SERVER)}. Installation refused."
+  fi
+  ok "License key accepted"
 fi
 
 TOTAL_STEPS=10
@@ -917,6 +967,12 @@ GAMESERVERS_PATH=$GAMESERVERS_DIR
 # Store it somewhere safe — it is the "never lock myself out" key.
 GSM_ACCESS_GATE=$ACCESS_GATE
 GSM_PANEL_MASTER_KEY=$ACCESS_KEY
+
+# Licensing
+GSM_LICENSE_SERVER=$LICENSE_SERVER
+GSM_LICENSE_MODE=$([[ "$MASTER_PANEL" == "true" ]] && echo master || ([[ -n "$LICENSE_TOKEN" ]] && echo offline || echo standard))
+GSM_LICENSE_OFFLINE_TOKEN=$LICENSE_TOKEN
+GSM_LICENSE_OFFLINE_PUBKEY=$LICENSE_PUBKEY_B64
 
 # SMTP (optional — configure for email notifications)
 # SMTP_HOST=smtp.example.com

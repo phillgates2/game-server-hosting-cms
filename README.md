@@ -81,6 +81,9 @@ bash <(curl -fsSL https://raw.githubusercontent.com/phillgates2/game-server-host
 | `--access-key` | Panel access key (CD-key gate), min 16 chars — guards the web installer and, with the gate on, every login | *auto-generated, printed once* |
 | `--access-gate` | Force the login gate `on`/`off` | `on` when a key exists |
 | `--no-access-key` | Skip the access key entirely (open install, no gate) | off |
+| `--license-key` | Installation license key issued by the master panel — validated live before anything is installed | *(required)* |
+| `--license-server` | Master panel URL that validates the key | *(required unless `--master-panel`)* |
+| `--master-panel` | Install as the master panel (the key desk); skips license validation | off |
 | `--caddy` | Set up Caddy with automatic HTTPS | off |
 | `--no-steamcmd` | Skip SteamCMD entirely | off |
 | `-y`, `--noninteractive` | Skip all prompts | off |
@@ -235,6 +238,7 @@ Then visit `http://your-server:3000` to finish setup in the install wizard.
 - **🔮 Cron preview** — the scheduler shows the next three fire times as you type and warns when an expression can never match
 - **📡 Webhook delivery log** — every outbound delivery outcome (skipped/delivered/failed) inspectable in Settings, with a saved-config test button
 - **🔐 Session manager & IP allowlist** — revoke any login session; lock the panel to your CIDR ranges
+- **🎟️ Licensing** — this panel doubles as the license server: issue/track/revoke installation keys (hash-only, activation fingerprints, per-key caps & expiry); every normal installation validates its key against the master panel at install time and is refused without one. Licensed panels then re-prove their activation every 6 hours via a key-less fingerprint heartbeat — an explicit revocation/expiry locks new logins immediately, while an unreachable license server gets a 72h grace window with a live countdown banner before lockout
 
 </td>
 </tr>
@@ -347,6 +351,8 @@ Only running non-Steam games? Skip it entirely with `--no-steamcmd`.
 | `DISCORD_BOT_TOKEN` | optional | Bot token, required only for automatic per-server channels *(webhooks cannot create channels)* |
 | `DISCORD_GUILD_ID` | optional | Discord server ID the bot creates channels in |
 | `GSM_ACCESS_GATE` | optional | Force the CD-key login gate `on` or `off`, overriding the stored setting. When unset, the toggle in Settings → Access Gate decides |
+| `GSM_LICENSE_SERVER` | optional | URL of the master panel that validates installation license keys. Required for normal installations (`install.sh` fails closed without it); only the master/key-desk instance may omit it |
+| `GSM_LICENSE_MODE` | optional | `master` = this instance is the key desk (skips license validation); anything else = standard licensed installation |
 | `GSM_PANEL_MASTER_KEY` | optional | Master access key, **min 16 chars**. Opens the web installer on fresh panels and always opens the login gate — the never-lock-yourself-out key. `install.sh` generates one by default |
 | `GSM_DISABLE_AUTOSTART` | optional | Set `true` to stop servers marked *Start on node boot* from launching when the panel starts |
 | `GSM_LOG_FORMAT` | optional | `text` *(default)* or `json` for machine-readable logs |

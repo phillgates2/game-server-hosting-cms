@@ -102,6 +102,90 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── License enforcement (fail closed) ─────────────────────────────────
+    // Normal installations must present a key issued by the master panel.
+    // The master panel itself runs with GSM_LICENSE_MODE=master.
+    let licenseOutcomeOk = false;
+    let licenseServerUsed: string | null = null;
+    let licenseFingerprintUsed: string | null = null;
+    let licenseModeUsed: "online" | "offline" | null = null;
+    let licenseOfflineExpiresAt: number | null = null;
+    if (!alreadyInstalled) {
+      const {
+        isLicenseMasterMode,
+        licenseServerUrl,
+        validateLicenseRemote,
+        decideInstallLicenseExtended,
+      } = await import("@/lib/license-client");
+      const masterMode = isLicenseMasterMode();
+      const serverUrl = licenseServerUrl();
+      const licenseKey = (body as Record<string, unknown>).licenseKey;
+      const keyPresented = typeof licenseKey === "string" && licenseKey.trim().length > 0;
+
+      let outcome: Awaited<ReturnType<typeof validateLicenseRemote>> = null;
+      if (!masterMode && serverUrl && keyPresented) {
+        const { hostname } = await import("node:os");
+        const installHostname = hostname();
+        const installPanelUrl = req.headers.get("origin") || req.headers.get("referer") || "";
+        outcome = await validateLicenseRemote({
+          serverUrl,
+          key: String(licenseKey).trim(),
+          hostname: installHostname,
+          panelUrl: installPanelUrl,
+        });
+        licenseOutcomeOk = outcome?.ok === true;
+        licenseServerUsed = serverUrl;
+        if (licenseOutcomeOk) {
+          // The heartbeat re-proves this activation later WITHOUT the key.
+          const { licenseFingerprint } = await import("@/lib/licensing");
+          licenseFingerprintUsed = await licenseFingerprint(installHostname, installPanelUrl);
+        }
+      }
+
+      // Offline path: a pre-signed token + the master panel's public key,
+      // either posted by the wizard or passed via .env by install.sh.
+      const tokenFromBody = (body as Record<string, unknown>).licenseToken;
+      const pubkeyFromBody = (body as Record<string, unknown>).licensePublicKey;
+      const { LICENSE_OFFLINE_TOKEN_ENV, LICENSE_OFFLINE_PUBKEY_ENV, normalizePublicKeyPem } = await import("@/lib/license-client");
+      const offlineToken =
+        typeof tokenFromBody === "string" && tokenFromBody.trim()
+          ? tokenFromBody.trim()
+          : process.env[LICENSE_OFFLINE_TOKEN_ENV]?.trim() || "";
+      const offlinePubkeyRaw =
+        typeof pubkeyFromBody === "string" && pubkeyFromBody.trim()
+          ? pubkeyFromBody.trim()
+          : process.env[LICENSE_OFFLINE_PUBKEY_ENV]?.trim() || "";
+      const offlineTokenPresented = offlineToken.length > 0 || typeof tokenFromBody === "string" && tokenFromBody.trim().length > 0;
+
+      let offlineOutcome: { ok: boolean; reason?: string; expiresAtMs?: number } | null = null;
+      if (offlineToken) {
+        const publicPem = normalizePublicKeyPem(offlinePubkeyRaw);
+        if (!publicPem) {
+          offlineOutcome = { ok: false, reason: "An offline token was provided but no valid public key came with it." };
+        } else {
+          const { verifyOfflineToken } = await import("@/lib/license-client");
+          const verified = await verifyOfflineToken({ token: offlineToken, publicKeyPem: publicPem, nowMs: Date.now() });
+          offlineOutcome = { ok: verified.ok, reason: verified.reason, expiresAtMs: verified.payload?.expiresAtMs };
+        }
+      }
+
+      const decision = decideInstallLicenseExtended({
+        masterMode,
+        serverConfigured: serverUrl !== null,
+        onlineOutcome: outcome,
+        keyPresented,
+        offlineTokenPresented,
+        offlineOutcome,
+      });
+      if (!decision.ok) {
+        return NextResponse.json({ error: decision.reason }, { status: 402 });
+      }
+      if (decision.mode === "offline") {
+        licenseModeUsed = "offline";
+        licenseOfflineExpiresAt = offlineOutcome?.expiresAtMs ?? null;
+      }
+    }
+
     const { adminUsername, adminEmail, adminPassword, panelName, databasePassword } = body;
     let pendingDatabaseUrlUpdate: string | null = null;
 
@@ -684,6 +768,17 @@ export async function POST(req: NextRequest) {
       { key: "panel_name", value: panelName || "GameServer Manager" },
       { key: "installed", value: "true" },
       { key: "install_date", value: new Date().toISOString() },
+      ...(((licenseServerUsed && licenseOutcomeOk) || licenseModeUsed === "offline")
+        ? [
+            { key: "license_server", value: licenseServerUsed },
+            { key: "license_activated_at", value: new Date().toISOString() },
+            { key: "license_mode", value: licenseModeUsed ?? "online" },
+            ...(licenseFingerprintUsed ? [{ key: "license_fingerprint", value: licenseFingerprintUsed }] : []),
+            ...(licenseOfflineExpiresAt
+              ? [{ key: "license_offline_expires_at", value: new Date(licenseOfflineExpiresAt).toISOString() }]
+              : []),
+          ]
+        : []),
       { key: "version", value: "1.0.0" },
       { key: "multi_node_enabled", value: "true" },
       { key: "ipv6_enabled", value: "true" },

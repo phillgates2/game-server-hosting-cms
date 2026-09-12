@@ -15,6 +15,9 @@ export default function InstallWizard({ onComplete }: Props) {
     databasePassword: "",
     panelName: "GameServer Manager",
     accessKey: "",
+    licenseKey: "",
+    licenseToken: "",
+    licensePublicKey: "",
   });
   const [installing, setInstalling] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
@@ -151,6 +154,36 @@ export default function InstallWizard({ onComplete }: Props) {
                     onChange={(e) => setForm({ ...form, adminEmail: e.target.value })}
                     className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
                   />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-text-secondary mb-1">License Key <span className="text-text-muted font-normal">(required — issued by the master panel)</span></label>
+                  <input
+                    type="text"
+                    value={form.licenseKey}
+                    onChange={(e) => setForm({ ...form, licenseKey: e.target.value })}
+                    placeholder="GSM-LIC-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+                    autoComplete="off"
+                    className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-muted font-mono focus:outline-none focus:ring-2 focus:ring-accent"
+                  />
+                  <p className="mt-1 text-[11px] text-text-muted">Validated live against the license server before anything is installed. Master-panel instances (GSM_LICENSE_MODE=master) skip this.</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-text-secondary mb-1">Air-gapped? <span className="text-text-muted font-normal">(offline token instead — leave the key above blank)</span></label>
+                  <textarea
+                    value={form.licenseToken}
+                    onChange={(e) => setForm({ ...form, licenseToken: e.target.value })}
+                    placeholder="Paste the offline token from the master panel"
+                    rows={2}
+                    className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-muted font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent"
+                  />
+                  <textarea
+                    value={form.licensePublicKey}
+                    onChange={(e) => setForm({ ...form, licensePublicKey: e.target.value })}
+                    placeholder="-----BEGIN PUBLIC KEY----- … (the master panel's public key)"
+                    rows={2}
+                    className="mt-2 w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-muted font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent"
+                  />
+                  <p className="mt-1 text-[11px] text-text-muted">Verified locally by signature — no network needed. The token carries an expiry; renew it from the master panel when it runs out.</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-text-secondary mb-1">Panel Access Key <span className="text-text-muted font-normal">(required when the operator set one)</span></label>

@@ -24,6 +24,22 @@ function clientIp(req: NextRequest): string {
 }
 
 export async function POST(req: NextRequest) {
+  // License lockout: a panel whose license was explicitly rejected (or whose
+  // grace window ran out) refuses NEW logins. Existing data is untouched and
+  // the recovery path is GSM_LICENSE_MODE=master on a box you own.
+  try {
+    const { currentLicenseState } = await import("@/lib/license-heartbeat");
+    const license = await currentLicenseState();
+    if (license.state === "locked") {
+      return NextResponse.json(
+        { error: `This panel's license is invalid${license.code ? ` (${license.code})` : ""} — logins are blocked. Renew the key with your provider.${license.message ? ` ${license.message}` : ""}` },
+        { status: 402 }
+      );
+    }
+  } catch {
+    /* licensing checks must never brick authentication */
+  }
+
   try {
     const body = await req.json();
     const username = (body.username || "").trim();

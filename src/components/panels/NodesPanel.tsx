@@ -786,7 +786,7 @@ export default function NodesPanel({ user }: { user: AuthUser }) {
               {capResult[selectedNode.id] ? (
                 <p className="text-xs text-text-secondary">{capResult[selectedNode.id]!.answer}</p>
               ) : null}
-              <p className="text-[10px] text-text-muted">Estimates use conservative per-game footprints (RAM/disk) against the node's real usage — a planning aid, not a guarantee.</p>
+              <p className="text-[10px] text-text-muted">Estimates use conservative per-game footprints (RAM/disk) against real node usage — a planning aid, not a guarantee.</p>
             </div>
           )}
 

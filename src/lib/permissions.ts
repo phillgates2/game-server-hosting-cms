@@ -179,6 +179,14 @@ export const PERMISSION_CATEGORIES = {
       "scheduler.logs":       "View scheduler run logs",
     },
   },
+  licenses: {
+    label: "License Keys",
+    permissions: {
+      "licenses.view":        "View license keys & activations",
+      "licenses.issue":       "Issue license keys",
+      "licenses.revoke":      "Revoke license keys",
+    },
+  },
   apikeys: {
     label: "API Keys",
     permissions: {

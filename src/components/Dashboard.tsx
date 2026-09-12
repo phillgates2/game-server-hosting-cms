@@ -19,6 +19,7 @@ import AuditPanel from "./panels/AuditPanel";
 import ActivityPanel from "./panels/ActivityPanel";
 import SchedulerPanel from "./panels/SchedulerPanel";
 import ApiKeysPanel from "./panels/ApiKeysPanel";
+import LicensesPanel from "./panels/LicensesPanel";
 import SettingsPanel from "./panels/SettingsPanel";
 import LadderPanel from "./panels/LadderPanel";
 import { ThemeToggleButton } from "./ThemeToggle";
@@ -36,7 +37,7 @@ interface AuthUser {
 }
 interface Props { user: AuthUser; onLogout: () => void; onGoHome?: () => void }
 
-type Tab = "overview" | "servers" | "files" | "rcon" | "nodes" | "games" | "audit" | "monitor" | "forum" | "cms" | "ladder" | "users" | "roles" | "profile" | "database" | "activity" | "scheduler" | "apikeys" | "settings";
+type Tab = "overview" | "servers" | "files" | "rcon" | "nodes" | "games" | "audit" | "monitor" | "forum" | "cms" | "ladder" | "users" | "roles" | "profile" | "database" | "activity" | "scheduler" | "apikeys" | "licenses" | "settings";
 
 interface NavItem { key: Tab; label: string; permission?: string; section: string; shortcut?: string }
 
@@ -58,6 +59,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: "activity", label: "Activity Log", permission: "security.audit", section: "admin" },
   { key: "settings", label: "Settings", permission: "panel.settings", section: "admin" },
   { key: "scheduler", label: "Scheduler", permission: "scheduler.view", section: "main" },
+  { key: "licenses", label: "License Keys", permission: "licenses.view", section: "admin" },
   { key: "apikeys", label: "API Keys", permission: "apikeys.view", section: "account" },
   { key: "profile", label: "My Profile", section: "account", shortcut: "P" },
 ];
@@ -83,6 +85,7 @@ const TAB_META: Record<Tab, { title: string; subtitle: string }> = {
     activity: { title: "Activity Log", subtitle: "Full audit trail — who did what and when." },
     scheduler: { title: "Scheduler", subtitle: "Automate server restarts, backups, and updates on a schedule." },
     apikeys: { title: "API Keys", subtitle: "Generate personal keys for external tools and scripts." },
+    licenses: { title: "License Keys", subtitle: "Issue and manage installation licenses — the master key desk for distributed panels." },
   settings: { title: "Settings", subtitle: "Retention, account defaults, and Discord channel management." },
   };
 
@@ -128,6 +131,8 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
     onLogout();
   }
 
+  const [licenseBanner, setLicenseBanner] = useState<string | null>(null);
+  const [licenseLocked, setLicenseLocked] = useState(false);
   const filteredNav = NAV_ITEMS.filter((item) => !item.permission || perms[item.permission] === true);
 
   const sections: Record<string, NavItem[]> = {};
@@ -156,6 +161,23 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [filteredNav]);
+
+  // License heartbeat banner: warn during grace, show the lock when locked.
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const res = await fetch("/api/license/status");
+        const data = await res.json().catch(() => null);
+        if (cancelled || !res.ok) return;
+        setLicenseBanner(data?.banner ?? null);
+        setLicenseLocked(data?.state === "locked");
+      } catch { /* dashboard keeps working */ }
+    };
+    const timer = window.setTimeout(() => void check(), 0);
+    const interval = window.setInterval(() => void check(), 60_000);
+    return () => { cancelled = true; window.clearTimeout(timer); window.clearInterval(interval); };
+  }, []);
 
   useEffect(() => {
     function onWindowClick(e: MouseEvent) {
@@ -220,6 +242,7 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
       case "activity": return <ActivityPanel />;
       case "scheduler": return <SchedulerPanel />;
       case "apikeys": return <ApiKeysPanel />;
+      case "licenses": return <LicensesPanel />;
       case "settings": return <SettingsPanel />;
       default: return <OverviewPanel user={user} onNavigate={navTo} />;
     }
@@ -235,6 +258,11 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
     <div className="dashboard-shell min-h-screen relative isolate">
       <main className="overflow-auto min-w-0 relative z-10">
         <div className="dashboard-content p-4 lg:p-6 space-y-6 animate-panel-lift">
+          {licenseBanner && (
+            <div role="alert" className={`rounded-xl border px-4 py-3 text-sm font-medium ${licenseLocked ? "border-danger/40 bg-danger/10 text-danger" : "border-warning/40 bg-warning/10 text-warning"}`}>
+              {licenseBanner}
+            </div>
+          )}
           <header className="gaming-surface relative z-30 overflow-visible rounded-2xl px-4 py-3 lg:px-5 lg:py-4 flex flex-col gap-3">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">

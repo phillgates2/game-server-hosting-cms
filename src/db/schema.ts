@@ -395,6 +395,33 @@ export const serverEvents = pgTable("server_events", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// ── License keys (master-panel licensing) ──────────────────────
+// This panel can act as the LICENSE SERVER: admins issue keys here and
+// other installations must present one to install. Only the SHA-256 hash
+// is stored; the plaintext key is shown exactly once at creation.
+export const licenseKeys = pgTable("license_keys", {
+  id: serial("id").primaryKey(),
+  keyHash: text("key_hash").notNull().unique(),
+  keyPrefix: varchar("key_prefix", { length: 20 }).notNull(),
+  label: varchar("label", { length: 128 }),
+  maxActivations: integer("max_activations").notNull().default(1),
+  expiresAt: timestamp("expires_at"),
+  revokedAt: timestamp("revoked_at"),
+  createdBy: integer("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const licenseActivations = pgTable("license_activations", {
+  id: serial("id").primaryKey(),
+  keyId: integer("key_id").references(() => licenseKeys.id, { onDelete: "cascade" }).notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  hostname: text("hostname"),
+  panelUrl: text("panel_url"),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
+});
+
 // ── Scheduled maintenance windows ──────────────────────────────
 // Drain a node automatically at startsAt and release it at endsAt.
 // appliedAt/completedAt let the scheduler know what it already did.

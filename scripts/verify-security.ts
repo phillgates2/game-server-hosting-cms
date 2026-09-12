@@ -3312,6 +3312,189 @@ console.log("\nINSTSH installer-script rails");
   );
 }
 
+// ── LICENSE: master-panel key desk rails ────────────────────────────────────
+console.log("\nLIC licensing rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const lib = read("../src/lib/licensing.ts");
+  const validate = read("../src/app/api/license/validate/route.ts");
+  const keys = read("../src/app/api/license/keys/route.ts");
+  check(
+    "verdict order: invalid > revoked > expired > same-fingerprint > cap",
+    /if \(!input\.keyFound\) return "invalid"/.test(lib) &&
+      /if \(input\.revoked\) return "revoked"/.test(lib) &&
+      /if \(input\.expired\) return "expired"/.test(lib) &&
+      /if \(input\.sameFingerprintActive\) return "ok"/.test(lib) &&
+      /if \(input\.activeActivations >= input\.maxActivations\) return "limit-reached"/.test(lib)
+  );
+  check(
+    "validate endpoint: rate-limited, hash-compared, fingerprint-bound",
+    /checkRateLimit\(hits, ip, Date\.now\(\), RATE_WINDOW_MS, RATE_MAX\)/.test(validate) &&
+      /entry\.count > maxPerWindow/.test(lib) &&
+      /entry\.count \+= 1/.test(lib) &&
+      /const keyHash = await hashLicenseKey\(key as string\)/.test(validate) &&
+      /licenseFingerprint\(hostname, panelUrl\)/.test(validate) &&
+      /sameFingerprintActive/.test(validate) &&
+      /status: 429/.test(validate)
+  );
+  check(
+    "key issuance is permission-gated and stores hash only",
+    /hasPermission\(auth\.userId, "licenses\.issue"\)/.test(keys) &&
+      /const keyHash = await hashLicenseKey\(key\)/.test(keys) &&
+      /keyHash,/.test(keys)
+  );
+}
+
+// ── LICCLIENT: install-time license enforcement ─────────────────────────────
+console.log("\nLICCLI enforcement rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const client = read("../src/lib/license-client.ts");
+  const install = read("../src/app/api/install/route.ts");
+  const sh = read("../public/install.sh");
+  check(
+    "client fails closed: no server, no key, unreachable all refuse; only master mode bypasses",
+    /if \(input\.masterMode\) return \{ ok: true \}/.test(client) &&
+      /No license server is configured/.test(client) &&
+      /A license key is required to install this panel/.test(client) &&
+      /could not be reached — installation refused/.test(client)
+  );
+  check(
+    "install route enforces the license decision before creating anything",
+    /decideInstallLicenseExtended\(\{/.test(install) &&
+      /return NextResponse\.json\(\{ error: decision\.reason \}, \{ status: 402 \}\)/.test(install) &&
+      /licenseOutcomeOk = outcome\?\.ok === true/.test(install)
+  );
+  check(
+    "install.sh validates the key against the master panel before Step 1",
+    /--license-server\)\s+LICENSE_SERVER="\$2"/.test(sh) &&
+      /curl -fsS -m 15 -X POST "\$LICENSE_SERVER\/api\/license\/validate"/.test(sh) &&
+      /printf '%s' "\$VALIDATE_RESP" \| grep -q '"ok":true'/.test(sh) &&
+      /License validation failed/.test(sh) &&
+      /--master-panel\)\s+MASTER_PANEL="true"/.test(sh) &&
+      /GSM_LICENSE_MODE=/.test(sh)
+  );
+}
+
+// ── LICHART: heartbeat grace & lockout rails ────────────────────────────────
+console.log("\nLICHART heartbeat rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const hb = read("../src/lib/license-heartbeat.ts");
+  const login = read("../src/app/api/auth/login/route.ts");
+  const sched = read("../src/lib/scheduler.ts");
+  const val = read("../src/app/api/license/validate/route.ts");
+  const inst = read("../src/app/api/install/route.ts");
+  check(
+    "state machine: reject locks now, unreachable uses grace from the ORIGINAL streak start",
+    /if \(input\.verdict === "rejected"\) \{/.test(hb) &&
+      /return \{ state: "locked", invalidSinceMs: input\.nowMs \}/.test(hb) &&
+      /const since = input\.invalidSinceMs \?\? input\.nowMs/.test(hb) &&
+      /const locked = input\.nowMs - since >= input\.graceMs/.test(hb) &&
+      /if \(input\.verdict === "ok"\) \{/.test(hb)
+  );
+  check(
+    "login gate blocks new sessions when locked, without bricking auth on error",
+    /if \(license\.state === "locked"\)/.test(login) &&
+      /\{ status: 402 \}/.test(login) &&
+      /licensing checks must never brick authentication/.test(login)
+  );
+  check(
+    "scheduler throttles the heartbeat and never breaks task execution",
+    /Date\.now\(\) - lastLicenseHeartbeat >= LICENSE_HEARTBEAT_INTERVAL_MS/.test(sched) &&
+      /await runLicenseHeartbeat\(\)/.test(sched) &&
+      /license heartbeat failed/.test(sched)
+  );
+  check(
+    "master re-check is fingerprint-shaped and re-evaluates the parent key",
+    /\/\^\[0-9a-f\]\{64\}\$\//.test(val) &&
+      /sameFingerprintActive: true/.test(val) &&
+      /parent\.revokedAt !== null/.test(val)
+  );
+  check(
+    "install stores the activation fingerprint for key-less heartbeats",
+    /licenseFingerprintUsed = await licenseFingerprint\(installHostname, installPanelUrl\)/.test(inst) &&
+      /"license_fingerprint", value: licenseFingerprintUsed/.test(inst)
+  );
+}
+
+// ── LICUSE: usage analytics rails ───────────────────────────────────────────
+console.log("\nLICUSE analytics rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const lib = read("../src/lib/license-analytics.ts");
+  const route = read("../src/app/api/license/analytics/route.ts");
+  check(
+    "health windows are exact and future timestamps count as recently seen",
+    /if \(ageMs <= LICENSE_ACTIVE_WINDOW_DAYS \* 86_400_000\) return "active"/.test(lib) &&
+      /if \(ageMs <= LICENSE_SILENT_WINDOW_DAYS \* 86_400_000\) return "silent"/.test(lib) &&
+      /if \(ageMs < 0\) return "active"/.test(lib) &&
+      /if \(key\.activationCount === 0\) return "never"/.test(lib)
+  );
+  check(
+    "analytics endpoint is permission-gated and caps the activation scan",
+    /hasPermission\(auth\.userId, "licenses\.view"\)/.test(route) &&
+      /\.limit\(500\)/.test(route) &&
+      /summarizeLicenseFleet\(keys, activationHealth, nowMs\)/.test(route)
+  );
+}
+
+// ── LICOFF: offline token rails ─────────────────────────────────────────────
+console.log("\nLICOFF offline-token rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const client = read("../src/lib/license-client.ts");
+  const install = read("../src/app/api/install/route.ts");
+  const hb = read("../src/lib/license-heartbeat.ts");
+  const sign = read("../src/app/api/license/signing-key/route.ts");
+  const tok = read("../src/app/api/license/keys/[id]/offline-token/route.ts");
+  const sh = read("../public/install.sh");
+  check(
+    "offline verdict: malformed > bad signature > expired; verify is timing-safe crypto",
+    /if \(!input\.parsed\) return \{ ok: false, reason: "The offline license token is malformed\." \}/.test(client) &&
+      /signatureValid = verify\(null, parsed\.payloadBytes, input\.publicKeyPem, parsed\.sig\)/.test(client) &&
+      /if \(input\.expired\) return \{ ok: false, reason: "The offline license token has expired — ask for a fresh one\." \}/.test(client) &&
+      /candidate\.v === OFFLINE_TOKEN_VERSION/.test(client)
+  );
+  check(
+    "install verifies tokens locally and persists offline mode + expiry",
+    /verifyOfflineToken\(\{ token: offlineToken, publicKeyPem: publicPem, nowMs: Date\.now\(\) \}\)/.test(install) &&
+      /offlineOutcome = \{ ok: verified\.ok, reason: verified\.reason, expiresAtMs: verified\.payload\?\.expiresAtMs \}/.test(install) &&
+      /decideInstallLicenseExtended\(\{/.test(install) &&
+      /licenseModeUsed = "offline"/.test(install) &&
+      /"license_offline_expires_at"/.test(install)
+  );
+  check(
+    "offline heartbeat locks on token expiry without any network call",
+    /if \(licenseMode === "offline"\)/.test(hb) &&
+      /offline-token-expired/.test(hb) &&
+      /Number\.isFinite\(expiresMs\) && nowMs < expiresMs \? "ok" : "rejected"/.test(hb)
+  );
+  check(
+    "signing key + token issuance are permission-gated; revoked keys issue nothing",
+    /hasPermission\(auth\.userId, "licenses\.issue"\)/.test(sign) &&
+      /hasPermission\(auth\.userId, "licenses\.issue"\)/.test(tok) &&
+      /if \(key\.revokedAt\) return NextResponse\.json\(\{ error: "That key is revoked — it cannot issue offline tokens\." \}, \{ status: 400 \}\)/.test(tok) &&
+      /Math\.min\(daysRaw, OFFLINE_TOKEN_MAX_DAYS\)/.test(tok)
+  );
+  check(
+    "install.sh offline path requires the public key file and stores it base64-wrapped",
+    /--license-token needs --license-pubkey FILE/.test(sh) &&
+      /GSM_LICENSE_OFFLINE_TOKEN=\$LICENSE_TOKEN/.test(sh) &&
+      /GSM_LICENSE_OFFLINE_PUBKEY=\$LICENSE_PUBKEY_B64/.test(sh)
+  );
+}
+
 console.log(`\n${checks - failures}/${checks} checks passed`);
 if (failures > 0) {
   console.error(`${failures} security check(s) FAILED`);

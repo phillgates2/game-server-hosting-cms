@@ -32,6 +32,7 @@ const TICK_MS = 30_000;
 /** Ephemeral-server expiry sweeps run on a slower clock. */
 const EPHEMERAL_SWEEP_INTERVAL_MS = 5 * 60_000;
 let lastEphemeralSweep = 0;
+let lastLicenseHeartbeat = 0;
 /** A tick executes at most this many tasks; the next tick picks up the rest. */
 const MAX_TASKS_PER_TICK = 20;
 /** Command tasks are shell commands; cap them so a paste cannot grow unbounded. */
@@ -83,6 +84,19 @@ export async function tickOnce(): Promise<void> {
     // task is due. Best-effort: never disturbs the schedule on failure.
     await runThresholdAlerts();
     await markStaleNodesOffline();
+
+    // License heartbeat: licensed panels re-prove their activation against
+    // the master panel on a throttle. Best-effort like every other chore.
+    const { LICENSE_HEARTBEAT_INTERVAL_MS } = await import("./license-heartbeat");
+    if (Date.now() - lastLicenseHeartbeat >= LICENSE_HEARTBEAT_INTERVAL_MS) {
+      lastLicenseHeartbeat = Date.now();
+      try {
+        const { runLicenseHeartbeat } = await import("./license-heartbeat");
+        await runLicenseHeartbeat();
+      } catch (e: unknown) {
+        log.warn("license heartbeat failed", { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
 
     // Scheduled maintenance windows: drain nodes at their planned start and
     // release them at the end. Best-effort like every other tick chore.
