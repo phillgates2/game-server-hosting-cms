@@ -76,7 +76,6 @@ DOMAIN=""
 JWT_SECRET=""
 ACCESS_KEY=""
 ACCESS_KEY_PROVIDED="false"
-ACCESS_GATE="auto"
 LICENSE_KEY=""
 LICENSE_SERVER=""
 LICENSE_TOKEN=""
@@ -104,8 +103,6 @@ while [[ $# -gt 0 ]]; do
     --install-dir)      INSTALL_DIR="$2";     shift 2 ;;
     --jwt-secret)       JWT_SECRET="$2";      shift 2 ;;
     --access-key)       ACCESS_KEY="$2"; ACCESS_KEY_PROVIDED="true"; shift 2 ;;
-    --access-gate)      ACCESS_GATE="$2";     shift 2 ;;
-    --no-access-key)    ACCESS_KEY="__none__"; shift  ;;
     --license-key)      LICENSE_KEY="$2";     shift 2 ;;
     --license-server)   LICENSE_SERVER="$2";  shift 2 ;;
     --license-token)    LICENSE_TOKEN="$2";   shift 2 ;;
@@ -135,9 +132,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --steamcmd-dir     PATH        SteamCMD installation directory (default: /opt/steamcmd)"
       echo "  --gameservers-dir  PATH        Game servers directory (default: /opt/gameservers)"
       echo "  --jwt-secret       SECRET      JWT signing secret (default: auto-generated)"
-      echo "  --access-key       KEY         Panel access key / master key (min 16 chars; default: auto-generated)"
-      echo "  --access-gate      on|off      Force the login gate on/off (default: on when a key exists)"
-      echo "  --no-access-key                Skip the access key entirely (open install, no gate)"
+      echo "  --access-key       KEY         Operator master key / install key (min 16 chars; default: auto-generated)"
       echo "  --license-key      KEY         Installation license key issued by the master panel (required)"
       echo "  --license-server   URL         Master panel URL that validates the key (required unless --master-panel)"
       echo "  --license-token    TOKEN       Offline pre-signed token (air-gapped installs; skips network validation)"
@@ -505,30 +500,27 @@ elif [[ ${#JWT_SECRET} -lt 32 ]]; then
   die "--jwt-secret must be at least 32 characters (got ${#JWT_SECRET}). Generate one with: openssl rand -hex 32"
 fi
 
-# ── Panel access key (CD-key style gate) ─────────────────────────────────────
-# The key guards BOTH the web installer (nobody can claim a fresh panel
-# without it) and — when the gate is on — login/registration. Min length
-# must match PANEL_MASTER_KEY_MIN_LENGTH in src/lib/access-gate.ts.
+# ── Master key (the install key) ─────────────────────────────────────────────
+# Stage 42: the CD-key login gate is gone. This single key is the ONLY key:
+# it guards the web installer (nobody can claim a fresh panel without it),
+# validates as an unlimited license key, and drives the X-Master-Key admin
+# APIs. Login itself is username + password. Min length must match
+# PANEL_MASTER_KEY_MIN_LENGTH in src/lib/master-key.ts.
 ACCESS_KEY_GENERATED="false"
-if [[ "$ACCESS_KEY" == "__none__" ]]; then
-  ACCESS_KEY=""
-elif [[ -z "$ACCESS_KEY" ]]; then
+if [[ -z "$ACCESS_KEY" ]]; then
   ACCESS_KEY="GSM-$(openssl rand -hex 16)"
   ACCESS_KEY_GENERATED="true"
 elif [[ ${#ACCESS_KEY} -lt 16 ]]; then
   die "--access-key must be at least 16 characters (got ${#ACCESS_KEY})"
 fi
 
-case "$ACCESS_GATE" in
-  on|off) ;;
-  auto)
-    if [[ -n "$ACCESS_KEY" ]]; then ACCESS_GATE="on"; else ACCESS_GATE="off"; fi
-    ;;
-  *) die "--access-gate must be 'on' or 'off' (got: $ACCESS_GATE)" ;;
-esac
-
-if [[ "$ACCESS_GATE" == "on" && -z "$ACCESS_KEY" ]]; then
-  die "--access-gate on requires an access key (drop --no-access-key or pass --access-key)"
+if [[ "$MASTER_PANEL" == "true" ]]; then
+  echo -e "  ${YELLOW}${BOLD}🔑 MASTER PANEL INSTALL${NC}"
+  echo -e "     The web installer will bootstrap the key desk: it generates your"
+  echo -e "     UNIFIED MASTER KEY (shown once!), creates the offline-token signing"
+  echo -e "     key and adds a starter product. The license gate is skipped for this"
+  echo -e "     instance. Open the panel URL above to finish setup."
+  echo ""
 fi
 
 # ── License validation (fail closed) ─────────────────────────────────────────
@@ -962,10 +954,10 @@ PORT=$PANEL_PORT
 STEAMCMD_PATH=$STEAMCMD_DIR
 GAMESERVERS_PATH=$GAMESERVERS_DIR
 
-# Panel access gate (CD-key style)
-# The master key opens the web installer and, with the gate on, every login.
+# Master key (the install key) — the ONLY key this panel knows.
+# Guards fresh installs, validates as an unlimited license key, and
+# administers the shop/license APIs via the X-Master-Key header.
 # Store it somewhere safe — it is the "never lock myself out" key.
-GSM_ACCESS_GATE=$ACCESS_GATE
 GSM_PANEL_MASTER_KEY=$ACCESS_KEY
 
 # Licensing
@@ -1592,25 +1584,15 @@ if [[ "$NONINTERACTIVE" == "true" && -n "$ADMIN_PASS" ]]; then
 fi
 echo ""
 
-if [[ -n "$ACCESS_KEY" ]]; then
-  echo -e "  ${YELLOW}${BOLD}🔑 Panel Access Key — save this now, it is shown only once:${NC}"
-  echo -e "     ${BOLD}$ACCESS_KEY${NC}"
-  echo ""
-  echo -e "     • The web installer asks for this key before anyone can claim the panel."
-  if [[ "$ACCESS_GATE" == "on" ]]; then
-    echo -e "     • The login gate is ${BOLD}ON${NC}: every login/register needs this key or a key"
-    echo -e "       you mint in Settings → Access Gate. Use it once to log in, then mint"
-    echo -e "       per-person keys and hand those out."
-  else
-    echo -e "     • The login gate is OFF (you can enable it in Settings → Access Gate)."
-  fi
-  echo -e "     • Also stored in ${BOLD}$INSTALL_DIR/.env${NC} and ${BOLD}$INSTALL_DIR/.install-info${NC} (root only)."
-  echo ""
-else
-  echo -e "  ${YELLOW}No panel access key configured — installs and logins are open.${NC}"
-  echo -e "  ${YELLOW}Set GSM_PANEL_MASTER_KEY in $INSTALL_DIR/.env and GSM_ACCESS_GATE=on to lock the panel down.${NC}"
-  echo ""
-fi
+echo -e "  ${YELLOW}${BOLD}🔑 Master Key (install key) — save this now, it is shown only once:${NC}"
+echo -e "     ${BOLD}$ACCESS_KEY${NC}"
+echo ""
+echo -e "     • The web installer asks for this key before anyone can claim the panel."
+echo -e "     • It also validates as an unlimited license key and drives the"
+echo -e "       X-Master-Key admin APIs. Only you should ever hold it."
+echo -e "     • Login is plain username + password — there is no panel access gate."
+echo -e "     • Also stored in ${BOLD}$INSTALL_DIR/.env${NC} and ${BOLD}$INSTALL_DIR/.install-info${NC} (root only)."
+echo ""
 
 if [[ "$PANEL_LOCAL_OK" == "true" ]]; then
   ok "Panel is running and responding on localhost:$PANEL_PORT"
@@ -1691,7 +1673,6 @@ SERVER_LAN_IP=$SERVER_LAN_IP_FINAL
 REVERSE_PROXY=caddy
 STEAMCMD_DIR=$STEAMCMD_DIR
 GAMESERVERS_DIR=$GAMESERVERS_DIR
-ACCESS_GATE=$ACCESS_GATE
 ACCESS_KEY=$ACCESS_KEY
 INFOEOF
 chmod 600 "$INSTALL_DIR/.install-info"

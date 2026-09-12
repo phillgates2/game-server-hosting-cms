@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import { getDiscordSettings, isOauthConfigured } from "@/lib/discord-settings";
-import { accessGatePassed } from "@/lib/access-gate";
 import { OAUTH_STATE_COOKIE, discordRedirectUri } from "@/lib/discord-oauth";
 
 export const runtime = "nodejs";
@@ -15,12 +14,6 @@ export const dynamic = "force-dynamic";
  * cross-site forgery of the final step.
  */
 export async function GET(req: NextRequest) {
-  // CD-key gate: the key rides in the query string because OAuth is a redirect
-  // flow with no request body. Ignored entirely when the gate is off.
-  if (!(await accessGatePassed(req.nextUrl.searchParams.get("accessKey")))) {
-    return NextResponse.redirect(new URL("/?oauth=gate_required", req.url));
-  }
-
   const s = await getDiscordSettings();
   if (!isOauthConfigured(s)) {
     return NextResponse.redirect(new URL("/?oauth=not_configured", req.url));

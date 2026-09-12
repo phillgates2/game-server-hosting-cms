@@ -11,7 +11,6 @@ import {
 } from "@/lib/auth";
 import { getUserPermissions } from "@/lib/permissions";
 import { apiError } from "@/lib/api-error";
-import { accessGatePassed, ACCESS_GATE_ERROR } from "@/lib/access-gate";
 import { eq, sql } from "drizzle-orm";
 import * as OTPAuth from "otpauth";
 
@@ -45,10 +44,9 @@ export async function POST(req: NextRequest) {
     const username = (body.username || "").trim();
     const password = body.password || "";
 
-    // CD-key gate: when enabled, credentials alone are not enough.
-    if (!(await accessGatePassed(body.accessKey))) {
-      return NextResponse.json({ error: ACCESS_GATE_ERROR }, { status: 403 });
-    }
+    // Stage 42: the CD-key panel gate is gone — login is username+password
+    // (plus 2FA/session/IP gates). The only remaining key is the install-time
+    // master key.
     const twoFactorCode = body.twoFactorCode ? String(body.twoFactorCode).trim() : "";
 
     if (!username || !password) {

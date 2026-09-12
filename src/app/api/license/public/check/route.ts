@@ -43,6 +43,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, status: "invalid", message: licenseCheckMessage("invalid") }, { status: 400 });
   }
   const key = (body as Record<string, unknown>)?.key;
+  const { verifyMasterKey } = await import("@/lib/master-key");
+  if (await verifyMasterKey(key)) {
+    return NextResponse.json({
+      ok: true,
+      status: "valid",
+      message: "Master key — unlimited activations, never expires.",
+      activationsUsed: 0,
+      maxActivations: null,
+      expiresAt: null,
+    });
+  }
   if (!isValidLicenseKeyFormat(key)) {
     return NextResponse.json({ ok: false, status: "invalid", message: licenseCheckMessage("invalid") }, { status: 402 });
   }

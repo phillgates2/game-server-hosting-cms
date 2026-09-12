@@ -23,6 +23,7 @@ export default function InstallWizard({ onComplete }: Props) {
   const [logs, setLogs] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+  const [bootstrap, setBootstrap] = useState<{ masterKey: string | null; signingKey: boolean; starterProduct: string | null } | null>(null);
 
   async function runInstall() {
     setInstalling(true);
@@ -58,6 +59,20 @@ export default function InstallWizard({ onComplete }: Props) {
           "  2. Install game templates from Games → Templates",
           "  3. Create your first game server!",
         ]);
+        setBootstrap(data?.bootstrap ?? null);
+        if (data?.bootstrap) {
+          setLogs((l) => [
+            ...l.slice(0, -4),
+            ...(data.bootstrap.masterKey ? ["🔑 Master key generated — copy it below (shown once!)"] : []),
+            ...(data.bootstrap.signingKey ? ["🔏 Offline-token signing key created"] : []),
+            ...(data.bootstrap.starterProduct ? [`🛒 Starter product added: "${data.bootstrap.starterProduct}"`] : []),
+            "",
+            "📌 Next steps:",
+            "  1. Add a node from Nodes panel (or add this server as local node)",
+            "  2. Install game templates from Games → Templates",
+            "  3. Create your first game server!",
+          ]);
+        }
         setDone(true);
       }
     } catch (e: unknown) {
@@ -186,16 +201,16 @@ export default function InstallWizard({ onComplete }: Props) {
                   <p className="mt-1 text-[11px] text-text-muted">Verified locally by signature — no network needed. The token carries an expiry; renew it from the master panel when it runs out.</p>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-text-secondary mb-1">Panel Access Key <span className="text-text-muted font-normal">(required when the operator set one)</span></label>
+                  <label className="block text-sm font-medium text-text-secondary mb-1">Install Key <span className="text-text-muted font-normal">(the operator master key — required when set)</span></label>
                   <input
                     type="password"
                     value={form.accessKey}
                     onChange={(e) => setForm({ ...form, accessKey: e.target.value })}
-                    placeholder="Leave blank unless this install is key-protected"
+                    placeholder="Leave blank unless the operator set a master key"
                     autoComplete="off"
                     className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent"
                   />
-                  <p className="mt-1 text-[11px] text-text-muted">If the server runs with GSM_PANEL_MASTER_KEY, the install only proceeds with that key — nobody can claim a fresh panel without it.</p>
+                  <p className="mt-1 text-[11px] text-text-muted">If the server runs with GSM_PANEL_MASTER_KEY, the install only proceeds with that key — nobody can claim a fresh panel without it. This is the only key the panel asks for; login itself is just username + password.</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-text-secondary mb-1">Admin Password</label>
@@ -283,6 +298,29 @@ export default function InstallWizard({ onComplete }: Props) {
                   {installing && (
                     <div className="text-accent animate-pulse">Installing...</div>
                   )}
+                </div>
+              )}
+
+              {done && bootstrap?.masterKey && (
+                <div className="rounded-xl border border-success/40 bg-success/10 p-4 space-y-2 text-left">
+                  <p className="text-sm font-bold text-success">🔑 Your master key — shown exactly once. Copy it now:</p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 truncate rounded-lg bg-bg-card border border-border px-3 py-2 text-xs font-mono text-text-primary">{bootstrap.masterKey}</code>
+                    <button
+                      onClick={() => { void navigator.clipboard.writeText(bootstrap.masterKey ?? "").then(() => setLogs((l) => [...l, "✅ Master key copied to clipboard"])); }}
+                      className="px-3 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white text-xs font-medium"
+                    >Copy</button>
+                  </div>
+                  <p className="text-[11px] text-text-muted">
+                    This key guards fresh installs, validates as an unlimited license key, and administers the shop/license APIs (X-Master-Key header). Only you should ever hold it.
+                    {bootstrap.starterProduct ? <> The store is live with “{bootstrap.starterProduct}” — manage everything under API Keys → Access Gate and License Keys.</> : null}
+                  </p>
+                </div>
+              )}
+
+              {done && !bootstrap?.masterKey && bootstrap && (
+                <div className="rounded-xl border border-border bg-bg-secondary/60 p-3 text-left">
+                  <p className="text-xs text-text-secondary">🔑 Master panel bootstrapped: signing key{bootstrap.starterProduct ? <> + starter product “{bootstrap.starterProduct}”</> : null} ready. An env master key is active, so no new key was generated.</p>
                 </div>
               )}
 

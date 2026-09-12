@@ -11,12 +11,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 async function requireShopAdmin(req: NextRequest) {
-  const auth = await getCurrentUser(req.headers);
-  if (!auth) return { auth: null, res: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  if (!(await hasPermission(auth.userId, "shop.manage"))) {
-    return { auth: null, res: NextResponse.json({ error: "Permission denied" }, { status: 403 }) };
-  }
-  return { auth, res: null };
+  // Session OR unified master key (X-Master-Key header).
+  const { authorizeMasterOrSession } = await import("@/lib/master-key");
+  return authorizeMasterOrSession(req, "shop.manage");
 }
 
 // GET — all coupons

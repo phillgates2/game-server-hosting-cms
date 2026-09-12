@@ -106,6 +106,12 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // The unified master key validates everywhere as an unlimited license.
+  const { verifyMasterKey } = await import("@/lib/master-key");
+  if (await verifyMasterKey(key)) {
+    return NextResponse.json({ ok: true, code: "ok", message: licenseCheckMessage("ok") });
+  }
+
   if (!isValidLicenseKeyFormat(key)) {
     // Same shape as a real rejection — no free information.
     return NextResponse.json({ ok: false, code: "invalid", error: licenseCheckMessage("invalid") }, { status: 402 });

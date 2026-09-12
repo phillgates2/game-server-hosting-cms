@@ -15,11 +15,9 @@ const SIGNING_KEY_SETTING = "license_signing_private_key";
 
 // POST /api/license/keys/[id]/offline-token — { days } — sign an air-gap token
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await getCurrentUser(req.headers);
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "licenses.issue"))) {
-    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
-  }
+  const { authorizeMasterOrSession } = await import("@/lib/master-key");
+  const { auth, res: gateRes } = await authorizeMasterOrSession(req, "licenses.issue");
+  if (!auth) return gateRes;
 
   let body: unknown = {};
   try { body = await req.json(); } catch { body = {}; }

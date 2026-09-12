@@ -215,3 +215,18 @@ describe("resellers", () => {
     assert.equal(normalizeResellerToken(null), null);
   });
 });
+
+// ── Refunds ─────────────────────────────────────────────────────────────────
+describe("refunds", () => {
+  test("orderCanRefund: only money-moved states; pending cancels instead", () => {
+    const { orderCanRefund, orderCanCancel } = require("../src/lib/shop") as typeof import("../src/lib/shop");
+    assert.equal(orderCanRefund("paid"), true);
+    assert.equal(orderCanRefund("fulfilled"), true);
+    assert.equal(orderCanRefund("pending"), false);
+    assert.equal(orderCanRefund("cancelled"), false);
+    assert.equal(orderCanRefund("refunded"), false); // no double-refunds
+    assert.equal(orderCanCancel("pending"), true);
+    assert.equal(orderCanCancel("paid"), false);
+    assert.equal(orderCanCancel("fulfilled"), false);
+  });
+});

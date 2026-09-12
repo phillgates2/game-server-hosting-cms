@@ -16,9 +16,7 @@ type Mode = "login" | "register" | "forgot" | "reset";
 
 export default function LoginForm({ onLogin }: Props) {
   const [mode, setMode] = useState<Mode>("login");
-  const [form, setForm] = useState({ username: "", email: "", password: "", dateOfBirth: "", accessKey: "" });
-  // When the operator enables the CD-key gate, login/register also need a key.
-  const [gateRequired, setGateRequired] = useState(false);
+  const [form, setForm] = useState({ username: "", email: "", password: "", dateOfBirth: "" });
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
@@ -62,7 +60,6 @@ export default function LoginForm({ onLogin }: Props) {
         suspended: "That account is suspended or banned.",
         "2fa": "That account has two-factor authentication enabled — sign in with your password and a code instead.",
         no_register: "Self-registration is disabled on this panel, so no new account was created.",
-        gate_required: "This panel requires an access key. Enter yours below to sign in.",
         age_gate: "New accounts must register with a date of birth (Australian minimum-age law). Discord sign-in only works for existing accounts.",
       };
       const msg = messages[oauth] ?? "Discord sign-in failed.";
@@ -75,10 +72,6 @@ export default function LoginForm({ onLogin }: Props) {
       .then((d) => setDiscordOAuth(Boolean(d.enabled)))
       .catch(() => setDiscordOAuth(false));
 
-    fetch("/api/auth/access-gate")
-      .then((r) => (r.ok ? r.json() : { required: false }))
-      .then((d) => setGateRequired(Boolean(d.required)))
-      .catch(() => setGateRequired(false));
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
@@ -91,8 +84,8 @@ export default function LoginForm({ onLogin }: Props) {
     const endpoint = mode === "login" ? "/api/auth/login" : "/api/auth/register";
     const body =
       mode === "login"
-        ? { username: form.username, password: form.password, ...(twoFactorCode ? { twoFactorCode } : {}), ...(gateRequired ? { accessKey: form.accessKey } : {}) }
-        : { ...form, ...(gateRequired ? {} : { accessKey: undefined }) };
+        ? { username: form.username, password: form.password, ...(twoFactorCode ? { twoFactorCode } : {}) }
+        : { ...form };
 
     try {
       const res = await fetch(endpoint, {
@@ -152,7 +145,7 @@ export default function LoginForm({ onLogin }: Props) {
       const res = await fetch("/api/auth/reset-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: resetToken, password: newPassword, ...(gateRequired ? { accessKey: form.accessKey } : {}) }),
+        body: JSON.stringify({ token: resetToken, password: newPassword }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -211,21 +204,6 @@ export default function LoginForm({ onLogin }: Props) {
                 </div>
               )}
 
-              {gateRequired && (mode === "login" || mode === "register") && (
-                <div>
-                  <label className="block text-sm font-medium text-text-secondary mb-1">🔑 Panel access key</label>
-                  <input
-                    type="text"
-                    value={form.accessKey}
-                    onChange={(e) => setForm({ ...form, accessKey: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-text-primary font-mono tracking-wider focus:outline-none focus:ring-2 focus:ring-accent"
-                    placeholder="GSM-XXXX-XXXX-XXXX-XXXX"
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                  <p className="text-xs text-text-muted mt-1">This panel is protected — ask the operator for a key.</p>
-                </div>
-              )}
 
               <div>
                 <label className="block text-sm font-medium text-text-secondary mb-1">Username</label>
@@ -331,7 +309,7 @@ export default function LoginForm({ onLogin }: Props) {
                     <span className="h-px flex-1 bg-border" />or<span className="h-px flex-1 bg-border" />
                   </div>
                   <a
-                    href={`/api/auth/discord${gateRequired && form.accessKey.trim() ? `?accessKey=${encodeURIComponent(form.accessKey.trim())}` : ""}`}
+                    href="/api/auth/discord"
                     className="block w-full py-3 text-center bg-[#5865F2] hover:opacity-90 text-white rounded-lg font-medium transition-opacity"
                   >
                     Sign in with Discord

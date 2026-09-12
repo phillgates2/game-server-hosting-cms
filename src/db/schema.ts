@@ -362,18 +362,6 @@ export const serverUptimeHistory = pgTable("server_uptime_history", {
   checkedAt: timestamp("checked_at").defaultNow().notNull(),
 });
 
-// ── Panel access keys (CD-key gate) ─────────────────────────
-export const accessKeys = pgTable("access_keys", {
-  id: serial("id").primaryKey(),
-  keyHash: text("key_hash").notNull().unique(),
-  keyPrefix: varchar("key_prefix", { length: 16 }).notNull(),
-  label: varchar("label", { length: 128 }),
-  createdBy: integer("created_by").references(() => users.id),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  lastUsedAt: timestamp("last_used_at"),
-  revokedAt: timestamp("revoked_at"),
-});
-
 // ── Server presets (one-click setups) ────────────────────────
 export const serverPresets = pgTable("server_presets", {
   id: serial("id").primaryKey(),

@@ -12,11 +12,9 @@ export const dynamic = "force-dynamic";
 
 // POST — manual-provider approval: mark paid + fulfil (issue & email the key)
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await getCurrentUser(req.headers);
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "shop.manage"))) {
-    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
-  }
+  const { authorizeMasterOrSession } = await import("@/lib/master-key");
+  const { auth, res: gateRes } = await authorizeMasterOrSession(req, "shop.manage");
+  if (!auth) return gateRes;
 
   try {
     const { id } = await params;
@@ -39,7 +37,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     try {
       const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
       await db.insert(auditLog).values({
-        userId: auth.userId as number,
+        userId: auth.userId || null,
         action: "shop.order.approve",
         entityType: "shop-order",
         entityId: order.id,

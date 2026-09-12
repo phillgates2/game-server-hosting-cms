@@ -19,11 +19,9 @@ export const dynamic = "force-dynamic";
 
 // GET /api/license/keys — list (admins / licenses.view)
 export async function GET(req: NextRequest) {
-  const auth = await getCurrentUser(req.headers);
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "licenses.view"))) {
-    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
-  }
+  const { authorizeMasterOrSession } = await import("@/lib/master-key");
+  const { auth, res: gateRes } = await authorizeMasterOrSession(req, "licenses.view");
+  if (!auth) return gateRes;
 
   try {
     await ensureLicenseTables();
@@ -62,11 +60,9 @@ export async function GET(req: NextRequest) {
 
 // POST /api/license/keys — issue a key; plaintext shown ONCE
 export async function POST(req: NextRequest) {
-  const auth = await getCurrentUser(req.headers);
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "licenses.issue"))) {
-    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
-  }
+  const { authorizeMasterOrSession } = await import("@/lib/master-key");
+  const { auth, res: gateRes } = await authorizeMasterOrSession(req, "licenses.issue");
+  if (!auth) return gateRes;
 
   let body: unknown = {};
   try { body = await req.json(); } catch { body = {}; }
@@ -102,11 +98,11 @@ export async function POST(req: NextRequest) {
     try {
       const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
       await db.insert(auditLog).values({
-        userId: auth.userId as number,
+        userId: auth.userId || null,
         action: "license.issue",
         entityType: "license",
         entityId: row.id,
-        details: { prefix: licenseKeyDisplayLabel(key), label, maxActivations },
+        details: { prefix: licenseKeyDisplayLabel(key), label, maxActivations, viaMasterKey: auth.userId === 0 },
         ipAddress: ip.slice(0, 45),
       });
     } catch { /* best-effort */ }

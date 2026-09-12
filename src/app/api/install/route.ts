@@ -117,7 +117,15 @@ export async function POST(req: NextRequest) {
         validateLicenseRemote,
         decideInstallLicenseExtended,
       } = await import("@/lib/license-client");
-      const masterMode = isLicenseMasterMode();
+      // Master mode: env flag, OR the unified master key presented as the
+      // license key itself (operator install, any time, any box).
+      let masterMode = isLicenseMasterMode();
+      if (!masterMode && typeof (body as Record<string, unknown>).licenseKey === "string") {
+        try {
+          const { verifyMasterKey } = await import("@/lib/master-key");
+          masterMode = await verifyMasterKey((body as Record<string, unknown>).licenseKey);
+        } catch { /* no settings yet */ }
+      }
       const serverUrl = licenseServerUrl();
       const licenseKey = (body as Record<string, unknown>).licenseKey;
       const keyPresented = typeof licenseKey === "string" && licenseKey.trim().length > 0;
@@ -796,6 +804,67 @@ export async function POST(req: NextRequest) {
     }
     await logStep("settings", "done", "Panel settings saved");
 
+    // ── Master first-run bootstrap ──────────────────────────────────────
+    // A fresh key-desk install must stand on its own: a unified master key
+    // (shown once), the Ed25519 signing key for offline tokens, and a
+    // starter product so the store has something on the shelf immediately.
+    // License + access gates are already skipped in master mode.
+    let bootstrap: { masterKey: string | null; signingKey: boolean; starterProduct: string | null } | null = null;
+    {
+      const { isLicenseMasterMode } = await import("@/lib/license-client");
+      if (isLicenseMasterMode()) {
+        try {
+          const { ensureShopTables } = await import("@/lib/shop");
+          const { ensureLicenseTables } = await import("@/lib/licensing");
+          await ensureShopTables();
+          await ensureLicenseTables();
+
+          // 1) Unified master key — generated only when nothing exists yet.
+          let masterKeyPlaintext: string | null = null;
+          const { masterKeyConfigured, generateMasterKey, hashMasterKey, MASTER_KEY_SETTING } = await import("@/lib/master-key");
+          const mkState = await masterKeyConfigured();
+          if (!mkState.env && !mkState.stored) {
+            masterKeyPlaintext = await generateMasterKey();
+            await db.insert(settings).values({ key: MASTER_KEY_SETTING, value: await hashMasterKey(masterKeyPlaintext) });
+          }
+
+          // 2) Signing key for offline tokens (private PEM stays in settings).
+          let signingKeyCreated = false;
+          const SIGNING_SETTING = "license_signing_private_key";
+          const [signingRow] = await db.select({ value: settings.value }).from(settings).where(eq(settings.key, SIGNING_SETTING)).limit(1);
+          if (!signingRow?.value) {
+            const { generateKeyPairSync } = await import("node:crypto");
+            const pair = generateKeyPairSync("ed25519");
+            const privatePem = pair.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+            await db.insert(settings).values({ key: SIGNING_SETTING, value: privatePem });
+            signingKeyCreated = true;
+          }
+
+          // 3) Starter product so the store opens with something to sell.
+          const { shopProducts } = await import("@/db/schema");
+          const [countRow] = await db.select({ n: sql<number>`count(*)::int` }).from(shopProducts);
+          let starterProduct: string | null = null;
+          if ((countRow?.n ?? 0) === 0) {
+            await db.insert(shopProducts).values({
+              name: "Solo License",
+              description: "A license key for GameServer Manager — 1 activation, never expires.",
+              priceCents: 900,
+              currency: "usd",
+              maxActivations: 1,
+              durationDays: null,
+              kind: "onetime",
+            });
+            starterProduct = "Solo License";
+          }
+
+          bootstrap = { masterKey: masterKeyPlaintext, signingKey: signingKeyCreated, starterProduct };
+          await logStep("master-bootstrap", "done", "Master panel bootstrapped: master key, signing key and starter product ready.");
+        } catch {
+          /* bootstrap must never fail the install itself */
+        }
+      }
+    }
+
     if (pendingDatabaseUrlUpdate) {
       process.env.DATABASE_URL = pendingDatabaseUrlUpdate;
       await writeDatabaseUrlToEnv(pendingDatabaseUrlUpdate);
@@ -810,7 +879,8 @@ export async function POST(req: NextRequest) {
         templatesAvailable: gameTemplates.length,
         forumCategories: forumCats.length,
         multiNodeEnabled: true,
-      }
+      },
+      bootstrap,
     });
   } catch (e: unknown) {
     return apiError(e, "Unknown error", 500);

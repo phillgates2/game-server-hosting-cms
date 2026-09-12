@@ -5,7 +5,6 @@ import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { hashPassword } from "@/lib/auth";
 import { isValidResetToken, hashResetToken } from "@/lib/password-reset";
 import { apiError } from "@/lib/api-error";
-import { accessGatePassed, ACCESS_GATE_ERROR } from "@/lib/access-gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,11 +39,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
     const { token, password } = (body ?? {}) as Record<string, unknown>;
-
-    // CD-key gate: resetting a password is an entry point too.
-    if (!(await accessGatePassed(((body ?? {}) as Record<string, unknown>).accessKey))) {
-      return NextResponse.json({ error: ACCESS_GATE_ERROR }, { status: 403 });
-    }
 
     if (!isValidResetToken(token)) {
       return NextResponse.json(INVALID_LINK, { status: 400 });

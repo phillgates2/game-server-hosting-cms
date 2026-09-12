@@ -9,7 +9,6 @@ import {
   recordFailedLogin,
 } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
-import { accessGatePassed, ACCESS_GATE_ERROR } from "@/lib/access-gate";
 import { eq, or, sql } from "drizzle-orm";
 
 /**
@@ -72,11 +71,6 @@ export async function POST(req: NextRequest) {
       body = await req.json();
     } catch {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-    }
-
-    // CD-key gate: no key, no account.
-    if (!(await accessGatePassed((body as Record<string, unknown>).accessKey))) {
-      return NextResponse.json({ error: ACCESS_GATE_ERROR }, { status: 403 });
     }
 
     const { username, email, password, dateOfBirth } = (body ?? {}) as Record<string, unknown>;

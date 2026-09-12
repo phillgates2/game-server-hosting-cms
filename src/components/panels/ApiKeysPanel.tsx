@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useToast } from "@/components/ToastProvider";
 import { useConfirm } from "@/components/ConfirmDialog";
-import AccessGateSection from "./AccessGateSection";
+import MasterKeySection from "./MasterKeySection";
 import { keyVerdict } from "@/lib/key-hygiene";
 
 interface ApiKey {
@@ -75,7 +75,7 @@ export default function ApiKeysPanel() {
         <button onClick={() => { setShowCreate(!showCreate); setNewKey(null); }} className="px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium">{showCreate ? "✕ Cancel" : "+ New Key"}</button>
       </div>
 
-      <AccessGateSection />
+      <MasterKeySection />
 
       {/* New key reveal */}
       {newKey && (

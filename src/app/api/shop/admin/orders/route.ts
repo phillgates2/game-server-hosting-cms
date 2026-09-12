@@ -12,11 +12,9 @@ export const dynamic = "force-dynamic";
 
 // GET — order book for the admin panel (newest first, capped)
 export async function GET(req: NextRequest) {
-  const auth = await getCurrentUser(req.headers);
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "shop.view"))) {
-    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
-  }
+  const { authorizeMasterOrSession } = await import("@/lib/master-key");
+  const { auth, res: gateRes } = await authorizeMasterOrSession(req, "shop.view");
+  if (!auth) return gateRes;
 
   try {
     await ensureShopTables();

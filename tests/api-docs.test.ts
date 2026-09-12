@@ -43,11 +43,10 @@ describe("API docs catalog integrity", () => {
     const flat = API_DOCS.flatMap((g) => g.endpoints.map((e) => `${e.method} ${e.path}`));
     for (const anchor of [
       "POST /api/auth/login",
-      "GET /api/auth/access-gate",
+      "POST /api/settings/master-key",
       "POST /api/servers/batch",
       "POST /api/servers/batch-update",
       "GET /api/servers/uptime",
-      "POST /api/access-keys/gate",
       "POST /api/servers/:id/daily-backup",
       "GET /api/health",
     ]) {

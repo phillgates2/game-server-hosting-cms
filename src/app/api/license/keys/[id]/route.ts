@@ -12,11 +12,9 @@ export const dynamic = "force-dynamic";
 
 // GET /api/license/keys/[id] — activations for one key
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await getCurrentUser(req.headers);
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "licenses.view"))) {
-    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
-  }
+  const { authorizeMasterOrSession } = await import("@/lib/master-key");
+  const { auth, res: gateRes } = await authorizeMasterOrSession(req, "licenses.view");
+  if (!auth) return gateRes;
 
   try {
     const { id } = await params;
@@ -37,11 +35,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 // POST /api/license/keys/[id] — { action: "revoke" } — revoke a key
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await getCurrentUser(req.headers);
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "licenses.revoke"))) {
-    return NextResponse.json({ error: "Permission denied" }, { status: 403 });
-  }
+  const { authorizeMasterOrSession } = await import("@/lib/master-key");
+  const { auth, res: gateRes } = await authorizeMasterOrSession(req, "licenses.revoke");
+  if (!auth) return gateRes;
 
   let body: unknown = {};
   try { body = await req.json(); } catch { body = {}; }

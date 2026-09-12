@@ -188,6 +188,33 @@ export default function LicensesPanel() {
     } finally { setBusy(false); }
   }
 
+  async function refundOrder(id: number, email: string, status: string) {
+    const isCancel = status === "pending";
+    const ok = await confirm({
+      title: isCancel ? "Cancel order" : "Refund order",
+      message: isCancel
+        ? `Cancel pending order #${id} (${email})? No money has moved; the order is simply voided.`
+        : `Refund order #${id} (${email})? The license key is REVOKED immediately and the customer loses access. Stripe payments are refunded automatically when configured.`,
+      confirmLabel: isCancel ? "Cancel order" : "Refund & revoke key",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/shop/admin/orders/${id}/refund`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: isCancel ? "cancel" : "refund" }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok) {
+        toast.success(isCancel ? "Order cancelled" : "Order refunded",
+          data?.stripe ? `${data.stripe.detail}` : (isCancel ? "The order was voided." : "Key revoked."));
+        void loadShop(); void load();
+      } else toast.error("Refund failed", data?.error || "Could not process the refund");
+    } finally { setBusy(false); }
+  }
+
   async function approveOrder(id: number, email: string) {
     const ok = await confirm({
       title: "Approve payment",
@@ -438,10 +465,16 @@ export default function LicensesPanel() {
                     <span className="text-xs font-mono text-text-primary">#{o.id}</span>
                     <span className="text-xs text-text-secondary truncate max-w-[180px]">{o.email}</span>
                     <span className="text-[11px] text-text-muted">{o.productName ?? "?"} · {o.amountLabel}</span>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${o.status === "fulfilled" ? "bg-success/15 text-success" : o.status === "pending" ? "bg-warning/15 text-warning" : o.status === "paid" ? "bg-accent/15 text-accent" : "bg-danger/15 text-danger"}`}>{o.status}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${o.status === "fulfilled" ? "bg-success/15 text-success" : o.status === "pending" ? "bg-warning/15 text-warning" : o.status === "paid" ? "bg-accent/15 text-accent" : o.status === "refunded" ? "bg-text-muted/20 text-text-muted" : "bg-danger/15 text-danger"}`}>{o.status}</span>
                     <span className="flex-1" />
                     {o.status === "pending" && o.provider === "manual" && (
                       <button onClick={() => void approveOrder(o.id, o.email)} disabled={busy} className="rounded-lg bg-accent px-2.5 py-1 text-[11px] font-medium text-white hover:bg-accent-hover disabled:opacity-40">Approve payment</button>
+                    )}
+                    {o.status === "pending" && (
+                      <button onClick={() => void refundOrder(o.id, o.email, o.status)} disabled={busy} className="text-[11px] text-text-muted hover:text-danger disabled:opacity-40">Cancel</button>
+                    )}
+                    {(o.status === "paid" || o.status === "fulfilled") && (
+                      <button onClick={() => void refundOrder(o.id, o.email, o.status)} disabled={busy} className="text-[11px] text-danger/80 hover:text-danger disabled:opacity-40">Refund</button>
                     )}
                   </div>
                 ))}

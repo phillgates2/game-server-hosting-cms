@@ -34,6 +34,7 @@ export default function TrackOrderPage() {
     paid: ["💳 Paid — issuing…", "#38bdf8"],
     fulfilled: ["✅ Delivered", "#22c55e"],
     cancelled: ["❌ Cancelled", "#ef4444"],
+    refunded: ["↩️ Refunded", "#94a3b8"],
   };
 
   return (

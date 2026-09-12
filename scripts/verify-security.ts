@@ -18,7 +18,7 @@ import { clampFeedHours, FEED_MAX_HOURS } from "../src/lib/event-feed";
 import { validateBatchRequest, validateBatchServerIds, partitionBatch, BATCH_MAX_SIZE } from "../src/lib/batch-ops";
 import { validatePresetImport } from "../src/lib/server-presets";
 import { parseDailyRestartCron, buildDailyRestartCron } from "../src/lib/daily-restart";
-import { normalizeAccessKey, isValidAccessKeyFormat, hashAccessKey } from "../src/lib/access-keys";
+import { checkInstallAccessKey } from "../src/lib/access-keys";
 import { connectInfoFor, pickHost } from "../src/lib/connect-info";
 import { summarizeUptime, clampUptimeHours, uptimeGrade } from "../src/lib/uptime";
 import { nextIdleStamp, idleDurationMs, isServerIdle, shouldIdleStop } from "../src/lib/idle-math";
@@ -2120,65 +2120,55 @@ console.log("\nMAINT node maintenance mode enforcement");
   );
 }
 
-// ── ACCESS GATE: CD-key style panel protection ──────────────────────────────
-console.log("\nGATE panel access key enforcement");
+// ── GATELESS: Stage 42 removed the CD-key login gate ────────────────────────
+console.log("\nGATELESS no panel access key — install key + master key only");
 {
-  const read = (p: string) =>
-    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+  const fs = require("node:fs");
+  const read = (p: string) => fs.readFileSync(new URL(p, import.meta.url), "utf8") as string;
+  const exists = (p: string) => fs.existsSync(new URL(p, import.meta.url));
 
+  // The install-key decision is the only key check left: open when no master
+  // key is configured, exact-match and fail-closed when one is.
   check(
-    "keys are normalised to the unambiguous alphabet and hashed",
-    normalizeAccessKey("gsm-abcd-2345-xyz9-hjkm") === "ABCD2345XYZ9HJKM" &&
-      isValidAccessKeyFormat(normalizeAccessKey("gsm-abcd-2345-xyz9-hjkm")) === true &&
-      isValidAccessKeyFormat("ABCD2345XYZ9HJKM") === true &&
-      isValidAccessKeyFormat("IIII00001111LLLL") === false &&
-      hashAccessKey("ABCD").length === 64
+    "install key stays exact-match, min-length and fail-closed",
+    checkInstallAccessKey({ masterKeyConfigured: false, masterKey: null, presented: undefined }).ok === true &&
+      checkInstallAccessKey({ masterKeyConfigured: true, masterKey: "0123456789abcdef", presented: "0123456789abcdef" }).ok === true &&
+      checkInstallAccessKey({ masterKeyConfigured: true, masterKey: "0123456789abcdef", presented: "  0123456789abcdef  " }).ok === true &&
+      checkInstallAccessKey({ masterKeyConfigured: true, masterKey: "0123456789abcdef", presented: "nope-nope-nope-9" }).ok === false &&
+      checkInstallAccessKey({ masterKeyConfigured: true, masterKey: "0123456789abcdef", presented: "short" }).ok === false
   );
 
-  const gateLib = read("../src/lib/access-gate.ts");
+  // The gate machinery must be GONE: routes deleted, no table, no checks.
   check(
-    "verification fails closed for revoked or unknown keys",
-    /isNull\(accessKeys\.revokedAt\)/.test(gateLib) &&
-      /return false;/.test(gateLib) &&
-      /PANEL_MASTER_KEY_ENV/.test(gateLib)
+    "the CD-key gate routes and status endpoint are deleted",
+    !exists("../src/app/api/access-keys/route.ts") &&
+      !exists("../src/app/api/access-keys/gate/route.ts") &&
+      !exists("../src/app/api/access-keys/[id]/route.ts") &&
+      !exists("../src/app/api/auth/access-gate/route.ts") &&
+      !exists("../src/components/panels/AccessGateSection.tsx")
   );
 
-  // Every entry point must refuse without a valid key when the gate is on.
-  const entryPoints: Array<[string, string]> = [
-    ["login", "../src/app/api/auth/login/route.ts"],
-    ["register", "../src/app/api/auth/register/route.ts"],
-    ["reset-password", "../src/app/api/auth/reset-password/route.ts"],
-    ["discord-oauth", "../src/app/api/auth/discord/route.ts"],
+  const entryPoints = [
+    "../src/app/api/auth/login/route.ts",
+    "../src/app/api/auth/register/route.ts",
+    "../src/app/api/auth/reset-password/route.ts",
+    "../src/app/api/auth/discord/route.ts",
   ];
-  for (const [name, path] of entryPoints) {
-    const src = read(path);
-    check(
-      `the ${name} entry point enforces the access gate`,
-      /accessGatePassed\(/.test(src) &&
-        /ACCESS_GATE_ERROR|gate_required/.test(src) &&
-        /status: 403|gate_required/.test(src)
-    );
-  }
-
-  const keysRoute = read("../src/app/api/access-keys/route.ts");
-  const delRoute = read("../src/app/api/access-keys/[id]/route.ts");
-  const gateRoute = read("../src/app/api/access-keys/gate/route.ts");
   check(
-    "key management is admin-only and stores hashes, never plaintext",
-    /auth\.role !== "admin"/.test(keysRoute) &&
-      /auth\.role !== "admin"/.test(delRoute) &&
-      /auth\.role !== "admin"/.test(gateRoute) &&
-      /keyHash: hash/.test(keysRoute) &&
-      !/"key"/.test(keysRoute.split("generateAccessKey")[0])
+    "login/register/reset/discord no longer ask for an access key",
+    entryPoints.every((path) => !/accessGatePassed|ACCESS_GATE_ERROR|accessKey/.test(read(path)))
   );
 
+  const schema = read("../src/db/schema.ts");
+  const gateLib = read("../src/lib/access-gate.ts");
+  const keysLib = read("../src/lib/access-keys.ts");
+  const loginForm = read("../src/components/LoginForm.tsx");
   check(
-    "enabling the gate with zero keys bootstraps one instead of locking out",
-    /bootstrapKey/.test(gateRoute) &&
-      /if \(!active\)/.test(gateRoute) &&
-      /generateAccessKey\(\)/.test(gateRoute) &&
-      /isNull\(accessKeys\.revokedAt\)/.test(gateRoute) &&
-      /ACCESS_GATE_ENV/.test(gateRoute)
+    "no access_keys table, no gate decision, no CD-key helpers, no gate UI",
+    !/access_keys/.test(schema) &&
+      !/accessGatePassed|accessGateRequired|verifyAccessKey|ensureAccessKeysTable/.test(gateLib) &&
+      !/generateAccessKey|normalizeAccessKey|hashAccessKey|isValidAccessKeyFormat/.test(keysLib) &&
+      !/access-gate|gateRequired|accessKey/.test(loginForm)
   );
 }
 
@@ -3293,22 +3283,22 @@ console.log("\nINSTSH installer-script rails");
 
   const sh = read("../public/install.sh");
   check(
-    "install.sh supports --access-key/--access-gate/--no-access-key",
+    "install.sh carries ONLY the master/install key — no gate flags remain",
     /--access-key\)\s+ACCESS_KEY="\$2"/.test(sh) &&
-      /--access-gate\)\s+ACCESS_GATE="\$2"/.test(sh) &&
-      /--no-access-key\)\s+ACCESS_KEY="__none__"/.test(sh)
+      !/--access-gate/.test(sh) &&
+      !/--no-access-key/.test(sh) &&
+      !/GSM_ACCESS_GATE/.test(sh)
   );
   check(
-    "key is validated (>=16), auto-generated, and written to .env with the gate",
+    "key is validated (>=16), auto-generated, and written to .env",
     /\$\{#ACCESS_KEY\} -lt 16/.test(sh) &&
       /GSM-\$\(openssl rand -hex 16\)/.test(sh) &&
-      /GSM_ACCESS_GATE=\$ACCESS_GATE/.test(sh) &&
       /GSM_PANEL_MASTER_KEY=\$ACCESS_KEY/.test(sh)
   );
   check(
-    "gate-on without a key dies; the key is printed once in the summary",
-    /--access-gate on requires an access key/.test(sh) &&
-      /Panel Access Key — save this now, it is shown only once/.test(sh)
+    "the summary presents the key as the master/install key, gate-free",
+    /Master Key \(install key\) — save this now, it is shown only once/.test(sh) &&
+      /there is no panel access gate/.test(sh)
   );
 }
 
@@ -3341,7 +3331,7 @@ console.log("\nLIC licensing rails");
   );
   check(
     "key issuance is permission-gated and stores hash only",
-    /hasPermission\(auth\.userId, "licenses\.issue"\)/.test(keys) &&
+    /authorizeMasterOrSession\(req, "licenses.issue"\)/.test(keys) &&
       /const keyHash = await hashLicenseKey\(key\)/.test(keys) &&
       /keyHash,/.test(keys)
   );
@@ -3483,7 +3473,7 @@ console.log("\nLICOFF offline-token rails");
   check(
     "signing key + token issuance are permission-gated; revoked keys issue nothing",
     /hasPermission\(auth\.userId, "licenses\.issue"\)/.test(sign) &&
-      /hasPermission\(auth\.userId, "licenses\.issue"\)/.test(tok) &&
+      /authorizeMasterOrSession\(req, "licenses.issue"\)/.test(tok) &&
       /if \(key\.revokedAt\) return NextResponse\.json\(\{ error: "That key is revoked — it cannot issue offline tokens\." \}, \{ status: 400 \}\)/.test(tok) &&
       /Math\.min\(daysRaw, OFFLINE_TOKEN_MAX_DAYS\)/.test(tok)
   );
@@ -3613,7 +3603,7 @@ console.log("\nSHOP ecommerce rails");
   );
   check(
     "shop admin routes are permission-gated",
-    /hasPermission\(auth\.userId, "shop\.manage"\)/.test(adminProducts)
+    /authorizeMasterOrSession\(req, "shop.manage"\)/.test(adminProducts)
   );
 }
 
@@ -3637,7 +3627,7 @@ console.log("\nCOUPON rails");
     "coupon endpoints rate-limited, oracle-safe, admin-gated",
     /checkRateLimit\(hits, ip, Date\.now\(\), 60_000, 20\)/.test(checkRoute) &&
       /That coupon is not valid/.test(checkRoute) &&
-      /hasPermission\(auth\.userId, "shop\.manage"\)/.test(admin) &&
+      /authorizeMasterOrSession\(req, "shop.manage"\)/.test(admin) &&
       /That code already exists/.test(admin)
   );
 }
@@ -3699,10 +3689,108 @@ console.log("\nRESELL reseller rails");
   );
   check(
     "admin reseller routes gated; tokens hash-only in storage; commission clamped",
-    /hasPermission\(auth\.userId, "shop\.manage"\)/.test(admin) &&
+    /authorizeMasterOrSession\(req, "shop.manage"\)/.test(admin) &&
       /const tokenHash = await hashResellerToken\(token\)/.test(admin) &&
       /pct > COMMISSION_MAX_PCT/.test(admin) &&
       /Math\.max\(0, Math\.min\(COMMISSION_MAX_PCT, Math\.floor\(pct\)\)\)/.test(shopLib)
+  );
+}
+
+// ── REFUND rails ────────────────────────────────────────────────────────────
+console.log("\nREFUND refund rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const refund = read("../src/app/api/shop/admin/orders/[id]/refund/route.ts");
+  const shopLib = read("../src/lib/shop.ts");
+  check(
+    "refund is gated, revokes the key BEFORE money moves, and refuses double-refunds",
+    /authorizeMasterOrSession\(req, "shop.manage"\)/.test(refund) &&
+      /if \(order\.licenseKeyId\) \{\n      await db\.update\(licenseKeys\)\.set\(\{ revokedAt: new Date\(\) \}\)/.test(refund) &&
+      /orderCanRefund\(status\)/.test(refund) &&
+      /export function orderCanRefund\(status: ShopOrderStatus\): boolean \{\n  return status === "paid" \|\| status === "fulfilled";/.test(shopLib)
+  );
+  check(
+    "cancels only pending; stripe refund is attempted for stripe payments",
+    /return status === "pending";/.test(shopLib) &&
+      /order\.provider === "stripe" && order\.providerRef/.test(refund) &&
+      /refundStripeSession\(order\.providerRef\)/.test(refund) &&
+      /status: "refunded"/.test(refund)
+  );
+}
+
+// ── MASTERKEY rails ─────────────────────────────────────────────────────────
+console.log("\nMKEY unified master-key rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const mk = read("../src/lib/master-key.ts");
+  const validate = read("../src/app/api/license/validate/route.ts");
+  const publicCheck = read("../src/app/api/license/public/check/route.ts");
+  const mkRoute = read("../src/app/api/settings/master-key/route.ts");
+  const products = read("../src/app/api/shop/admin/products/route.ts");
+  check(
+    "master key storage is hash-only with timing-safe compare",
+    /createHash\("sha256"\)\.update\(key\.trim\(\)\)/.test(mk) &&
+      /timingSafeEqual\(a, b\)/.test(mk) &&
+      /MASTER_KEY_SETTING = "panel_master_key_hash"/.test(mk)
+  );
+  check(
+    "license endpoints accept the master key; install treats it as master mode",
+    /if \(await verifyMasterKey\(key\)\) \{/.test(validate) &&
+      /Master key — unlimited activations, never expires/.test(publicCheck) &&
+      /masterMode = await verifyMasterKey\(\(body as Record<string, unknown>\)\.licenseKey\)/.test(read("../src/app/api/install/route.ts"))
+  );
+  check(
+    "master-key admin path returns the synthetic admin identity and gates reuse it",
+    /return \{ auth: \{ userId: MASTER_KEY_USER_ID, role: "admin" \}, res: null \}/.test(mk) &&
+      /authorizeMasterOrSession\(req, "shop\.manage"\)/.test(products) &&
+      /authorizeMasterOrSession\(req, "panel\.settings"\)/.test(mkRoute)
+  );
+  check(
+    "the stored master key is never returned by GET and rotates through POST only",
+    /const state = await masterKeyConfigured\(\)/.test(mkRoute) &&
+      /return NextResponse\.json\(state\)/.test(mkRoute) &&
+      /return NextResponse\.json\(\{ ok: true, key \}\)/.test(mkRoute)
+  );
+}
+
+// ── MASTERBOOT rails ────────────────────────────────────────────────────────
+console.log("\nMBOOT first-run master rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const install = read("../src/app/api/install/route.ts");
+  const wizard = read("../src/components/InstallWizard.tsx");
+  const mk = read("../src/lib/master-key.ts");
+  const sh = read("../public/install.sh");
+  check(
+    "bootstrap runs ONLY for master installs and never duplicates existing keys",
+    /if \(isLicenseMasterMode\(\)\) \{/.test(install) &&
+      /if \(!mkState\.env && !mkState\.stored\) \{/.test(install) &&
+      /MASTER_KEY_SETTING, value: await hashMasterKey\(masterKeyPlaintext\)/.test(install) &&
+      /bootstrap must never fail the install itself/.test(install)
+  );
+  check(
+    "bootstrap seeds signing key and starter product only when missing",
+    /if \(!signingRow\?\.value\) \{/.test(install) &&
+      /if \(\(countRow\?\.n \?\? 0\) === 0\) \{/.test(install) &&
+      /bootstrap,\n    \}\);/.test(install)
+  );
+  check(
+    "wizard shows the master key exactly once with copy",
+    /bootstrap\?\.masterKey && \(/.test(wizard) &&
+      /shown exactly once/.test(wizard) &&
+      /navigator\.clipboard\.writeText\(bootstrap\.masterKey/.test(wizard)
+  );
+  check(
+    "pure bootstrap plan: no key when one exists, re-runs idempotent",
+    /generateMasterKey: !input\.envMasterKey && !input\.storedMasterKey/.test(mk) &&
+      /seedStarterProduct: input\.productCount <= 0/.test(mk) &&
+      /MASTER PANEL INSTALL/.test(sh)
   );
 }
 
