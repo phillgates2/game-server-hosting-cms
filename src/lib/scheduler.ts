@@ -437,7 +437,7 @@ async function runTask(task: DueTask): Promise<void> {
         // The task is explicitly a shell command created by an operator with
         // scheduler.create; run it in the server's own directory.
         const bytes = await new Promise<number>((resolve, reject) => {
-          execFile(
+          execFile(/*turbopackIgnore: true*/ 
             "/bin/bash",
             ["-lc", command],
             { cwd: installPath, timeout: 30 * 60_000, maxBuffer: 4 * 1024 * 1024 },

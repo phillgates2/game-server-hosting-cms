@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
 // POST /api/cms - Create a new post (admin only)
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "cms.create"))) {
+  if (!auth || !(await hasPermission(auth.userId, "cms.create", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -62,11 +62,11 @@ export async function POST(req: NextRequest) {
     const { title, slug, content, type, excerpt, coverImage, published, pinned, tags } = body;
 
     if (published !== undefined && published !== null) {
-      const canPublish = await hasPermission(auth.userId, "cms.publish");
+      const canPublish = await hasPermission(auth.userId, "cms.publish", auth.keyScope);
       if (!canPublish) return NextResponse.json({ error: "cms.publish permission required" }, { status: 403 });
     }
     if (pinned !== undefined && pinned !== null) {
-      const canPin = (await hasPermission(auth.userId, "cms.pin")) || (await hasPermission(auth.userId, "cms.publish"));
+      const canPin = (await hasPermission(auth.userId, "cms.pin", auth.keyScope)) || (await hasPermission(auth.userId, "cms.publish", auth.keyScope));
       if (!canPin) return NextResponse.json({ error: "cms.pin permission required" }, { status: 403 });
     }
 

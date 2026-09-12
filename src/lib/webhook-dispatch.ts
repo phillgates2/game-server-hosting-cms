@@ -76,7 +76,11 @@ export async function dispatchWebhookEvent(event: WebhookEventInput): Promise<bo
     const timeout = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
     let status: number | null = null;
     try {
-      const res = await fetch(valid.url, { method: "POST", headers, body, signal: controller.signal });
+      // redirect: "error" — webhook POSTs must never follow redirects. The
+      // default "follow" would let a public URL bounce the delivery into a
+      // private/metadata address that validateWebhookUrl rightly refuses
+      // (classic SSRF-via-redirect; found in the Stage 47 debug pass).
+      const res = await fetch(valid.url, { method: "POST", headers, body, signal: controller.signal, redirect: "error" });
       status = res.status;
       recordWebhookDelivery({ atMs: Date.now(), action: event.action, attempted: true, ok: res.ok, status, error: res.ok ? null : `HTTP ${res.status}` });
       return true;

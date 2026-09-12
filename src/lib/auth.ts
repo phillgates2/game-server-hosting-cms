@@ -74,8 +74,7 @@ export function getTokenFromHeaders(headers: Headers): string | null {
  */
 export async function getCurrentUser(
   headers: Headers
-): Promise<{ userId: number; role: string } | null> {
-  const { setAuthContext } = await import("./request-context");
+): Promise<{ userId: number; role: string; keyScope: import("./key-scope").KeyScope } | null> {
 
   const token = getTokenFromHeaders(headers);
   if (token) {
@@ -85,14 +84,14 @@ export async function getCurrentUser(
       // revocation and the IP allowlist. Both fail open on db errors.
       const { sessionGate, ipGate } = await import("./auth-gates");
       if (!(await sessionGate(token)) || !(await ipGate(headers))) {
-        setAuthContext({ keyPermissions: null, keyId: null });
         return null;
       }
-      // A cookie session carries no key scope. Setting it explicitly (rather
-      // than leaving the store untouched) prevents a scope from a previous
-      // request ever bleeding into this one.
-      setAuthContext({ keyPermissions: null, keyId: null });
-      return session;
+      // A cookie session carries no API-key scope: null means "the owner's own
+      // permissions decide". The scope rides on the returned identity now — an
+      // AsyncLocalStorage carrier was tried and dropped in Stage 45 because
+      // Next's per-request context boundary swallowed writes made inside this
+      // awaited function.
+      return { ...session, keyScope: null };
     }
   }
 
@@ -100,17 +99,10 @@ export async function getCurrentUser(
   // in at module load would drag the db client into every consumer of auth.ts.
   const { authenticateApiKey } = await import("./api-key-auth");
   const viaKey = await authenticateApiKey(headers);
-  if (!viaKey) {
-    setAuthContext({ keyPermissions: null, keyId: null });
-    return null;
-  }
+  if (!viaKey) return null;
   const { ipGate } = await import("./auth-gates");
-  if (!(await ipGate(headers))) {
-    setAuthContext({ keyPermissions: null, keyId: null });
-    return null;
-  }
-  setAuthContext({ keyPermissions: viaKey.permissions, keyId: viaKey.keyId });
-  return { userId: viaKey.userId, role: viaKey.role };
+  if (!(await ipGate(headers))) return null;
+  return { userId: viaKey.userId, role: viaKey.role, keyScope: viaKey.permissions };
 }
 
 // Cookie options — secure only when behind HTTPS (detected via x-forwarded-proto)

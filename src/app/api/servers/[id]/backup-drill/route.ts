@@ -36,8 +36,8 @@ export async function POST(
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (
-    !(await hasPermission(auth.userId, "servers.backup")) &&
-    !(await hasPermission(auth.userId, "servers.restore"))
+    !(await hasPermission(auth.userId, "servers.backup", auth.keyScope)) &&
+    !(await hasPermission(auth.userId, "servers.restore", auth.keyScope))
   ) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
@@ -144,7 +144,7 @@ async function runCmd(file: string, args: string[], cwd: string, timeout: number
   return new Promise((resolvePromise, reject) => {
     let stderr = "";
     let done = false;
-    const child: ChildProcess = spawn(file, args, { cwd });
+    const child: ChildProcess = spawn(/*turbopackIgnore: true*/ file, args, { cwd });
     const timer = setTimeout(() => {
       if (!done) {
         done = true;

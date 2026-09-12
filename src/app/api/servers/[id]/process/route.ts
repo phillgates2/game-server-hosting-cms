@@ -136,14 +136,14 @@ export async function POST(
     }
 
     if (action === "status") {
-      if (!(await hasPermission(auth.userId, "servers.view"))) {
+      if (!(await hasPermission(auth.userId, "servers.view", auth.keyScope))) {
         return NextResponse.json({ error: "Permission denied" }, { status: 403 });
       }
     } else if (action === "restart") {
-      const canRestart = (await hasPermission(auth.userId, "servers.restart")) || (await hasPermission(auth.userId, "servers.start_stop"));
+      const canRestart = (await hasPermission(auth.userId, "servers.restart", auth.keyScope)) || (await hasPermission(auth.userId, "servers.start_stop", auth.keyScope));
       if (!canRestart) return NextResponse.json({ error: "Permission denied" }, { status: 403 });
     } else {
-      if (!(await hasPermission(auth.userId, "servers.start_stop"))) {
+      if (!(await hasPermission(auth.userId, "servers.start_stop", auth.keyScope))) {
         return NextResponse.json({ error: "Permission denied" }, { status: 403 });
       }
     }

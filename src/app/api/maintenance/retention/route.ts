@@ -7,7 +7,7 @@ import { pruneMetrics, pruneAuditLog, retentionStats } from "@/lib/retention";
 async function requireAdmin(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return null;
-  const allowed = await hasPermission(auth.userId, "panel.settings");
+  const allowed = await hasPermission(auth.userId, "panel.settings", auth.keyScope);
   return allowed ? auth : null;
 }
 

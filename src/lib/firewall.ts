@@ -13,7 +13,7 @@ import { execFile } from "node:child_process";
 
 function ufw(args: string[]): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
-    execFile("ufw", args, { timeout: 10_000 }, (error, stdout, stderr) => {
+    execFile(/*turbopackIgnore: true*/ "ufw", args, { timeout: 10_000 }, (error, stdout, stderr) => {
       if (error) {
         const msg = stderr || stdout || error.message;
         console.warn(`[firewall] ufw ${args.join(" ")} → ${msg.trim()}`);

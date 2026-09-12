@@ -51,7 +51,7 @@ echo "Update complete"
       let stderr = "";
       let done = false;
 
-      const child: ChildProcess = spawn(bashPath, [scriptPath], {
+      const child: ChildProcess = spawn(/*turbopackIgnore: true*/ bashPath, [scriptPath], {
         cwd: tempDir,
         env: {
           NODE_ENV: process.env.NODE_ENV || "production",

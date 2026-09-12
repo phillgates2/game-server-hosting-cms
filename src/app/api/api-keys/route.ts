@@ -17,7 +17,7 @@ const hashKey = hashApiKey;
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "apikeys.view"))) {
+  if (!(await hasPermission(auth.userId, "apikeys.view", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -45,17 +45,28 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "apikeys.create"))) {
+  if (!(await hasPermission(auth.userId, "apikeys.create", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
   try {
-    const { name, permissions, expiresInDays } = await req.json();
+    const { name, permissions, scopes, expiresInDays } = await req.json();
     if (!name) return NextResponse.json({ error: "Name required" }, { status: 400 });
+
+    // Stage 45 debug pass: integrations kept sending `scopes: ["perm", ...]`
+    // and silently received an UNRESTRICTED key because this endpoint only
+    // read `permissions`. Accept the array as an alias instead of failing
+    // open. (permissions wins if both are given.)
+    const effectivePermissions =
+      permissions !== undefined
+        ? permissions
+        : Array.isArray(scopes)
+          ? Object.fromEntries(scopes.filter((x): x is string => typeof x === "string").map((x) => [x, true]))
+          : undefined;
 
     // A malformed scope would be stored and then deny every request, which
     // presents as a mysteriously broken key rather than a rejected one.
-    const scopeCheck = validateKeyScope(permissions, ALL_PERMISSIONS);
+    const scopeCheck = validateKeyScope(effectivePermissions, ALL_PERMISSIONS);
     if (scopeCheck.error !== null) {
       return NextResponse.json({ error: scopeCheck.error }, { status: 400 });
     }
@@ -90,7 +101,7 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "apikeys.revoke")) && !(await hasPermission(auth.userId, "apikeys.create"))) {
+  if (!(await hasPermission(auth.userId, "apikeys.revoke", auth.keyScope)) && !(await hasPermission(auth.userId, "apikeys.create", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

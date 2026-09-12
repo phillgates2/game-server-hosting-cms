@@ -39,7 +39,7 @@ async function writeDatabaseUrlToEnv(databaseUrl: string) {
 
 async function restartPanelProcess() {
   await new Promise<void>((resolve) => {
-    execFile("pm2", ["restart", "gsm-panel"], (error: Error | null) => {
+    execFile(/*turbopackIgnore: true*/ "pm2", ["restart", "gsm-panel"], (error: Error | null) => {
       if (error) {
         resolve();
         return;
@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
 
     if (alreadyInstalled) {
       const auth = await getCurrentUser(req.headers);
-      if (!auth || !(await hasPermission(auth.userId, "panel.install"))) {
+      if (!auth || !(await hasPermission(auth.userId, "panel.install", auth.keyScope))) {
         return NextResponse.json({ error: "Permission denied" }, { status: 403 });
       }
     }

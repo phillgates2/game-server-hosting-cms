@@ -11,7 +11,7 @@ import { isValidWebhookUrl, verifyBot, sendDiscordWebhook } from "@/lib/discord"
 async function requireAdmin(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return null;
-  return (await hasPermission(auth.userId, "panel.settings")) ? auth : null;
+  return (await hasPermission(auth.userId, "panel.settings", auth.keyScope)) ? auth : null;
 }
 
 /**

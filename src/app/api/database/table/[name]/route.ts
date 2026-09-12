@@ -10,7 +10,7 @@ export async function GET(
   { params }: { params: Promise<{ name: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  const allowed = auth && ((await hasPermission(auth.userId, "database.view")) || (await hasPermission(auth.userId, "database.view.rows")));
+  const allowed = auth && ((await hasPermission(auth.userId, "database.view", auth.keyScope)) || (await hasPermission(auth.userId, "database.view.rows", auth.keyScope)));
   if (!allowed) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }

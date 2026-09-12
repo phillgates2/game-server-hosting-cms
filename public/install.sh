@@ -980,6 +980,11 @@ GAMESERVERS_PATH=$GAMESERVERS_DIR
 # Store it somewhere safe — it is the "never lock myself out" key.
 GSM_PANEL_MASTER_KEY=$ACCESS_KEY
 
+# Trusted proxy: 1 when Caddy fronts the panel, so client IPs are read from
+# the proxy-appended LAST X-Forwarded-For hop. 0 = forwarded headers are not
+# trusted (IP allowlist fails closed against header-claimed identities).
+GSM_TRUST_PROXY=$([[ "$SETUP_CADDY" == "true" ]] && echo 1 || echo 0)
+
 # Licensing
 GSM_LICENSE_SERVER=$LICENSE_SERVER
 GSM_LICENSE_MODE=$([[ "$MASTER_PANEL" == "true" ]] && echo master || ([[ -n "$LICENSE_TOKEN" ]] && echo offline || echo standard))

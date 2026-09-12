@@ -67,3 +67,41 @@ describe("ipAllowed", () => {
     assert.equal(ipAllowed("192.0.2.1", ["203.0.113.9", "10.*"]), false);
   });
 });
+
+import { clientIpFromHeaders, clientIpForRecord } from "../src/lib/ip-allowlist";
+
+describe("clientIpFromHeaders — Stage 46 trust model", () => {
+  test("trusted proxy: the LAST hop wins (attacker-forged hops are ignored)", () => {
+    const h = new Headers({ "x-forwarded-for": "127.0.0.1, 1.2.3.4" });
+    assert.equal(clientIpFromHeaders(h, true), "1.2.3.4");
+  });
+
+  test("trusted proxy: falls back to x-real-ip when no XFF", () => {
+    const h = new Headers({ "x-real-ip": "9.9.9.9" });
+    assert.equal(clientIpFromHeaders(h, true), "9.9.9.9");
+  });
+
+  test("trusted proxy: no headers at all -> direct connection (null)", () => {
+    assert.equal(clientIpFromHeaders(new Headers(), true), null);
+  });
+
+  test("untrusted: ANY forwarded header is an unverifiable claim -> unknown", () => {
+    const h = new Headers({ "x-forwarded-for": "127.0.0.1" });
+    assert.equal(clientIpFromHeaders(h, false), "unknown");
+    const r = new Headers({ "x-real-ip": "127.0.0.1" });
+    assert.equal(clientIpFromHeaders(r, false), "unknown");
+  });
+
+  test("untrusted: header-less request is a direct connection (null)", () => {
+    assert.equal(clientIpFromHeaders(new Headers(), false), null);
+  });
+
+  test("loopback claimed via untrusted headers fails CLOSED against an allowlist", () => {
+    const spoofed = clientIpFromHeaders(new Headers({ "x-forwarded-for": "127.0.0.1" }), false);
+    assert.equal(ipAllowed(spoofed, ["10.*"]), false);
+  });
+
+  test("clientIpForRecord never returns null", () => {
+    assert.equal(clientIpForRecord(new Headers(), true), "direct");
+  });
+});

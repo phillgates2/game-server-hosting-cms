@@ -17,7 +17,7 @@ const SIGNING_KEY_SETTING = "license_signing_private_key";
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { authorizeMasterOrSession } = await import("@/lib/master-key");
   const { auth, res: gateRes } = await authorizeMasterOrSession(req, "licenses.issue");
-  if (!auth) return gateRes;
+  if (!auth) return gateRes ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let body: unknown = {};
   try { body = await req.json(); } catch { body = {}; }
@@ -40,10 +40,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!row?.value) {
       return NextResponse.json({ error: "No signing key yet — generate one first (Signing key section)." }, { status: 400 });
     }
-    const { createPrivateKey } = await import("node:crypto");
+    const { publicPemFromPrivateKeyPem } = await import("@/lib/signing");
     let publicPem: string;
     try {
-      publicPem = createPrivateKey(row.value).export({ type: "spki", format: "pem" }).toString();
+      publicPem = publicPemFromPrivateKeyPem(row.value);
     } catch {
       return NextResponse.json({ error: "The stored signing key is corrupt — regenerate it." }, { status: 500 });
     }

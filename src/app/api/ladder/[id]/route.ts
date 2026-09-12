@@ -40,7 +40,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
-  const canEditBase = (await hasPermission(auth.userId, "ladder.edit")) || (await hasPermission(auth.userId, "ladder.edit.entry"));
+  const canEditBase = (await hasPermission(auth.userId, "ladder.edit", auth.keyScope)) || (await hasPermission(auth.userId, "ladder.edit.entry", auth.keyScope));
   if (!canEditBase) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
@@ -53,10 +53,10 @@ export async function PATCH(
     const body = await req.json();
     const update: Record<string, unknown> = { updatedAt: new Date(), updatedBy: auth.userId };
 
-    const canSeason = (await hasPermission(auth.userId, "ladder.season")) || (await hasPermission(auth.userId, "ladder.season.manage"));
-    const canStats = (await hasPermission(auth.userId, "ladder.edit.stats")) || canEditBase;
-    const canNotes = (await hasPermission(auth.userId, "ladder.edit.notes")) || canEditBase;
-    const canGame = (await hasPermission(auth.userId, "ladder.manage.games")) || canEditBase;
+    const canSeason = (await hasPermission(auth.userId, "ladder.season", auth.keyScope)) || (await hasPermission(auth.userId, "ladder.season.manage", auth.keyScope));
+    const canStats = (await hasPermission(auth.userId, "ladder.edit.stats", auth.keyScope)) || canEditBase;
+    const canNotes = (await hasPermission(auth.userId, "ladder.edit.notes", auth.keyScope)) || canEditBase;
+    const canGame = (await hasPermission(auth.userId, "ladder.manage.games", auth.keyScope)) || canEditBase;
 
     if (body.season !== undefined) {
       if (!canSeason) return NextResponse.json({ error: "Permission denied for season updates" }, { status: 403 });
@@ -144,7 +144,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !((await hasPermission(auth.userId, "ladder.delete")) || (await hasPermission(auth.userId, "ladder.delete.entry")))) {
+  if (!auth || !((await hasPermission(auth.userId, "ladder.delete", auth.keyScope)) || (await hasPermission(auth.userId, "ladder.delete.entry", auth.keyScope)))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

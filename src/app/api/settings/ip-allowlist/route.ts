@@ -29,7 +29,7 @@ async function readAllowlist() {
 // GET — current allowlist + the caller's own IP (admin only)
 export async function GET(req: NextRequest) {
   const { auth, res } = await requireAdmin(req);
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const { spec, rules } = await readAllowlist();
     return NextResponse.json({ spec, rules, yourIp: clientIpFromHeaders(req.headers) });
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
 // POST — { spec: string } to save, or { addSelf: true } to append the caller's IP
 export async function POST(req: NextRequest) {
   const { auth, res } = await requireAdmin(req);
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let body: unknown;
   try {

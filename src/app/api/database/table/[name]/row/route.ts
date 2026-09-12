@@ -18,7 +18,7 @@ export async function POST(
   { params }: { params: Promise<{ name: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "database.edit"))) {
+  if (!auth || !(await hasPermission(auth.userId, "database.edit", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

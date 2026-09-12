@@ -350,18 +350,10 @@ console.log("\nH2/H3 auth enforcement wiring");
   );
 
   // API keys can carry a permission scope. It was stored and advertised but
-  // never read, so a "read-only" key had its owner's full rights.
-  const permsLib = read("../src/lib/permissions.ts");
-  const authLib = read("../src/lib/auth.ts");
-  check(
-    "hasPermission intersects the API key scope",
-    /allowedByKeyScope\(/.test(permsLib)
-  );
-  check(
-    "the key scope is bound to the request on every auth path",
-    /setAuthContext\(/.test(authLib) &&
-      (authLib.match(/setAuthContext\(/g) || []).length >= 3
-  );
+  // never read, so a "read-only" key had its owner's full rights. The scope
+  // is now threaded explicitly as auth.keyScope (the old AsyncLocalStorage
+  // carrier could not cross Next's per-request context boundary). The
+  // threading + fail-closed decision is pinned in the DBG45 section below.
   check(
     "API key scopes are validated before storage",
     /validateKeyScope\(/.test(read("../src/app/api/api-keys/route.ts"))
@@ -522,7 +514,7 @@ console.log("\nH2/H3 auth enforcement wiring");
 
   const backup = read("../src/app/api/servers/[id]/backup/route.ts");
   check("backup no longer spawns a shell", !/spawn\("sh"/.test(backup));
-  check("backup passes tar an argument array", /spawn\(file, args/.test(backup));
+  check("backup passes tar an argument array", /spawn\(\/\*turbopackIgnore: true\*\/ file, args/.test(backup));
 
   // Cascading deletes must be atomic. Run as loose statements, a failure
   // between them destroys the children and leaves the parent behind.
@@ -1686,11 +1678,12 @@ console.log("\nRemote file ops & backups");
 
   const filesRoute = read("../src/app/api/servers/[id]/files/route.ts");
   check(
-    "the files route runs list/read/download/write/mkdir/delete/rename on the agent",
-    /remoteFs\(remoteNode, op, \{ path: reqPath \}\)/.test(filesRoute) &&
+    "the files route runs list/read/download/write/mkdir/delete/rename on the agent, anchored to the server dir",
+    /remoteFs\(remoteNode, op, \{ installPath: server\.installPath, path: reqPath \}\)/.test(filesRoute) &&
       /op: "readbin"/.test(filesRoute) === false &&
       /"readbin"/.test(filesRoute) &&
-      /await remoteFs\(remoteNode, "write", \{ path: reqPath, content: content \|\| "" \}\)/.test(filesRoute) &&
+      /await remoteFs\(remoteNode, "write", \{ installPath: server\.installPath, path: reqPath, content: content \|\| "" \}\)/.test(filesRoute) &&
+      /await remoteFs\(remoteNode, "delete", \{ installPath: server\.installPath, path: reqPath \}\)/.test(filesRoute) &&
       /not supported on remote nodes yet/.test(filesRoute)
   );
 }
@@ -1845,7 +1838,7 @@ console.log("\nPRESETS server preset validation and apply-time filtering");
   check(
     "preset list/create is authenticated and create needs servers.create",
     /getCurrentUser\(req\.headers\)/.test(route) &&
-      /if \(!\(await hasPermission\(auth\.userId, "servers\.create"\)\)\)/.test(route) &&
+      /if \(!\(await hasPermission\(auth\.userId, "servers\.create", auth.keyScope\)\)\)/.test(route) &&
       /validatePresetInput\(body\)/.test(route) &&
       /limit\(200\)/.test(route)
   );
@@ -1883,7 +1876,7 @@ console.log("\nNODEH smart node picker scoring and metrics permission");
   const route = read("../src/app/api/nodes/route.ts");
   check(
     "node list embeds heartbeat metrics only for nodes.view.metrics holders",
-    /hasPermission\(auth\.userId, "nodes\.view\.metrics"\)/.test(route) &&
+    /hasPermission\(auth\.userId, "nodes\.view\.metrics", auth.keyScope\)/.test(route) &&
       /if \(canSeeMetrics\) try/.test(route) &&
       /metrics: latestMetrics\[node\.id\] \?\? null/.test(route)
   );
@@ -1919,7 +1912,7 @@ console.log("\nNOTES server notes validation and allowlist");
   const patchRoute = read("../src/app/api/servers/[id]/route.ts");
   check(
     "PATCH validates notes through the normaliser under servers.edit",
-    /hasPermission\(auth\.userId, "servers\.edit"\)/.test(patchRoute) &&
+    /hasPermission\(auth\.userId, "servers\.edit", auth.keyScope\)/.test(patchRoute) &&
       /normalizeServerNotes\(updates\.notes\)/.test(patchRoute) &&
       /ADD COLUMN IF NOT EXISTS notes TEXT/.test(patchRoute)
   );
@@ -1949,7 +1942,7 @@ console.log("\nTAGS server tag validation and plumbing");
   const patchRoute = read("../src/app/api/servers/[id]/route.ts");
   check(
     "PATCH validates tags through the normaliser under servers.edit",
-    /hasPermission\(auth\.userId, "servers\.edit"\)/.test(patchRoute) &&
+    /hasPermission\(auth\.userId, "servers\.edit", auth.keyScope\)/.test(patchRoute) &&
       /normalizeServerTags\(updates\.tags\)/.test(patchRoute) &&
       /ADD COLUMN IF NOT EXISTS tags JSONB/.test(patchRoute)
   );
@@ -1981,7 +1974,7 @@ console.log("\nFEED fleet incident feed scoping and limits");
   const route = read("../src/app/api/servers/events/route.ts");
   check(
     "the feed is permission-gated and scoped to the caller's own servers",
-    /hasPermission\(auth\.userId, "servers\.view"\)/.test(route) &&
+    /hasPermission\(auth\.userId, "servers\.view", auth.keyScope\)/.test(route) &&
       /auth\.role !== "admin" \? eq\(gameServers\.userId, auth\.userId\) : undefined/.test(route)
   );
 
@@ -2023,7 +2016,7 @@ console.log("\nBATCH batch start/stop/restart validation and scoping");
     "the batch route delegates to the real process handler with permission pre-check and ownership partition",
     /from "\.\.\/\[id\]\/process\/route"/.test(route) &&
       /if \(!canAct\)/.test(route) &&
-      /hasPermission\(auth\.userId, "servers\.start_stop"\)/.test(route) &&
+      /hasPermission\(auth\.userId, "servers\.start_stop", auth.keyScope\)/.test(route) &&
       /partitionBatch\(\s*rows,\s*serverIds,\s*auth\.role === "admin",\s*auth\.userId\s*\)/.test(route) &&
       /validateBatchRequest\(body\)/.test(route)
   );
@@ -2053,7 +2046,7 @@ console.log("\nPIMPORT preset import validation and scoping");
   const route = read("../src/app/api/presets/import/route.ts");
   check(
     "the import route needs servers.create, validates payloads, and drops unknown games",
-    /if \(!\(await hasPermission\(auth\.userId, "servers\.create"\)\)\)/.test(route) &&
+    /if \(!\(await hasPermission\(auth\.userId, "servers\.create", auth.keyScope\)\)\)/.test(route) &&
       /validatePresetImport\(body\)/.test(route) &&
       /knownGames\.has\(p\.gameId\)/.test(route) &&
       /userId: auth\.userId/.test(route)
@@ -2079,7 +2072,7 @@ console.log("\nDAILY one-click daily restart scoping and shape");
   check(
     "GET and POST both enforce ownership and disable by flag, never delete",
     ownershipHits >= 2 &&
-      /hasPermission\(auth\.userId, "scheduler\.create"\)/.test(route) &&
+      /hasPermission\(auth\.userId, "scheduler\.create", auth.keyScope\)/.test(route) &&
       /\.set\(\{ enabled: false \}\)/.test(route) &&
       !/delete\(scheduledTasks\)/.test(route)
   );
@@ -2207,7 +2200,7 @@ console.log("\nDBACKUP one-click daily backup scoping and shape");
   check(
     "GET and POST both enforce ownership, schedule backup tasks, and disable by flag",
     ownershipHits >= 2 &&
-      /hasPermission\(auth\.userId, "scheduler\.create"\)/.test(route) &&
+      /hasPermission\(auth\.userId, "scheduler\.create", auth.keyScope\)/.test(route) &&
       /taskType: "backup"/.test(route) &&
       /\.set\(\{ enabled: false \}\)/.test(route) &&
       !/delete\(scheduledTasks\)/.test(route)
@@ -2316,7 +2309,7 @@ console.log("\nBUPD batch update validation and delegation");
     "batch update delegates to the real update handler and never touches running servers",
     /from "\.\.\/\[id\]\/update\/route"/.test(route) &&
       /if \(server\.status !== "stopped"\)/.test(route) &&
-      /hasPermission\(auth\.userId, "servers\.install"\)/.test(route) &&
+      /hasPermission\(auth\.userId, "servers\.install", auth.keyScope\)/.test(route) &&
       /partitionBatch\(/.test(route) &&
       /action: "server\.batch-update"/.test(route)
   );
@@ -2507,7 +2500,7 @@ console.log("\nCAP forecasting honesty and permission scoping");
   const route = read("../src/app/api/nodes/capacity/route.ts");
   check(
     "the capacity endpoint needs the metrics permission and bounds its rows",
-    /hasPermission\(auth\.userId, "nodes\.view\.metrics"\)/.test(route) &&
+    /hasPermission\(auth\.userId, "nodes\.view\.metrics", auth.keyScope\)/.test(route) &&
       /\.limit\(MAX_ROWS_PER_NODE\)/.test(route) &&
       /MAX_FIT_SAMPLES/.test(route) &&
       /gte\(nodeMetrics\.recordedAt, since\)/.test(route)
@@ -2531,7 +2524,7 @@ console.log("\nDRILL restore drill verdicts and path safety");
   const route = read("../src/app/api/servers/[id]/backup-drill/route.ts");
   check(
     "the drill is permission-gated, path-contained, and always cleans up",
-    /hasPermission\(auth\.userId, "servers\.backup"\)/.test(route) &&
+    /hasPermission\(auth\.userId, "servers\.backup", auth.keyScope\)/.test(route) &&
       /auth\.role !== "admin" && server\.userId !== auth\.userId/.test(route) &&
       /startsWith\(base \+ sep\)/.test(route) &&
       /rm\(scratch, \{ recursive: true, force: true \}\)/.test(route) &&
@@ -2991,8 +2984,8 @@ console.log("\nMAINTW scheduled maintenance rails");
   );
   check(
     "routes gate on nodes.maintenance and cancelling an applied window releases the node",
-    /hasPermission\(auth\.userId, "nodes\.maintenance"\)/.test(post) &&
-      /hasPermission\(auth\.userId, "nodes\.maintenance"\)/.test(del) &&
+    /hasPermission\(auth\.userId, "nodes\.maintenance", auth.keyScope\)/.test(post) &&
+      /hasPermission\(auth\.userId, "nodes\.maintenance", auth.keyScope\)/.test(del) &&
       /maintenanceMode: false/.test(del)
   );
 }
@@ -3109,7 +3102,7 @@ console.log("\nCAPACITY planner rails");
   );
   check(
     "capacity route is gated on nodes.view",
-    /hasPermission\(auth\.userId, "nodes\.view"\)/.test(route) &&
+    /hasPermission\(auth\.userId, "nodes\.view", auth.keyScope\)/.test(route) &&
       /footprintForSlug\(slug\)/.test(route)
   );
 }
@@ -3439,7 +3432,7 @@ console.log("\nLICUSE analytics rails");
   );
   check(
     "analytics endpoint is permission-gated and caps the activation scan",
-    /hasPermission\(auth\.userId, "licenses\.view"\)/.test(route) &&
+    /hasPermission\(auth\.userId, "licenses\.view", auth.keyScope\)/.test(route) &&
       /\.limit\(500\)/.test(route) &&
       /summarizeLicenseFleet\(keys, activationHealth, nowMs\)/.test(route)
   );
@@ -3480,7 +3473,7 @@ console.log("\nLICOFF offline-token rails");
   );
   check(
     "signing key + token issuance are permission-gated; revoked keys issue nothing",
-    /hasPermission\(auth\.userId, "licenses\.issue"\)/.test(sign) &&
+    /hasPermission\(auth\.userId, "licenses\.issue", auth.keyScope\)/.test(sign) &&
       /authorizeMasterOrSession\(req, "licenses.issue"\)/.test(tok) &&
       /if \(key\.revokedAt\) return NextResponse\.json\(\{ error: "That key is revoked — it cannot issue offline tokens\." \}, \{ status: 400 \}\)/.test(tok) &&
       /Math\.min\(daysRaw, OFFLINE_TOKEN_MAX_DAYS\)/.test(tok)
@@ -3502,7 +3495,7 @@ console.log("\nLICTRF transfer rails");
   const route = read("../src/app/api/license/activations/[id]/route.ts");
   check(
     "transfer is permission-gated, deletes exactly the target row, and is audited",
-    /hasPermission\(auth\.userId, "licenses\.revoke"\)/.test(route) &&
+    /hasPermission\(auth\.userId, "licenses\.revoke", auth.keyScope\)/.test(route) &&
       /db\.delete\(licenseActivations\)\.where\(eq\(licenseActivations\.id, act\.id\)\)/.test(route) &&
       /action: "license\.transfer"/.test(route) &&
       /if \(!act\) return NextResponse\.json\(\{ error: "Not found" \}, \{ status: 404 \}\)/.test(route)
@@ -3799,6 +3792,275 @@ console.log("\nMBOOT first-run master rails");
     /generateMasterKey: !input\.envMasterKey && !input\.storedMasterKey/.test(mk) &&
       /seedStarterProduct: input\.productCount <= 0/.test(mk) &&
       /MASTER PANEL INSTALL/.test(sh)
+  );
+}
+
+// ── BUILDRUN rails: production-build compatibility ──────────────────────────
+console.log("\nBRUN production-build rails (Turbopack + route-handler types)");
+{
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const walk = (dir: string, out: string[] = []) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full, out);
+      else if (e.name.endsWith(".ts")) out.push(full);
+    }
+    return out;
+  };
+  const srcFiles = walk(new URL("../src", import.meta.url).pathname);
+
+  // Turbopack traces child_process spawn calls and fails the production
+  // build when the target is dynamic. Every call site must opt out with
+  // the turbopackIgnore magic comment or the deploy build dies.
+  const bareSpawns: string[] = [];
+  for (const f of srcFiles) {
+    const text = fs.readFileSync(f, "utf8");
+    for (const line of text.split("\n")) {
+      if (line.trim().startsWith("import ")) continue;
+      const m = line.match(/\b(spawnSync|spawn|execFileSync|execFile)\(/);
+      if (m && !/\b(spawnSync|spawn|execFileSync|execFile)\(\/\*turbopackIgnore: true\*\//.test(line)) {
+        bareSpawns.push(`${path.basename(path.dirname(f))}/${path.basename(f)}: ${line.trim().slice(0, 60)}`);
+      }
+    }
+  }
+  check(
+    `every spawn/execFile call site carries turbopackIgnore (${bareSpawns.length} bare: ${bareSpawns[0] ?? "none"})`,
+    bareSpawns.length === 0
+  );
+
+  // Route handlers must never return null — Next 16's generated validator
+  // rejects Promise<NextResponse | null>. Every auth-gate early return
+  // needs the ?? NextResponse fallback.
+  const bareNullReturns: string[] = [];
+  for (const f of srcFiles) {
+    if (!f.endsWith("route.ts")) continue;
+    const text = fs.readFileSync(f, "utf8");
+    const m = text.match(/if \(!auth\) return (gateRes|res);/);
+    if (m) bareNullReturns.push(`${path.basename(path.dirname(f))}: ${m[0]}`);
+  }
+  check(
+    `no auth-gated route returns a bare nullable response (${bareNullReturns[0] ?? "none"})`,
+    bareNullReturns.length === 0 &&
+      /gateRes \?\? NextResponse\.json/.test(fs.readFileSync(new URL("../src/app/api/license/keys/route.ts", import.meta.url), "utf8"))
+  );
+}
+
+// ── DBG45 rails: live-debug findings, pinned ────────────────────────────────
+console.log("\nDBG45 full-debug-pass rails");
+{
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const read = (rel: string) => fs.readFileSync(new URL(rel, import.meta.url), "utf8") as string;
+  const walk = (dir: string, out: string[] = []) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full, out);
+      else if (e.name.endsWith(".ts") || e.name.endsWith(".tsx")) out.push(full);
+    }
+    return out;
+  };
+
+  // 1. Scoped API keys: the scope MUST be threaded explicitly. Next's
+  //    per-request context boundary swallows enterWith from awaited helpers,
+  //    so the old ALS carrier silently left every scoped key unrestricted.
+  // Count-based pin: EVERY literal-permission call on an authenticated
+  // identity must appear in the exact fully-threaded form. Any deviation —
+  // missing scope, hard-coded null (silent widening), casts, reformats —
+  // breaks the count equality.
+  let allCalls = 0;
+  let exactCalls = 0;
+  let firstBad = "none";
+  for (const f of walk(new URL("../src", import.meta.url).pathname)) {
+    const text = fs.readFileSync(f, "utf8");
+    for (const m of text.matchAll(/hasPermission\((auth(?:User)?)\.userId,\s*("[^"]*")/g)) {
+      allCalls += 1;
+      if (text.slice(m.index, m.index + 300).match(new RegExp(`hasPermission\\(${m[1]}\\.userId,\\s*${m[2].replace(/"/g, '\\"')},\\s*${m[1]}.keyScope\\)`))) {
+        exactCalls += 1;
+      } else if (firstBad === "none") {
+        firstBad = `${path.basename(path.dirname(f))}/${path.basename(f)}: ${text.slice(m.index, m.index + 90).replace(/\n/g, " ")}`;
+      }
+    }
+  }
+  check(
+    `every permission check threads the key scope exactly (${exactCalls}/${allCalls}; first bad: ${firstBad})`,
+    allCalls > 100 && allCalls === exactCalls
+  );
+
+  const perms = read("../src/lib/permissions.ts");
+  const scopeLib = read("../src/lib/key-scope.ts");
+  const auth = read("../src/lib/auth.ts");
+  check(
+    "scope decision is explicit, pure and fail-closed on omission",
+    /keyScope: import\("\.\/key-scope"\)\.KeyScope/.test(perms) &&
+      /if \(keyScope === undefined\)/.test(scopeLib) &&
+      /return false;/.test(scopeLib) &&
+      /if \(keyScope === null\) return true;/.test(scopeLib)
+  );
+  check(
+    "getCurrentUser carries the scope on the identity; the ALS carrier is gone",
+    /return \{ \.\.\.session, keyScope: null \};/.test(auth) &&
+      /keyScope: viaKey\.permissions/.test(auth) &&
+      !fs.existsSync(new URL("../src/lib/request-context.ts", import.meta.url))
+  );
+
+  // 2. Signing keys: spki must be derived via createPublicKey — exporting
+  //    spki from a private KeyObject throws and masqueraded as "corrupt key".
+  const offline = read("../src/app/api/license/keys/[id]/offline-token/route.ts");
+  const signingRoute = read("../src/app/api/license/signing-key/route.ts");
+  const signingLib = read("../src/lib/signing.ts");
+  check(
+    "public half is derived through createPublicKey everywhere",
+    /publicPemFromPrivateKeyPem\(row\.value\)/.test(offline) &&
+      /publicPemFromPrivateKeyPem\(row\.value\)/.test(signingRoute) &&
+      /createPublicKey\(priv\)\.export\(\{ type: "spki"/.test(signingLib) &&
+      !/createPrivateKey\(row\.value\)/.test(offline) &&
+      !/createPrivateKey\(row\.value\)/.test(signingRoute)
+  );
+
+  // 3. API-key creation must not silently mint unrestricted keys when a
+  //    client sends the `scopes` array shape.
+  const keysRoute = read("../src/app/api/api-keys/route.ts");
+  check(
+    "key creation accepts the scopes array alias instead of failing open",
+    /const \{ name, permissions, scopes, expiresInDays \}/.test(keysRoute) &&
+      /Object\.fromEntries\(scopes\.filter/.test(keysRoute) &&
+      /validateKeyScope\(effectivePermissions, ALL_PERMISSIONS\)/.test(keysRoute)
+  );
+}
+
+// ── DBG46 rails: second deep-dive findings ──────────────────────────────────
+console.log("\nDBG46 second-debug-pass rails");
+{
+  const fs = require("node:fs");
+  const read = (rel: string) => fs.readFileSync(new URL(rel, import.meta.url), "utf8") as string;
+
+  // 1. Client-IP extraction: forwarded headers are honoured only behind
+  //    GSM_TRUST_PROXY, via the LAST hop (the one our own proxy appended).
+  //    The old first-hop read let X-Forwarded-For: 127.0.0.1 spoof loopback
+  //    and bypass the entire IP allowlist.
+  const ipl = read("../src/lib/ip-allowlist.ts");
+  const gates = read("../src/lib/auth-gates.ts");
+  const sh = read("../public/install.sh");
+  check(
+    "IP extraction trusts only the proxy-appended LAST hop behind GSM_TRUST_PROXY",
+    /TRUST_PROXY_ENV = "GSM_TRUST_PROXY"/.test(ipl) &&
+      /hops\[hops\.length - 1\]/.test(ipl) &&
+      /if \(!trustProxy\) \{/.test(ipl) &&
+      /return xff \|\| real \? "unknown" : null;/.test(ipl) &&
+      !/split\(","\)\[0\]/.test(ipl)
+  );
+  check(
+    "auth routes use the shared trust-aware extractor; direct connections are the documented hatch",
+    /if \(ip === null\) return true;/.test(gates) &&
+      read("../src/app/api/auth/login/route.ts").includes("clientIpForRecord(req.headers)") &&
+      read("../src/app/api/auth/register/route.ts").includes("clientIpForRecord(req.headers)") &&
+      read("../src/app/api/auth/forgot-password/route.ts").includes("clientIpForRecord(req.headers)") &&
+      /GSM_TRUST_PROXY=\$\(\[\[ "\$SETUP_CADDY" == "true" \]\] && echo 1 \|\| echo 0\)/.test(sh)
+  );
+
+  // 2. Server deletion must remove EVERY FK child before the parent — six
+  //    were missed, so any server with history data failed to delete (500).
+  const del = read("../src/app/api/servers/[id]/route.ts");
+  const children = [
+    "scheduledTasks", "serverMetrics", "playerSamples", "serverChanges",
+    "serverCollaborators", "serverEvents", "serverIdleState", "serverUptimeHistory",
+  ];
+  const missing = children.filter((t) => !new RegExp(`tx\\.delete\\(${t}\\)`).test(del));
+  check(
+    `server delete cascades all 8 FK children first (missing: ${missing[0] ?? "none"})`,
+    missing.length === 0 && /tx\.delete\(gameServers\)/.test(del)
+  );
+
+  // 3. The lockout threshold the settings page DISPLAYS must equal the one
+  //    auth-policy ENFORCES before the operator ever saves the form.
+  const policy = read("../src/lib/auth-policy.ts");
+  const panelSettings = read("../src/lib/panel-settings.ts");
+  check(
+    "login throttle: displayed default equals enforced default",
+    /loginThrottleAttempts: 5,/.test(policy) &&
+      /num\("login_throttle_attempts", 5\)/.test(panelSettings)
+  );
+}
+
+// ── DBG47 rails: third deep-dive findings ───────────────────────────────────
+console.log("\nDBG47 third-debug-pass rails");
+{
+  const fs = require("node:fs");
+  const read = (rel: string) => fs.readFileSync(new URL(rel, import.meta.url), "utf8") as string;
+
+  // 1. Webhook delivery must never follow redirects — a public URL could
+  //    otherwise bounce the POST into a private/metadata address that
+  //    validateWebhookUrl rightly refuses at configuration time.
+  const dispatch = read("../src/lib/webhook-dispatch.ts");
+  check(
+    "webhook POSTs never follow redirects (SSRF-via-redirect closed)",
+    /fetch\(valid\.url, \{[^}]*redirect: "error"/.test(dispatch)
+  );
+
+  // 2. Custom roles must be assignable: /api/roles without a way to set
+  //    users.roleId was a dead feature (Stage 47 fixed the write path).
+  const usersRoute = read("../src/app/api/users/[id]/route.ts");
+  check(
+    "roleId is assignable with users.roles gate, existence check, and null-clear",
+    /if \(body\.roleId !== undefined\)/.test(usersRoute) &&
+      /"users\.roles", auth\.keyScope/.test(usersRoute) &&
+      /updateData\.roleId = null;/.test(usersRoute) &&
+      /from\(roles\)\.where\(eq\(roles\.id, rid\)\)/.test(usersRoute) &&
+      /"Unknown role"/.test(usersRoute)
+  );
+
+  // 3. Permission resolution order stays: legacy admin wins, then roleId,
+  //    then legacy fallback; suspended users get nothing.
+  const perms = read("../src/lib/permissions.ts");
+  check(
+    "permission resolution keeps suspended-empty / admin-all / roleId ordering",
+    /if \(user\.status !== "active"\) return \{\};/.test(perms) &&
+      /if \(user\.role === "admin"\)/.test(perms) &&
+      /if \(user\.roleId\) \{/.test(perms) &&
+      /return getRolePermissions\(user\.roleId\);/.test(perms)
+  );
+}
+
+// ── DBG48 rails: multi-node deep-dive fixes ─────────────────────────────────
+console.log("\nDBG48 multi-node rails");
+{
+  const fs = require("node:fs");
+  const read = (rel: string) => fs.readFileSync(new URL(rel, import.meta.url), "utf8") as string;
+  const agent = read("../agent/gsm-agent.mjs");
+  const install = read("../src/app/api/servers/[id]/install/route.ts");
+  const filesRoute = read("../src/app/api/servers/[id]/files/route.ts");
+
+  check(
+    "agent exposes /rpc/install, contained and bounded",
+    /if \(url === "\/rpc\/install"\)/.test(agent) &&
+      /containedPath\(root, installPath\)/.test(agent) &&
+      /script\.length > 2_000_000/.test(agent) &&
+      /Math\.min\(Math\.max\(Number\(body\.timeoutMs\)/.test(agent)
+  );
+  check(
+    "agent fs ops anchor to installPath inside the node root",
+    /const \{ op, path: rel, installPath \} = body;/.test(agent) &&
+      /if \(!anchored\) return send\(res, 400, \{ error: "installPath outside the allowed root" \}\);/.test(agent) &&
+      /await fsList\(base, rel\)/.test(agent)
+  );
+  check(
+    "agent stop kills the process GROUP like the panel does locally",
+    /function killTarget\(pid, signal\)/.test(agent) &&
+      /process\.kill\(-pid, signal\)/.test(agent) &&
+      /killTarget\(pid, "SIGTERM"\)/.test(agent) &&
+      /killTarget\(pid, "SIGKILL"\)/.test(agent)
+  );
+  check(
+    "remote installs run through the agent and materialize the server files",
+    /\/rpc\/install/.test(install) &&
+      /buildServerFileSet\(\{/.test(install) &&
+      /remoteFs\(nodeEndpoint, "write", \{ installPath: effectiveInstallPath, path: f\.name, content: f\.body \}\)/.test(install) &&
+      /remoteFs\(nodeEndpoint, "stat", \{ installPath: effectiveInstallPath, path: configPath \}\)/.test(install)
+  );
+  check(
+    "remote file operations are anchored to the server's installPath",
+    (filesRoute.match(/installPath: server\.installPath, path: reqPath/g) || []).length >= 2
   );
 }
 

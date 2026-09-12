@@ -16,7 +16,7 @@ export const UPDATE_HISTORY_MAX = 25;
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "servers.view"))) {
+  if (!(await hasPermission(auth.userId, "servers.view", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

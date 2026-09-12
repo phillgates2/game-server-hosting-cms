@@ -128,7 +128,7 @@ async function getIpv6Status() {
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "monitor.view"))) {
+  if (!(await hasPermission(auth.userId, "monitor.view", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

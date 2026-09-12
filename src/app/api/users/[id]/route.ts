@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { users, gameServers, forumPosts, apiKeys } from "@/db/schema";
+import { users, gameServers, forumPosts, apiKeys, roles } from "@/db/schema";
 import { getCurrentUser, hashPassword } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq, sql } from "drizzle-orm";
@@ -21,7 +21,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  const allowed = auth && ((await hasPermission(auth.userId, "users.view")) || (await hasPermission(auth.userId, "users.view.detail")));
+  const allowed = auth && ((await hasPermission(auth.userId, "users.view", auth.keyScope)) || (await hasPermission(auth.userId, "users.view.detail", auth.keyScope)));
   if (!allowed) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
@@ -77,7 +77,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "users.edit"))) {
+  if (!auth || !(await hasPermission(auth.userId, "users.edit", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -87,7 +87,7 @@ export async function PATCH(
   try {
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
     if (body.role !== undefined) {
-      if (!(await hasPermission(auth.userId, "users.roles"))) {
+      if (!(await hasPermission(auth.userId, "users.roles", auth.keyScope))) {
         return NextResponse.json({ error: "users.roles permission required" }, { status: 403 });
       }
       // Refusing here is what keeps the last admin from locking the panel:
@@ -101,8 +101,27 @@ export async function PATCH(
       }
       updateData.role = roleCheck.value;
     }
+    // Stage 47: roleId was readable but nothing ever wrote it — custom roles
+    // created in /api/roles could not be assigned to anyone (dead feature).
+    // null clears back to the legacy role fallback.
+    if (body.roleId !== undefined) {
+      if (!(await hasPermission(auth.userId, "users.roles", auth.keyScope))) {
+        return NextResponse.json({ error: "users.roles permission required" }, { status: 403 });
+      }
+      if (body.roleId === null) {
+        updateData.roleId = null;
+      } else {
+        const rid = Number(body.roleId);
+        if (!Number.isInteger(rid) || rid <= 0) {
+          return NextResponse.json({ error: "roleId must be a positive integer or null" }, { status: 400 });
+        }
+        const [roleRow] = await db.select({ id: roles.id }).from(roles).where(eq(roles.id, rid)).limit(1);
+        if (!roleRow) return NextResponse.json({ error: "Unknown role" }, { status: 400 });
+        updateData.roleId = rid;
+      }
+    }
     if (body.status !== undefined) {
-      if (!(await hasPermission(auth.userId, "users.suspend"))) {
+      if (!(await hasPermission(auth.userId, "users.suspend", auth.keyScope))) {
         return NextResponse.json({ error: "users.suspend permission required" }, { status: 403 });
       }
       const statusCheck = normalizeStatus(body.status);
@@ -110,7 +129,7 @@ export async function PATCH(
       updateData.status = statusCheck.value;
     }
     if (body.maxServers !== undefined) {
-      if (!(await hasPermission(auth.userId, "users.limits"))) {
+      if (!(await hasPermission(auth.userId, "users.limits", auth.keyScope))) {
         return NextResponse.json({ error: "users.limits permission required" }, { status: 403 });
       }
       const limitCheck = normalizeMaxServers(body.maxServers);
@@ -138,7 +157,7 @@ export async function PATCH(
       updateData.website = website.value;
     }
     if (body.password !== undefined && String(body.password ?? "") !== "") {
-      if (!((await hasPermission(auth.userId, "users.reset_password")) || (await hasPermission(auth.userId, "users.edit.security")))) {
+      if (!((await hasPermission(auth.userId, "users.reset_password", auth.keyScope)) || (await hasPermission(auth.userId, "users.edit.security", auth.keyScope)))) {
         return NextResponse.json({ error: "users.reset_password permission required" }, { status: 403 });
       }
       const pwCheck = checkPassword(body.password);
@@ -170,7 +189,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "users.delete"))) {
+  if (!auth || !(await hasPermission(auth.userId, "users.delete", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

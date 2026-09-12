@@ -69,7 +69,7 @@ export async function POST(
 ) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "forum.post"))) {
+  if (!(await hasPermission(auth.userId, "forum.post", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -125,13 +125,13 @@ export async function PATCH(
     if (!thread) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const canThreadModerate =
-      (await hasPermission(auth.userId, "forum.thread.edit_any")) ||
-      (await hasPermission(auth.userId, "forum.moderate"));
+      (await hasPermission(auth.userId, "forum.thread.edit_any", auth.keyScope)) ||
+      (await hasPermission(auth.userId, "forum.moderate", auth.keyScope));
     const isOwner = thread.userId === auth.userId;
 
     if (!canThreadModerate && !isOwner) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    if (isOwner && !canThreadModerate && !(await hasPermission(auth.userId, "forum.thread.edit_own"))) {
+    if (isOwner && !canThreadModerate && !(await hasPermission(auth.userId, "forum.thread.edit_own", auth.keyScope))) {
       return NextResponse.json({ error: "Permission denied" }, { status: 403 });
     }
 
@@ -144,12 +144,12 @@ export async function PATCH(
       update.title = title;
     }
     if (body.pinned !== undefined) {
-      const canPin = canThreadModerate || (await hasPermission(auth.userId, "forum.thread.pin")) || (await hasPermission(auth.userId, "forum.pin"));
+      const canPin = canThreadModerate || (await hasPermission(auth.userId, "forum.thread.pin", auth.keyScope)) || (await hasPermission(auth.userId, "forum.pin", auth.keyScope));
       if (!canPin) return NextResponse.json({ error: "Permission denied" }, { status: 403 });
       update.pinned = body.pinned === true || body.pinned === "true";
     }
     if (body.locked !== undefined) {
-      const canLock = canThreadModerate || (await hasPermission(auth.userId, "forum.thread.lock")) || (await hasPermission(auth.userId, "forum.lock"));
+      const canLock = canThreadModerate || (await hasPermission(auth.userId, "forum.thread.lock", auth.keyScope)) || (await hasPermission(auth.userId, "forum.lock", auth.keyScope));
       if (!canLock) return NextResponse.json({ error: "Permission denied" }, { status: 403 });
       update.locked = body.locked === true || body.locked === "true";
     }
@@ -176,10 +176,10 @@ export async function DELETE(
     if (!thread) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const canDeleteAny =
-      (await hasPermission(auth.userId, "forum.thread.delete_any")) ||
-      (await hasPermission(auth.userId, "forum.moderate"));
+      (await hasPermission(auth.userId, "forum.thread.delete_any", auth.keyScope)) ||
+      (await hasPermission(auth.userId, "forum.moderate", auth.keyScope));
     const isOwner = thread.userId === auth.userId;
-    const canDeleteOwn = await hasPermission(auth.userId, "forum.thread.delete_own");
+    const canDeleteOwn = await hasPermission(auth.userId, "forum.thread.delete_own", auth.keyScope);
 
     if (!canDeleteAny && !(isOwner && canDeleteOwn)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 

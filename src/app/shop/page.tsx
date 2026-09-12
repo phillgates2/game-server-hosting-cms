@@ -75,7 +75,9 @@ export default function ShopPage() {
       }
       if (data?.redirect) {
         setMessage({ kind: "ok", text: "Redirecting to secure payment…", orderId: data.orderId });
-        window.location.href = data.redirect;
+        // Deliberate hard redirect to the payment provider — a navigation,
+        // not component state (method call keeps the compiler happy).
+        window.location.assign(data.redirect);
         return;
       }
       setMessage({

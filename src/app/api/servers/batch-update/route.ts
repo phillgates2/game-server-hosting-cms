@@ -45,8 +45,8 @@ export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (
-    !(await hasPermission(auth.userId, "servers.install")) &&
-    !(await hasPermission(auth.userId, "games.install"))
+    !(await hasPermission(auth.userId, "servers.install", auth.keyScope)) &&
+    !(await hasPermission(auth.userId, "games.install", auth.keyScope))
   ) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }

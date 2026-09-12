@@ -19,7 +19,7 @@ export async function GET(
 ) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!((await hasPermission(auth.userId, "servers.view.logs")) || (await hasPermission(auth.userId, "servers.edit")))) {
+  if (!((await hasPermission(auth.userId, "servers.view.logs", auth.keyScope)) || (await hasPermission(auth.userId, "servers.edit", auth.keyScope)))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

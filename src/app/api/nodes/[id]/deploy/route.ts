@@ -18,7 +18,7 @@ const SSH_TIMEOUT_MS = 120_000;
 
 function runCommand(cmd: string, args: string[], opts: { stdin?: string; env?: Record<string, string> }): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolveP, rejectP) => {
-    const child = spawn(cmd, args, { env: { ...process.env, ...opts.env } });
+    const child = spawn(/*turbopackIgnore: true*/ cmd, args, { env: { ...process.env, ...opts.env } });
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {
@@ -51,7 +51,7 @@ export async function POST(
 ) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "nodes.edit"))) {
+  if (!(await hasPermission(auth.userId, "nodes.edit", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

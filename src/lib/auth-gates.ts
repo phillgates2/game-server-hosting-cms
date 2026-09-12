@@ -32,6 +32,10 @@ export async function ipGate(headers: Headers): Promise<boolean> {
     const rules = parseAllowList(row?.value ?? null);
     if (rules.length === 0) return true;
     const ip = clientIpFromHeaders(headers);
+    // null = direct connection to the panel port (no forwarded headers):
+    // the console safety hatch. install.sh firewalls the port, and behind
+    // Caddy every external request carries XFF, so direct == local console.
+    if (ip === null) return true;
     return ipAllowed(ip, rules);
   } catch {
     return true;

@@ -19,7 +19,7 @@ async function requireShopAdmin(req: NextRequest) {
 // GET — all coupons
 export async function GET(req: NextRequest) {
   const { auth, res } = await requireShopAdmin(req);
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     await ensureShopTables();
     const rows = await db
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
 // POST — create { code, kind, value, maxUses?, expiresAt?, productId? }
 export async function POST(req: NextRequest) {
   const { auth, res } = await requireShopAdmin(req);
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let body: unknown;
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 }); }
@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
 // PATCH — { id, active? } toggle (and nothing else: coupons are immutable otherwise)
 export async function PATCH(req: NextRequest) {
   const { auth, res } = await requireShopAdmin(req);
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let body: unknown;
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 }); }

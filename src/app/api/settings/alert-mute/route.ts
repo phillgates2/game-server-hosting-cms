@@ -39,7 +39,7 @@ async function readMute() {
 // GET — current mute window (admin only)
 export async function GET(req: NextRequest) {
   const { auth, res } = await requireAdmin(req);
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     return NextResponse.json(await readMute());
   } catch (e: unknown) {
@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
 // POST — { hours?: number } to mute, { clear: true } to unmute
 export async function POST(req: NextRequest) {
   const { auth, res } = await requireAdmin(req);
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let body: unknown;
   try {

@@ -57,7 +57,7 @@ function runCmd(cmd: string, args: string[], cwd: string, timeoutMs: number): Pr
     let stderr = "";
     let done = false;
 
-    const child = spawn(cmd, args, { cwd });
+    const child = spawn(/*turbopackIgnore: true*/ cmd, args, { cwd });
     const timer = setTimeout(() => {
       if (!done) {
         done = true;

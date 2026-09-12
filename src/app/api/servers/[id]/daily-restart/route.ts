@@ -57,8 +57,8 @@ export async function GET(
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (
-    !(await hasPermission(auth.userId, "scheduler.view")) &&
-    !(await hasPermission(auth.userId, "servers.edit"))
+    !(await hasPermission(auth.userId, "scheduler.view", auth.keyScope)) &&
+    !(await hasPermission(auth.userId, "servers.edit", auth.keyScope))
   ) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
@@ -98,8 +98,8 @@ export async function POST(
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (
-    !(await hasPermission(auth.userId, "scheduler.create")) &&
-    !(await hasPermission(auth.userId, "servers.edit"))
+    !(await hasPermission(auth.userId, "scheduler.create", auth.keyScope)) &&
+    !(await hasPermission(auth.userId, "servers.edit", auth.keyScope))
   ) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }

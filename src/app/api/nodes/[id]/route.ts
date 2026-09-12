@@ -14,7 +14,7 @@ export async function GET(
 ) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "nodes.view"))) {
+  if (!(await hasPermission(auth.userId, "nodes.view", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -53,7 +53,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "nodes.edit"))) {
+  if (!auth || !(await hasPermission(auth.userId, "nodes.edit", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -95,7 +95,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "nodes.delete"))) {
+  if (!auth || !(await hasPermission(auth.userId, "nodes.delete", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

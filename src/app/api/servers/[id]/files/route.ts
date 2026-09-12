@@ -41,7 +41,7 @@ export async function GET(
 ) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "servers.files"))) {
+  if (!(await hasPermission(auth.userId, "servers.files", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -49,7 +49,7 @@ export async function GET(
   const server = await getServer(Number(id));
   if (!server) return NextResponse.json({ error: "Server not found" }, { status: 404 });
 
-  if (server.userId !== auth.userId && !(await hasPermission(auth.userId, "servers.edit"))) {
+  if (server.userId !== auth.userId && !(await hasPermission(auth.userId, "servers.edit", auth.keyScope))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -63,7 +63,7 @@ export async function GET(
     const { remoteFs } = await import("@/lib/node-client");
     try {
       if (action === "download") {
-        const r = await remoteFs<{ base64?: string; fileName?: string; error?: string }>(remoteNode, "readbin", { path: reqPath });
+        const r = await remoteFs<{ base64?: string; fileName?: string; error?: string }>(remoteNode, "readbin", { installPath: server.installPath, path: reqPath });
         if (typeof r.base64 !== "string") return NextResponse.json({ error: r.error || "Download failed" }, { status: 502 });
         const content = Buffer.from(r.base64, "base64");
         return new NextResponse(new Uint8Array(content), {
@@ -75,7 +75,7 @@ export async function GET(
         });
       }
       const op = action === "read" ? "read" : "list";
-      const r = await remoteFs(remoteNode, op, { path: reqPath });
+      const r = await remoteFs(remoteNode, op, { installPath: server.installPath, path: reqPath });
       return NextResponse.json(r);
     } catch (e: unknown) {
       return NextResponse.json({ error: `Node agent: ${e instanceof Error ? e.message : String(e)}` }, { status: 502 });
@@ -116,7 +116,7 @@ export async function POST(
 ) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "servers.files"))) {
+  if (!(await hasPermission(auth.userId, "servers.files", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -124,7 +124,7 @@ export async function POST(
   const server = await getServer(Number(id));
   if (!server) return NextResponse.json({ error: "Server not found" }, { status: 404 });
 
-  if (server.userId !== auth.userId && !(await hasPermission(auth.userId, "servers.edit"))) {
+  if (server.userId !== auth.userId && !(await hasPermission(auth.userId, "servers.edit", auth.keyScope))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -140,22 +140,22 @@ export async function POST(
       const { remoteFs } = await import("@/lib/node-client");
       try {
         if (action === "save" || action === "createFile") {
-          await remoteFs(remoteNode, "write", { path: reqPath, content: content || "" });
+          await remoteFs(remoteNode, "write", { installPath: server.installPath, path: reqPath, content: content || "" });
           return NextResponse.json({ ok: true });
         }
         if (action === "createDir") {
-          await remoteFs(remoteNode, "mkdir", { path: reqPath });
+          await remoteFs(remoteNode, "mkdir", { installPath: server.installPath, path: reqPath });
           return NextResponse.json({ ok: true });
         }
         if (action === "delete") {
-          await remoteFs(remoteNode, "delete", { path: reqPath });
+          await remoteFs(remoteNode, "delete", { installPath: server.installPath, path: reqPath });
           return NextResponse.json({ ok: true });
         }
         if (action === "rename") {
           const sourcePath = String(reqPath || "");
           const nextPath = String(newPath || "");
           const fallback = sourcePath.split("/").slice(0, -1).concat(String(newName || "")).join("/");
-          await remoteFs(remoteNode, "rename", { path: sourcePath, to: nextPath || fallback });
+          await remoteFs(remoteNode, "rename", { installPath: server.installPath, path: sourcePath, to: nextPath || fallback });
           return NextResponse.json({ ok: true });
         }
         return NextResponse.json(

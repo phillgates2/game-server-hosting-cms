@@ -43,7 +43,7 @@ function parseStoredEntries(raw: unknown): BlueprintEntryInput[] | null {
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "servers.create"))) {
+  if (!(await hasPermission(auth.userId, "servers.create", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

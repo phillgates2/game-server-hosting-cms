@@ -48,7 +48,7 @@ export async function PATCH(
   { params }: { params: Promise<{ slug: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "cms.edit"))) {
+  if (!auth || !(await hasPermission(auth.userId, "cms.edit", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -69,13 +69,13 @@ export async function PATCH(
     if (body.excerpt !== undefined) updateData.excerpt = body.excerpt;
     if (body.coverImage !== undefined) updateData.coverImage = body.coverImage;
     if (body.published !== undefined) {
-      if (!(await hasPermission(auth.userId, "cms.publish"))) {
+      if (!(await hasPermission(auth.userId, "cms.publish", auth.keyScope))) {
         return NextResponse.json({ error: "cms.publish permission required" }, { status: 403 });
       }
       updateData.published = body.published;
     }
     if (body.pinned !== undefined) {
-      const canPin = (await hasPermission(auth.userId, "cms.pin")) || (await hasPermission(auth.userId, "cms.publish"));
+      const canPin = (await hasPermission(auth.userId, "cms.pin", auth.keyScope)) || (await hasPermission(auth.userId, "cms.publish", auth.keyScope));
       if (!canPin) return NextResponse.json({ error: "cms.pin permission required" }, { status: 403 });
       updateData.pinned = body.pinned;
     }
@@ -83,7 +83,7 @@ export async function PATCH(
     if (body.type !== undefined) updateData.type = body.type;
 
     if (existing.published && (body.title !== undefined || body.content !== undefined || body.excerpt !== undefined || body.coverImage !== undefined || body.tags !== undefined || body.type !== undefined)) {
-      const canEditPublished = (await hasPermission(auth.userId, "cms.edit.published")) || (await hasPermission(auth.userId, "cms.publish"));
+      const canEditPublished = (await hasPermission(auth.userId, "cms.edit.published", auth.keyScope)) || (await hasPermission(auth.userId, "cms.publish", auth.keyScope));
       if (!canEditPublished) {
         return NextResponse.json({ error: "cms.edit.published permission required" }, { status: 403 });
       }
@@ -107,7 +107,7 @@ export async function DELETE(
   { params }: { params: Promise<{ slug: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "cms.delete"))) {
+  if (!auth || !(await hasPermission(auth.userId, "cms.delete", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

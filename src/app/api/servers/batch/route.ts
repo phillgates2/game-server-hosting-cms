@@ -63,9 +63,9 @@ export async function POST(req: NextRequest) {
   // so a caller without the right cannot probe which ids exist.
   const canAct =
     action === "restart"
-      ? (await hasPermission(auth.userId, "servers.restart")) ||
-        (await hasPermission(auth.userId, "servers.start_stop"))
-      : await hasPermission(auth.userId, "servers.start_stop");
+      ? (await hasPermission(auth.userId, "servers.restart", auth.keyScope)) ||
+        (await hasPermission(auth.userId, "servers.start_stop", auth.keyScope))
+      : await hasPermission(auth.userId, "servers.start_stop", auth.keyScope);
   if (!canAct) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }

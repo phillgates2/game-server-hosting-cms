@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const { authorizeMasterOrSession } = await import("@/lib/master-key");
   const { auth, res: gateRes } = await authorizeMasterOrSession(req, "shop.view");
-  if (!auth) return gateRes;
+  if (!auth) return gateRes ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
     await ensureShopTables();

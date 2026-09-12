@@ -8,7 +8,7 @@ import { apiError } from "@/lib/api-error";
 // GET /api/settings/export — Export panel config as JSON
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  const allowed = auth && ((await hasPermission(auth.userId, "panel.settings.export")) || (await hasPermission(auth.userId, "panel.settings")) || (await hasPermission(auth.userId, "database.export")));
+  const allowed = auth && ((await hasPermission(auth.userId, "panel.settings.export", auth.keyScope)) || (await hasPermission(auth.userId, "panel.settings", auth.keyScope)) || (await hasPermission(auth.userId, "database.export", auth.keyScope)));
   if (!allowed) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }

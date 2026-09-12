@@ -29,7 +29,7 @@ async function requireAdmin(req: NextRequest) {
 // GET — current config (secret masked, never raw)
 export async function GET(req: NextRequest) {
   const { auth, res } = await requireAdmin(req);
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const { url, secret } = await getWebhookConfig();
     return NextResponse.json({
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
 // test:true delivers a test event to the provided url WITHOUT saving.
 export async function POST(req: NextRequest) {
   const { auth, res } = await requireAdmin(req);
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let body: unknown;
   try {

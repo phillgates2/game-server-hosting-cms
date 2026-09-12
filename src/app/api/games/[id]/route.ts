@@ -12,7 +12,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !((await hasPermission(auth.userId, "games.view")) || (await hasPermission(auth.userId, "games.templates")))) {
+  if (!auth || !((await hasPermission(auth.userId, "games.view", auth.keyScope)) || (await hasPermission(auth.userId, "games.templates", auth.keyScope)))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -32,7 +32,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !((await hasPermission(auth.userId, "games.edit")) || (await hasPermission(auth.userId, "games.install")))) {
+  if (!auth || !((await hasPermission(auth.userId, "games.edit", auth.keyScope)) || (await hasPermission(auth.userId, "games.install", auth.keyScope)))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -40,7 +40,7 @@ export async function PATCH(
   const body = await req.json();
 
   try {
-    const canEditScripts = (await hasPermission(auth.userId, "games.edit.scripts")) || (await hasPermission(auth.userId, "games.install"));
+    const canEditScripts = (await hasPermission(auth.userId, "games.edit.scripts", auth.keyScope)) || (await hasPermission(auth.userId, "games.install", auth.keyScope));
     const update: Record<string, unknown> = {};
     if (body.name !== undefined) {
       const name = String(body.name ?? "").trim();

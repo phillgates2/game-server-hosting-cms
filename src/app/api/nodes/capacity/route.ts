@@ -26,7 +26,7 @@ const MAX_FIT_SAMPLES = 336;
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "nodes.view.metrics"))) {
+  if (!(await hasPermission(auth.userId, "nodes.view.metrics", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

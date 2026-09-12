@@ -18,7 +18,7 @@ export async function POST(
 ) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "servers.console"))) {
+  if (!(await hasPermission(auth.userId, "servers.console", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied: servers.console required" }, { status: 403 });
   }
 
@@ -48,7 +48,7 @@ export async function POST(
     if (!server) return NextResponse.json({ error: "Server not found" }, { status: 404 });
 
     // Check ownership or admin
-    if (server.userId !== auth.userId && !(await hasPermission(auth.userId, "servers.edit"))) {
+    if (server.userId !== auth.userId && !(await hasPermission(auth.userId, "servers.edit", auth.keyScope))) {
       return NextResponse.json({ error: "Not your server" }, { status: 403 });
     }
 
@@ -108,7 +108,7 @@ export async function GET(
 ) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "servers.console"))) {
+  if (!(await hasPermission(auth.userId, "servers.console", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied: servers.console required" }, { status: 403 });
   }
 

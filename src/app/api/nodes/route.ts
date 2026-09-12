@@ -13,7 +13,7 @@ const log = createLogger("nodes");
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "nodes.view"))) {
+  if (!(await hasPermission(auth.userId, "nodes.view", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
     // Heartbeat history carries the dedicated nodes.view.metrics permission,
     // so the list only embeds it for callers who hold that permission —
     // plain nodes.view (moderators) must not leak CPU/RAM/disk readings.
-    const canSeeMetrics = await hasPermission(auth.userId, "nodes.view.metrics");
+    const canSeeMetrics = await hasPermission(auth.userId, "nodes.view.metrics", auth.keyScope);
     const latestMetrics: Record<number, {
       cpuPercent: number | null;
       ramUsedMb: number | null;
@@ -122,7 +122,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "nodes.create"))) {
+  if (!auth || !(await hasPermission(auth.userId, "nodes.create", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

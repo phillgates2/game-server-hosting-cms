@@ -146,7 +146,7 @@ async function dirStats(dirPath: string): Promise<{ count: number; sizeMb: numbe
 
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "games.install"))) {
+  if (!auth || !(await hasPermission(auth.userId, "games.install", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

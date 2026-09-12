@@ -51,7 +51,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "panel.settings"))) {
+  if (!(await hasPermission(auth.userId, "panel.settings", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

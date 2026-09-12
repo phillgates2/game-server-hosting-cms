@@ -19,7 +19,7 @@ async function requireShopAdmin(req: NextRequest) {
 // GET — all products (incl. inactive) for the admin list
 export async function GET(req: NextRequest) {
   const { auth, res } = await requireShopAdmin(req);
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     await ensureShopTables();
     const rows = await db.select().from(shopProducts).orderBy(asc(shopProducts.sortOrder), asc(shopProducts.id));
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
 // POST — create a product
 export async function POST(req: NextRequest) {
   const { auth, res } = await requireShopAdmin(req);
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let body: unknown;
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 }); }
@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
 // PATCH — { id, active?, name?, priceCents?, maxActivations?, durationDays?, description? }
 export async function PATCH(req: NextRequest) {
   const { auth, res } = await requireShopAdmin(req);
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let body: unknown;
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 }); }

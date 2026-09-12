@@ -12,7 +12,7 @@ const log = createLogger("users");
 // GET /api/users — Admin: list all users
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "users.view"))) {
+  if (!auth || !(await hasPermission(auth.userId, "users.view", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

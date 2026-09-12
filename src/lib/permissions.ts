@@ -370,12 +370,11 @@ export async function getUserPermissions(userId: number): Promise<Record<string,
   }
 }
 
-export async function hasPermission(userId: number, permission: string): Promise<boolean> {
-  // An API key may narrow what its owner can do. A key with no scope is
-  // unrestricted, so keys issued before scopes were enforced keep working.
-  const { allowedByKeyScope } = await import("./request-context");
-  if (!allowedByKeyScope(permission)) return false;
+export type { KeyScope } from "./key-scope";
+import { scopeAllows } from "./key-scope";
 
+export async function hasPermission(userId: number, permission: string, keyScope: import("./key-scope").KeyScope): Promise<boolean> {
+  if (!scopeAllows(keyScope, permission)) return false;
   const perms = await getUserPermissions(userId);
   return perms[permission] === true;
 }

@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Check forum.post permission
-  if (!(await hasPermission(authUser.userId, "forum.post"))) {
+  if (!(await hasPermission(authUser.userId, "forum.post", authUser.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -134,9 +134,9 @@ export async function DELETE(req: NextRequest) {
 
     // Check if user can delete: own message with forum.delete_own, or any message with forum.delete_any/moderate
     const isOwner = msg.userId === authUser.userId;
-    const canDeleteAny = await hasPermission(authUser.userId, "forum.delete_any") || 
-                         await hasPermission(authUser.userId, "forum.moderate");
-    const canDeleteOwn = await hasPermission(authUser.userId, "forum.delete_own");
+    const canDeleteAny = await hasPermission(authUser.userId, "forum.delete_any", authUser.keyScope) || 
+                         await hasPermission(authUser.userId, "forum.moderate", authUser.keyScope);
+    const canDeleteOwn = await hasPermission(authUser.userId, "forum.delete_own", authUser.keyScope);
 
     if (!canDeleteAny && !(isOwner && canDeleteOwn)) {
       return NextResponse.json({ error: "Permission denied" }, { status: 403 });

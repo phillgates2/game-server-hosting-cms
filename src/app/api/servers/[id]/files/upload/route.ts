@@ -16,7 +16,7 @@ export async function POST(
 ) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "servers.files"))) {
+  if (!(await hasPermission(auth.userId, "servers.files", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -31,7 +31,7 @@ export async function POST(
 
     if (!server) return NextResponse.json({ error: "Server not found" }, { status: 404 });
 
-    if (server.userId !== auth.userId && !(await hasPermission(auth.userId, "servers.edit"))) {
+    if (server.userId !== auth.userId && !(await hasPermission(auth.userId, "servers.edit", auth.keyScope))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

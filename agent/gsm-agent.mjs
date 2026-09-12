@@ -18,6 +18,9 @@
  *   /rpc/ping      → { ok, hostname, version }
  *   /rpc/process   → { action: status|start|stop, installPath, pid }
  *   /rpc/log       → { installPath, tail }
+ *   /rpc/install   → { installPath, script, timeoutMs? }  (Stage 48: remote
+ *                     game installs — the panel ships the rendered install
+ *                     script, the agent runs it contained in SERVERS_ROOT)
  *   /rpc/disk      → { path }
  *
  * Threat model: the network between panel and agent is not trusted. The key
@@ -116,14 +119,26 @@ function startServer(installPath) {
   return { pid: child.pid ?? null, alive: child.pid ? true : false };
 }
 
+// Kill the whole process GROUP, then fall back to the single pid — exactly
+// like the panel's local killProcess. Game start scripts detach children;
+// killing only the wrapper pid left the game itself running (Stage 48:
+// "stop" reported success while bedrock_server kept running).
+function killTarget(pid, signal) {
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      /* gone already */
+    }
+  }
+}
+
 function stopServer(pid) {
   return new Promise((res) => {
     if (!isAlive(pid)) return res({ ok: true, alreadyStopped: true });
-    try {
-      process.kill(pid, "SIGTERM");
-    } catch {
-      return res({ ok: true, alreadyStopped: true });
-    }
+    killTarget(pid, "SIGTERM");
     const deadline = Date.now() + STOP_GRACE_MS;
     const timer = setInterval(() => {
       if (!isAlive(pid)) {
@@ -132,11 +147,7 @@ function stopServer(pid) {
       }
       if (Date.now() >= deadline) {
         clearInterval(timer);
-        try {
-          process.kill(pid, "SIGKILL");
-        } catch {
-          /* gone already */
-        }
+        killTarget(pid, "SIGKILL");
         return res({ ok: true, escalated: true });
       }
     }, 250);
@@ -456,6 +467,54 @@ export function createAgentHandler(cfg) {
         }
       }
 
+      if (url === "/rpc/install") {
+        const { installPath, script } = body;
+        const dir = containedPath(root, installPath);
+        if (!dir) return send(res, 400, { error: "installPath outside the allowed root" });
+        if (typeof script !== "string" || script.length === 0 || script.length > 2_000_000) {
+          return send(res, 400, { error: "script required (string, max 2MB)" });
+        }
+        try {
+          await mkdir(dir, { recursive: true });
+          const scriptPath = join(dir, ".gsm-install.sh");
+          await writeFile(scriptPath, script, { mode: 0o700 });
+          const timeoutMs = Math.min(Math.max(Number(body.timeoutMs) || 1_800_000, 5_000), 1_800_000);
+          const result = await new Promise((resolveP) => {
+            let output = "";
+            let done = false;
+            const append = (chunk) => {
+              output += chunk.toString();
+              if (output.length > 200_000) output = output.slice(-200_000);
+            };
+            const child = spawn("bash", [scriptPath], { cwd: dir });
+            const timer = setTimeout(() => {
+              if (done) return;
+              done = true;
+              child.kill("SIGKILL");
+              resolveP({ ok: false, exitCode: -1, output: output.slice(-20_000) + "\n[killed: install timed out]" });
+            }, timeoutMs);
+            child.stdout.on("data", append);
+            child.stderr.on("data", append);
+            child.on("error", (e) => {
+              if (done) return;
+              done = true;
+              clearTimeout(timer);
+              resolveP({ ok: false, exitCode: -1, output: String(e.message || e) });
+            });
+            child.on("close", (code) => {
+              if (done) return;
+              done = true;
+              clearTimeout(timer);
+              rm(scriptPath).catch(() => undefined);
+              resolveP({ ok: code === 0, exitCode: code ?? -1, output: output.slice(-20_000) });
+            });
+          });
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { ok: false, exitCode: -1, output: String((e && e.message) || e) });
+        }
+      }
+
       if (url === "/rpc/disk") {
         const p = containedPath(root, body.path || ".") || root;
         try {
@@ -469,26 +528,35 @@ export function createAgentHandler(cfg) {
       }
 
       if (url === "/rpc/fs") {
-        const { op, path: rel } = body;
+        const { op, path: rel, installPath } = body;
+        // Stage 48: panel file operations are relative to the SERVER dir, not
+        // the node root. When installPath is supplied (and contained), it
+        // becomes the anchor; plain root-relative requests keep working.
+        let base = root;
+        if (typeof installPath === "string" && installPath.length > 0) {
+          const anchored = containedPath(root, installPath);
+          if (!anchored) return send(res, 400, { error: "installPath outside the allowed root" });
+          base = anchored;
+        }
         try {
-          if (op === "stat") return send(res, 200, await fsStat(root, rel));
-          if (op === "list") return send(res, 200, await fsList(root, rel));
-          if (op === "read") return send(res, 200, await fsRead(root, rel));
-          if (op === "readbin") return send(res, 200, await fsReadBin(root, rel));
+          if (op === "stat") return send(res, 200, await fsStat(base, rel));
+          if (op === "list") return send(res, 200, await fsList(base, rel));
+          if (op === "read") return send(res, 200, await fsRead(base, rel));
+          if (op === "readbin") return send(res, 200, await fsReadBin(base, rel));
           if (op === "write") {
-            const r = await fsWrite(root, rel, body.content);
+            const r = await fsWrite(base, rel, body.content);
             return send(res, r.code || 200, r);
           }
           if (op === "mkdir") {
-            const r = await fsMkdir(root, rel);
+            const r = await fsMkdir(base, rel);
             return send(res, r.code || 200, r);
           }
           if (op === "delete") {
-            const r = await fsDelete(root, rel);
+            const r = await fsDelete(base, rel);
             return send(res, r.code || 200, r);
           }
           if (op === "rename") {
-            const r = await fsRename(root, rel, body.to);
+            const r = await fsRename(base, rel, body.to);
             return send(res, r.code || 200, r);
           }
           return send(res, 400, { error: "Unknown fs op" });

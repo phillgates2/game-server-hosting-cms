@@ -10,7 +10,7 @@ import {
 
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "database.query"))) {
+  if (!auth || !(await hasPermission(auth.userId, "database.query", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

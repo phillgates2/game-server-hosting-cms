@@ -53,7 +53,7 @@ function runScript(
     let stderr = "";
     let finished = false;
 
-    const child: ChildProcess = spawn(shellPath, [scriptPath], {
+    const child: ChildProcess = spawn(/*turbopackIgnore: true*/ shellPath, [scriptPath], {
       cwd: options.cwd,
       env: options.env as NodeJS.ProcessEnv,
     });
@@ -107,23 +107,23 @@ async function ensurePortForwardRule(port: number, targetIp: string) {
   const protocols: Array<"tcp" | "udp"> = ["tcp", "udp"];
   for (const protocol of protocols) {
     try {
-      await execFile("iptables", ["-t", "nat", "-C", "PREROUTING", "-p", protocol, "--dport", String(port), "-j", "DNAT", "--to-destination", `${targetIp}:${port}`]);
+      await execFile(/*turbopackIgnore: true*/ "iptables", ["-t", "nat", "-C", "PREROUTING", "-p", protocol, "--dport", String(port), "-j", "DNAT", "--to-destination", `${targetIp}:${port}`]);
       continue;
     } catch {
       // Rule does not exist yet.
     }
 
     try {
-      await execFile("iptables", ["-t", "nat", "-A", "PREROUTING", "-p", protocol, "--dport", String(port), "-j", "DNAT", "--to-destination", `${targetIp}:${port}`]);
-      await execFile("iptables", ["-t", "nat", "-A", "POSTROUTING", "-p", protocol, "-d", targetIp, "--dport", String(port), "-j", "MASQUERADE"]);
-      await execFile("iptables", ["-A", "FORWARD", "-p", protocol, "-d", targetIp, "--dport", String(port), "-m", "state", "--state", "NEW,ESTABLISHED,RELATED", "-j", "ACCEPT"]);
+      await execFile(/*turbopackIgnore: true*/ "iptables", ["-t", "nat", "-A", "PREROUTING", "-p", protocol, "--dport", String(port), "-j", "DNAT", "--to-destination", `${targetIp}:${port}`]);
+      await execFile(/*turbopackIgnore: true*/ "iptables", ["-t", "nat", "-A", "POSTROUTING", "-p", protocol, "-d", targetIp, "--dport", String(port), "-j", "MASQUERADE"]);
+      await execFile(/*turbopackIgnore: true*/ "iptables", ["-A", "FORWARD", "-p", protocol, "-d", targetIp, "--dport", String(port), "-m", "state", "--state", "NEW,ESTABLISHED,RELATED", "-j", "ACCEPT"]);
     } catch {
       // Ignore failures when iptables is unavailable or the host does not permit the change.
     }
   }
 
   try {
-    await execFile("netfilter-persistent", ["save"]);
+    await execFile(/*turbopackIgnore: true*/ "netfilter-persistent", ["save"]);
   } catch {
     // Ignore if persistence tooling is unavailable.
   }
@@ -225,6 +225,40 @@ function normalizeTemplateBooleans(variables: Record<string, unknown>, defs?: Te
   }
 }
 
+interface ServerFileSpec { name: string; body: string; executable?: boolean }
+
+/**
+ * Pure content builder for the panel-generated server files (Stage 48: split
+ * out of materializeServerFiles so remote nodes can receive the SAME bytes
+ * through the agent instead of the panel writing them to its own disk).
+ */
+function buildServerFileSet(options: {
+  installPath: string;
+  gameName: string;
+  startCommand?: string | null;
+  stopCommand?: string | null;
+  variables: Record<string, unknown>;
+}): ServerFileSpec[] {
+  const files: ServerFileSpec[] = [];
+
+  const envBody = Object.entries(options.variables)
+    .map(([k, v]) => `${k}=${JSON.stringify(String(v ?? ""))}`)
+    .join("\n") + "\n";
+  files.push({ name: "gsm-server.env", body: envBody });
+
+  if (options.startCommand) {
+    const startBody = `#!/usr/bin/env bash\nset -e\ncd ${JSON.stringify(options.installPath)}\nexec >> ${JSON.stringify(join(options.installPath, "gsm-server.log"))} 2>&1\necho "\\n=== GSM Server Start — $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="\n${replaceTemplateVariables(options.startCommand, options.variables)}\n`;
+    files.push({ name: "gsm-start.sh", body: startBody, executable: true });
+  }
+
+  if (options.stopCommand) {
+    const stopBody = `#!/usr/bin/env bash\nset -e\ncd ${JSON.stringify(options.installPath)}\n${replaceTemplateVariables(options.stopCommand, options.variables)}\n`;
+    files.push({ name: "gsm-stop.sh", body: stopBody, executable: true });
+  }
+
+  return files;
+}
+
 async function materializeServerFiles(options: {
   installPath: string;
   gameName: string;
@@ -236,30 +270,11 @@ async function materializeServerFiles(options: {
 }) {
   const generated: string[] = [];
 
-  // Environment file
-  const envPath = join(options.installPath, "gsm-server.env");
-  const envBody = Object.entries(options.variables)
-    .map(([k, v]) => `${k}=${JSON.stringify(String(v ?? ""))}`)
-    .join("\n") + "\n";
-  await writeFile(envPath, envBody, "utf8");
-  generated.push("gsm-server.env");
-
-  // Start script
-  if (options.startCommand) {
-    const startPath = join(options.installPath, "gsm-start.sh");
-    const startBody = `#!/usr/bin/env bash\nset -e\ncd ${JSON.stringify(options.installPath)}\nexec >> ${JSON.stringify(join(options.installPath, "gsm-server.log"))} 2>&1\necho "\\n=== GSM Server Start — $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="\n${replaceTemplateVariables(options.startCommand, options.variables)}\n`;
-    await writeFile(startPath, startBody, "utf8");
-    await chmod(startPath, 0o755);
-    generated.push("gsm-start.sh");
-  }
-
-  // Stop script
-  if (options.stopCommand) {
-    const stopPath = join(options.installPath, "gsm-stop.sh");
-    const stopBody = `#!/usr/bin/env bash\nset -e\ncd ${JSON.stringify(options.installPath)}\n${replaceTemplateVariables(options.stopCommand, options.variables)}\n`;
-    await writeFile(stopPath, stopBody, "utf8");
-    await chmod(stopPath, 0o755);
-    generated.push("gsm-stop.sh");
+  for (const f of buildServerFileSet(options)) {
+    const target = join(options.installPath, f.name);
+    await writeFile(target, f.body, "utf8");
+    if (f.executable) await chmod(target, 0o755);
+    generated.push(f.name);
   }
 
   // Config files (create if missing).
@@ -382,7 +397,7 @@ export async function POST(
 ) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "servers.install"))) {
+  if (!(await hasPermission(auth.userId, "servers.install", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -444,32 +459,8 @@ export async function POST(
       .set({ status: "installing", updatedAt: new Date() })
       .where(eq(gameServers.id, server.id));
 
-    // Remote node
-    if (!server.nodeIsLocal) {
-      if (server.nodeApiUrl) {
-        try {
-          const res = await fetch(`${server.nodeApiUrl.replace(/\/$/, "")}/install`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...(server.nodeApiKey ? { "X-API-Key": server.nodeApiKey } : {}),
-            },
-            body: JSON.stringify({ serverId: server.id }),
-          });
-
-          if (!res.ok) {
-            const text = await res.text();
-            await db.update(gameServers).set({ status: "install_failed", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
-            return NextResponse.json({ error: `Remote node install failed: ${text}` }, { status: 502 });
-          }
-
-          return NextResponse.json({ ok: true, message: "Remote node installation started" });
-        } catch (e: unknown) {
-          await db.update(gameServers).set({ status: "install_failed", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
-          return NextResponse.json({ error: `Remote node error: ${e instanceof Error ? e.message : "Unknown"}` }, { status: 502 });
-        }
-      }
-
+    // Remote nodes without an agent URL cannot install anything.
+    if (!server.nodeIsLocal && !server.nodeApiUrl) {
       await db.update(gameServers).set({ status: "install_failed", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
       return NextResponse.json(
         { error: "Remote node installation requires a node agent API URL. Use a local node for direct installs." },
@@ -523,6 +514,89 @@ ${script}
 echo ""
 echo "=== Installation Complete ==="
 `;
+
+    // Remote node: ship the rendered script to the agent, which runs it
+    // contained inside GSM_SERVERS_ROOT. (Stage 48: the old code POSTed to
+    // an /install endpoint the agent never had, so remote installs 404'd.)
+    if (!server.nodeIsLocal) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 30 * 60_000);
+        const res = await fetch(`${server.nodeApiUrl!.replace(/\/$/, "")}/rpc/install`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(server.nodeApiKey ? { "X-API-Key": server.nodeApiKey } : {}),
+          },
+          body: JSON.stringify({ installPath: effectiveInstallPath, script: fullScript }),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+
+        const data = (await res.json().catch(() => null)) as { ok?: boolean; exitCode?: number; output?: string } | null;
+        if (!res.ok || !data?.ok) {
+          await db.update(gameServers).set({ status: "install_failed", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
+          return NextResponse.json({
+            error: `Remote node install failed (exit ${data?.exitCode ?? res.status})`,
+            output: data?.output || "",
+          }, { status: 502 });
+        }
+
+        // Ship the panel-generated files (env/start/stop/configs/readme) to
+        // the remote box too — without them the server can never start.
+        const { remoteFs } = await import("@/lib/node-client");
+        const nodeEndpoint = { apiUrl: server.nodeApiUrl!, apiKey: server.nodeApiKey || "" };
+        const fileSet = buildServerFileSet({
+          installPath: effectiveInstallPath,
+          gameName: server.gameName || "Unknown",
+          startCommand: startCommandSource,
+          stopCommand: stopCommandSource,
+          variables,
+        });
+        const generatedRemote: string[] = [];
+        for (const f of fileSet) {
+          await remoteFs(nodeEndpoint, "write", { installPath: effectiveInstallPath, path: f.name, content: f.body });
+          generatedRemote.push(f.name);
+        }
+        // Config files: create-if-missing, checked one stat at a time.
+        const byFile = resolveConfigFiles(configFilesSource, defaultConfigSource);
+        for (const [rawPath, rawValues] of Object.entries(byFile)) {
+          const configPath = replaceTemplateVariables(rawPath, variables);
+          if (!configPath || configPath.includes("{{") || configPath.startsWith("/")) continue;
+          let present = true;
+          try {
+            await remoteFs(nodeEndpoint, "stat", { installPath: effectiveInstallPath, path: configPath });
+          } catch {
+            present = false;
+          }
+          if (!present) {
+            const values = substituteConfigValues(rawValues, variables) as Record<string, unknown>;
+            const body = renderConfigFile(rawPath, values);
+            await remoteFs(nodeEndpoint, "write", { installPath: effectiveInstallPath, path: configPath, content: body });
+            generatedRemote.push(configPath);
+          }
+        }
+        const readmeBody = [
+          `GameServer Manager generated files for ${server.gameName || "Unknown"}`,
+          "",
+          "Generated files:",
+          ...generatedRemote.map((g) => `- ${g}`),
+          "",
+          "Variables are stored in gsm-server.env",
+        ].join("\n") + "\n";
+        await remoteFs(nodeEndpoint, "write", { installPath: effectiveInstallPath, path: "GSM-README.txt", content: readmeBody });
+
+        await db.update(gameServers).set({ status: "stopped", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
+        return NextResponse.json({
+          ok: true,
+          message: `${server.gameName || "Game"} files installed on ${server.nodeName || "remote node"} via agent`,
+          output: data.output || "",
+        });
+      } catch (e: unknown) {
+        await db.update(gameServers).set({ status: "install_failed", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
+        return NextResponse.json({ error: `Remote node error: ${e instanceof Error ? e.message : "Unknown"}` }, { status: 502 });
+      }
+    }
 
     // Find bash on this system (game scripts use bash syntax)
     const shellPath = await findBash();

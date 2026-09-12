@@ -20,7 +20,7 @@ function runCmd(cmd: string, args: string[], cwd: string, timeoutMs: number): Pr
     let stdout = "";
     let stderr = "";
     let done = false;
-    const child = spawn(cmd, args, { cwd });
+    const child = spawn(/*turbopackIgnore: true*/ cmd, args, { cwd });
     const timer = setTimeout(() => {
       if (!done) {
         done = true;
@@ -48,7 +48,7 @@ function runCmd(cmd: string, args: string[], cwd: string, timeoutMs: number): Pr
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "servers.restore"))) {
+  if (!(await hasPermission(auth.userId, "servers.restore", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

@@ -12,7 +12,7 @@ import { TASK_TYPES, MAX_COMMAND_LENGTH } from "@/lib/scheduler";
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "scheduler.view")) && !(await hasPermission(auth.userId, "servers.edit"))) {
+  if (!(await hasPermission(auth.userId, "scheduler.view", auth.keyScope)) && !(await hasPermission(auth.userId, "servers.edit", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
 // POST /api/scheduler — Create a scheduled task
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || (!(await hasPermission(auth.userId, "scheduler.create")) && !(await hasPermission(auth.userId, "servers.edit")))) {
+  if (!auth || (!(await hasPermission(auth.userId, "scheduler.create", auth.keyScope)) && !(await hasPermission(auth.userId, "servers.edit", auth.keyScope)))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

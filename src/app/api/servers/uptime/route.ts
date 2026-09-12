@@ -19,7 +19,7 @@ const MAX_SERVERS_REPORTED = 100;
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "servers.view"))) {
+  if (!(await hasPermission(auth.userId, "servers.view", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

@@ -9,7 +9,7 @@ export async function GET(
   { params }: { params: Promise<{ slug: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !((await hasPermission(auth.userId, "games.templates")) || (await hasPermission(auth.userId, "games.view")))) {
+  if (!auth || !((await hasPermission(auth.userId, "games.templates", auth.keyScope)) || (await hasPermission(auth.userId, "games.view", auth.keyScope)))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

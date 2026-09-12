@@ -190,7 +190,7 @@ export async function GET(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  const canCreate = auth && ((await hasPermission(auth.userId, "ladder.create")) || (await hasPermission(auth.userId, "ladder.create.entry")));
+  const canCreate = auth && ((await hasPermission(auth.userId, "ladder.create", auth.keyScope)) || (await hasPermission(auth.userId, "ladder.create.entry", auth.keyScope)));
   if (!canCreate) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }

@@ -16,10 +16,8 @@ async function loadSigningKey(): Promise<{ privatePem: string | null; publicPem:
   const [row] = await db.select({ value: settings.value }).from(settings).where(eq(settings.key, SIGNING_KEY_SETTING)).limit(1);
   if (!row?.value) return { privatePem: null, publicPem: null };
   try {
-    const { createPrivateKey } = await import("node:crypto");
-    const publicPem = createPrivateKey(row.value)
-      .export({ type: "spki", format: "pem" })
-      .toString();
+    const { publicPemFromPrivateKeyPem } = await import("@/lib/signing");
+    const publicPem = publicPemFromPrivateKeyPem(row.value);
     return { privatePem: row.value, publicPem };
   } catch {
     return { privatePem: null, publicPem: null };
@@ -30,7 +28,7 @@ async function loadSigningKey(): Promise<{ privatePem: string | null; publicPem:
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "licenses.view"))) {
+  if (!(await hasPermission(auth.userId, "licenses.view", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
   try {
@@ -45,7 +43,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "licenses.issue"))) {
+  if (!(await hasPermission(auth.userId, "licenses.issue", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
   try {

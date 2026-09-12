@@ -96,7 +96,7 @@ export async function startDetachedScript(
     }
   }
 
-  const child = spawn(bashPath, [scriptPath], {
+  const child = spawn(/*turbopackIgnore: true*/ bashPath, [scriptPath], {
     detached: true,
     stdio: ["ignore", logFd, logFd],
     env: {

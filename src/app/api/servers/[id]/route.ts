@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { gameServers, gameDefinitions, nodes, scheduledTasks, serverMetrics } from "@/db/schema";
+import { gameServers, gameDefinitions, nodes, scheduledTasks, serverMetrics, playerSamples, serverChanges, serverCollaborators, serverEvents, serverIdleState, serverUptimeHistory } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { sendDiscordWebhook, resolveWebhookUrl } from "@/lib/discord";
@@ -61,7 +61,7 @@ function isSafeToDeleteFolder(installPath: string, nodeBasePath: string | null) 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "servers.view"))) {
+  if (!(await hasPermission(auth.userId, "servers.view", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -112,7 +112,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "servers.edit"))) {
+  if (!(await hasPermission(auth.userId, "servers.edit", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -363,7 +363,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "servers.delete"))) {
+  if (!(await hasPermission(auth.userId, "servers.delete", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -457,8 +457,18 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     // One transaction: a failure partway through would strip a live server's
     // schedules and metrics history but leave the server itself listed.
     await db.transaction(async (tx) => {
+      // Every FK child of game_servers must go first — the FKs carry no ON
+      // DELETE, so a missed table turns deletion into a 500. (Stage 46: six
+      // tables were missed — any server with history data could not be
+      // deleted at all.)
       await tx.delete(scheduledTasks).where(eq(scheduledTasks.serverId, Number(id)));
       await tx.delete(serverMetrics).where(eq(serverMetrics.serverId, Number(id)));
+      await tx.delete(playerSamples).where(eq(playerSamples.serverId, Number(id)));
+      await tx.delete(serverChanges).where(eq(serverChanges.serverId, Number(id)));
+      await tx.delete(serverCollaborators).where(eq(serverCollaborators.serverId, Number(id)));
+      await tx.delete(serverEvents).where(eq(serverEvents.serverId, Number(id)));
+      await tx.delete(serverIdleState).where(eq(serverIdleState.serverId, Number(id)));
+      await tx.delete(serverUptimeHistory).where(eq(serverUptimeHistory.serverId, Number(id)));
       await tx.delete(gameServers).where(eq(gameServers.id, Number(id)));
     });
 

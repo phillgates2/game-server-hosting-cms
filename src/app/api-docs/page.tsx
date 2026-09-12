@@ -45,7 +45,7 @@ export default async function ApiDocsPage() {
           <h1 style={{ fontSize: 28, margin: 0 }}>📖 API Reference</h1>
           <p style={{ color: "#94a3b8", marginTop: 8 }}>
             {countDocumentedEndpoints()} documented endpoints · authenticate with your session cookie or an{" "}
-            <strong>API key</strong> (X-API-Key header). Paths use <code style={code}>:id</code> placeholders.
+            <strong>API key</strong> (<code style={code}>Authorization: Bearer gsm_…</code> header). Paths use <code style={code}>:id</code> placeholders.
           </p>
           <p style={{ color: "#64748b", fontSize: 13 }}>
             Canonical source is the route files under <code style={code}>src/app/api</code> — this page documents the

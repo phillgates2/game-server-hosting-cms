@@ -31,7 +31,10 @@ export interface AuthPolicy {
 const DEFAULTS: AuthPolicy = {
   registrationEnabled: true,
   defaultMaxServers: 5,
-  loginThrottleAttempts: 10,
+  // Must match panel-settings' display default: the settings page shows 5,
+  // so enforcing 10 before the operator ever saves the form meant the panel
+  // lied about its own lockout threshold (found in the Stage 46 debug pass).
+  loginThrottleAttempts: 5,
   sessionDays: 7,
   ageVerificationEnabled: true,
   minimumAccountAge: AUSTRALIAN_MINIMUM_ACCOUNT_AGE,

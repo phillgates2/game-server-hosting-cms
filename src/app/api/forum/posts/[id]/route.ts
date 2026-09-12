@@ -20,9 +20,9 @@ export async function PATCH(
     const [post] = await db.select({ userId: forumPosts.userId }).from(forumPosts).where(eq(forumPosts.id, Number(id))).limit(1);
     if (!post) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    const canEditAny = (await hasPermission(auth.userId, "forum.edit_any")) || (await hasPermission(auth.userId, "forum.moderate"));
+    const canEditAny = (await hasPermission(auth.userId, "forum.edit_any", auth.keyScope)) || (await hasPermission(auth.userId, "forum.moderate", auth.keyScope));
     const isOwner = post.userId === auth.userId;
-    const canEditOwn = await hasPermission(auth.userId, "forum.edit_own");
+    const canEditOwn = await hasPermission(auth.userId, "forum.edit_own", auth.keyScope);
     if (!canEditAny && !(isOwner && canEditOwn)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const { body } = await req.json();
@@ -49,9 +49,9 @@ export async function DELETE(
     const [post] = await db.select({ userId: forumPosts.userId }).from(forumPosts).where(eq(forumPosts.id, Number(id))).limit(1);
     if (!post) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    const canDeleteAny = (await hasPermission(auth.userId, "forum.delete_any")) || (await hasPermission(auth.userId, "forum.moderate"));
+    const canDeleteAny = (await hasPermission(auth.userId, "forum.delete_any", auth.keyScope)) || (await hasPermission(auth.userId, "forum.moderate", auth.keyScope));
     const isOwner = post.userId === auth.userId;
-    const canDeleteOwn = await hasPermission(auth.userId, "forum.delete_own");
+    const canDeleteOwn = await hasPermission(auth.userId, "forum.delete_own", auth.keyScope);
     if (!canDeleteAny && !(isOwner && canDeleteOwn)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     await db.delete(forumPosts).where(eq(forumPosts.id, Number(id)));

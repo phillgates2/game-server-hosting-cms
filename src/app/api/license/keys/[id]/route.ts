@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { authorizeMasterOrSession } = await import("@/lib/master-key");
   const { auth, res: gateRes } = await authorizeMasterOrSession(req, "licenses.view");
-  if (!auth) return gateRes;
+  if (!auth) return gateRes ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
     const { id } = await params;
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { authorizeMasterOrSession } = await import("@/lib/master-key");
   const { auth, res: gateRes } = await authorizeMasterOrSession(req, "licenses.revoke");
-  if (!auth) return gateRes;
+  if (!auth) return gateRes ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let body: unknown = {};
   try { body = await req.json(); } catch { body = {}; }

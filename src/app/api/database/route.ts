@@ -6,7 +6,7 @@ import { apiError } from "@/lib/api-error";
 
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  const allowed = auth && ((await hasPermission(auth.userId, "database.view")) || (await hasPermission(auth.userId, "database.view.schema")));
+  const allowed = auth && ((await hasPermission(auth.userId, "database.view", auth.keyScope)) || (await hasPermission(auth.userId, "database.view.schema", auth.keyScope)));
   if (!allowed) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }

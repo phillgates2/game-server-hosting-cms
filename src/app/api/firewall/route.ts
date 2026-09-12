@@ -7,7 +7,7 @@ import { apiError } from "@/lib/api-error";
 
 function ufwStatus(): Promise<string> {
   return new Promise((resolve) => {
-    execFile("ufw", ["status", "numbered"], { timeout: 10_000 }, (error, stdout) => {
+    execFile(/*turbopackIgnore: true*/ "ufw", ["status", "numbered"], { timeout: 10_000 }, (error, stdout) => {
       if (error) {
         resolve("UFW is not available or not installed.");
         return;
@@ -24,7 +24,7 @@ function ufwStatus(): Promise<string> {
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "panel.settings"))) {
+  if (!(await hasPermission(auth.userId, "panel.settings", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await hasPermission(auth.userId, "panel.settings"))) {
+  if (!(await hasPermission(auth.userId, "panel.settings", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

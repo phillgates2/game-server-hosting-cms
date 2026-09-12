@@ -60,7 +60,7 @@ export function migrationBlockReason(status: string): string | null {
 export function createLocalMigrationArchive(installPath: string): string {
   const staging = mkdtempSyncSafe();
   const out = join(staging, "migration.tar.gz");
-  const r = spawnSync(
+  const r = spawnSync(/*turbopackIgnore: true*/ 
     "tar",
     ["czf", out, "--exclude=gsm-backups", "--exclude=steamcmd", "--exclude=.steam", "-C", installPath, "."],
     { encoding: "utf8" }
@@ -77,7 +77,7 @@ function mkdtempSyncSafe(): string {
 
 /** Extract a local archive into a (created) destination directory. */
 export function extractLocalArchive(archivePath: string, destDir: string): void {
-  const r = spawnSync("tar", ["xzf", archivePath, "-C", destDir], { encoding: "utf8" });
+  const r = spawnSync(/*turbopackIgnore: true*/ "tar", ["xzf", archivePath, "-C", destDir], { encoding: "utf8" });
   if (r.status !== 0) {
     throw new Error(`Could not extract on the destination: ${(r.stderr || "tar failed").slice(-300)}`);
   }

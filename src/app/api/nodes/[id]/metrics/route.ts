@@ -20,7 +20,7 @@ export async function GET(
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Heartbeat history can include every machine an operator attached, so it
   // follows the nodes-panel rules rather than ordinary server viewing.
-  if (!(await hasPermission(auth.userId, "nodes.view.metrics"))) {
+  if (!(await hasPermission(auth.userId, "nodes.view.metrics", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

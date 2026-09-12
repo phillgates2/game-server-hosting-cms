@@ -17,7 +17,7 @@ const execAsync = promisify(exec);
 // POST /api/nodes/local - Create local node (this server)
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "nodes.create"))) {
+  if (!auth || !(await hasPermission(auth.userId, "nodes.create", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

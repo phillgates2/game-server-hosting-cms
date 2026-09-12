@@ -25,7 +25,7 @@ async function requireShopAdmin(req: NextRequest) {
 // GET — resellers with lifetime sales/commission totals
 export async function GET(req: NextRequest) {
   const { auth, res } = await requireShopAdmin(req);
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     await ensureShopTables();
     const rows = await db
@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
 // POST — create { label, email?, commissionPct? } → plaintext token ONCE
 export async function POST(req: NextRequest) {
   const { auth, res } = await requireShopAdmin(req);
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let body: unknown;
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 }); }
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
 // PATCH — { id, active?, commissionPct? }
 export async function PATCH(req: NextRequest) {
   const { auth, res } = await requireShopAdmin(req);
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let body: unknown;
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 }); }

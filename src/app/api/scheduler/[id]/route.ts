@@ -14,7 +14,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || (!(await hasPermission(auth.userId, "scheduler.edit")) && !(await hasPermission(auth.userId, "servers.edit")))) {
+  if (!auth || (!(await hasPermission(auth.userId, "scheduler.edit", auth.keyScope)) && !(await hasPermission(auth.userId, "servers.edit", auth.keyScope)))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -81,7 +81,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || (!(await hasPermission(auth.userId, "scheduler.delete")) && !(await hasPermission(auth.userId, "servers.edit")))) {
+  if (!auth || (!(await hasPermission(auth.userId, "scheduler.delete", auth.keyScope)) && !(await hasPermission(auth.userId, "servers.edit", auth.keyScope)))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

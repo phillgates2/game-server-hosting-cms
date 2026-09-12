@@ -10,7 +10,7 @@ import { limitParam, offsetParam } from "@/lib/pagination";
 // GET /api/audit-log — List audit log entries
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  const allowed = auth && ((await hasPermission(auth.userId, "security.audit")) || (await hasPermission(auth.userId, "panel.settings")));
+  const allowed = auth && ((await hasPermission(auth.userId, "security.audit", auth.keyScope)) || (await hasPermission(auth.userId, "panel.settings", auth.keyScope)));
   if (!allowed) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }

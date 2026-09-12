@@ -1,3 +1,4 @@
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { users } from "@/db/schema";
@@ -34,11 +35,9 @@ const USERNAME_RE = /^[A-Za-z0-9_.-]{3,64}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function clientIp(req: NextRequest): string {
-  return (
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip") ||
-    "unknown"
-  );
+  // Stage 46: shared trust-aware extraction — forwarded headers are honoured
+  // only behind GSM_TRUST_PROXY, and via the proxy-appended LAST hop.
+  return clientIpForRecord(req.headers);
 }
 
 export async function POST(req: NextRequest) {

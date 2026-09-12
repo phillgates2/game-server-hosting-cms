@@ -13,7 +13,7 @@ export async function POST(
   { params }: { params: Promise<{ slug: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "games.install"))) {
+  if (!auth || !(await hasPermission(auth.userId, "games.install", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 
@@ -71,7 +71,7 @@ export async function DELETE(
   { params }: { params: Promise<{ slug: string }> }
 ) {
   const auth = await getCurrentUser(req.headers);
-  if (!auth || !(await hasPermission(auth.userId, "games.uninstall"))) {
+  if (!auth || !(await hasPermission(auth.userId, "games.uninstall", auth.keyScope))) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
 

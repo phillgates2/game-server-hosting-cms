@@ -21,7 +21,7 @@ async function ipOf(req: NextRequest): Promise<string> {
 // GET — status only (never the key itself)
 export async function GET(req: NextRequest) {
   const { auth, res } = await authorizeMasterOrSession(req, "panel.settings");
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const state = await masterKeyConfigured();
     return NextResponse.json(state);
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
 // POST — generate/rotate; the plaintext is shown EXACTLY ONCE
 export async function POST(req: NextRequest) {
   const { auth, res } = await authorizeMasterOrSession(req, "panel.settings");
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const key = await generateMasterKey();
     const keyHash = await hashMasterKey(key);
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
 // DELETE — revoke the stored master key (the env key, if any, still works)
 export async function DELETE(req: NextRequest) {
   const { auth, res } = await authorizeMasterOrSession(req, "panel.settings");
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     await db.delete(settings).where(eq(settings.key, MASTER_KEY_SETTING));
     try {

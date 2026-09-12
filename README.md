@@ -357,6 +357,7 @@ Only running non-Steam games? Skip it entirely with `--no-steamcmd`.
 | `DISCORD_GUILD_ID` | optional | Discord server ID the bot creates channels in |
 | `GSM_LICENSE_SERVER` | optional | URL of the master panel that validates installation license keys. Required for normal installations (`install.sh` fails closed without it); only the master/key-desk instance may omit it |
 | `GSM_LICENSE_MODE` | optional | `master` = this instance is the key desk (skips license validation); anything else = standard licensed installation |
+| `GSM_TRUST_PROXY` | optional | `1` when a trusted edge proxy (Caddy) fronts the panel: client IPs are read from the **last** `X-Forwarded-For` hop (the one your proxy appended). Unset/`0` = forwarded headers are not trusted, so the IP allowlist fails closed against header-claimed identities. `install.sh` sets it automatically when Caddy is enabled |
 | `GSM_PANEL_MASTER_KEY` | optional | The **master key** — the panel's only key (min 16 chars). Guards fresh installs (the "install key"), validates as an unlimited license key, and administers shop/license APIs via the `X-Master-Key` header. `install.sh` generates one by default; you can also generate/rotate it in the panel (API Keys) — stored hash-only, shown once |
 | `GSM_DISABLE_AUTOSTART` | optional | Set `true` to stop servers marked *Start on node boot* from launching when the panel starts |
 | `GSM_LOG_FORMAT` | optional | `text` *(default)* or `json` for machine-readable logs |

@@ -125,7 +125,7 @@ export async function authorizeMasterOrSession(
   const { hasPermission } = await import("./permissions");
   const auth = await getCurrentUser(req.headers);
   if (!auth) return { auth: null, res: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  if (!(await hasPermission(auth.userId, permission))) {
+  if (!(await hasPermission(auth.userId, permission, auth.keyScope))) {
     return { auth: null, res: NextResponse.json({ error: "Permission denied" }, { status: 403 }) };
   }
   return { auth: { userId: auth.userId as number, role: auth.role }, res: null };

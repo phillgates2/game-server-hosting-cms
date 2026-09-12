@@ -1,3 +1,4 @@
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { users, passwordResets } from "@/db/schema";
@@ -29,11 +30,9 @@ async function ensurePasswordResetsTable() {
 }
 
 function clientIp(req: NextRequest): string {
-  return (
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip") ||
-    "unknown"
-  );
+  // Stage 46: shared trust-aware extraction — forwarded headers are honoured
+  // only behind GSM_TRUST_PROXY, and via the proxy-appended LAST hop.
+  return clientIpForRecord(req.headers);
 }
 
 // POST /api/auth/forgot-password — email a one-time reset link

@@ -48,7 +48,7 @@ async function readPolicy() {
 // GET — current idle auto-stop policy (admin only)
 export async function GET(req: NextRequest) {
   const { auth, res } = await requireAdmin(req);
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     return NextResponse.json(await readPolicy());
   } catch (e: unknown) {
@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
 // POST — { enabled?: boolean, hours?: number }
 export async function POST(req: NextRequest) {
   const { auth, res } = await requireAdmin(req);
-  if (!auth) return res;
+  if (!auth) return res ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let body: unknown;
   try {

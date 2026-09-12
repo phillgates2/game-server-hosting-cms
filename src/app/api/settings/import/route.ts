@@ -22,7 +22,7 @@ function asPermissionSet(raw: unknown): Record<string, boolean> {
 // POST /api/settings/import — Import panel config from JSON
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
-  const allowed = auth && ((await hasPermission(auth.userId, "panel.settings.import")) || (await hasPermission(auth.userId, "panel.settings")) || (await hasPermission(auth.userId, "database.import")));
+  const allowed = auth && ((await hasPermission(auth.userId, "panel.settings.import", auth.keyScope)) || (await hasPermission(auth.userId, "panel.settings", auth.keyScope)) || (await hasPermission(auth.userId, "database.import", auth.keyScope)));
   if (!allowed) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
