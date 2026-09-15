@@ -31,20 +31,33 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     }
 
     const [product] = await db
-      .select({ name: shopProducts.name, durationDays: shopProducts.durationDays, maxActivations: shopProducts.maxActivations })
+      .select({
+        name: shopProducts.name,
+        durationDays: shopProducts.durationDays,
+        maxActivations: shopProducts.maxActivations,
+        productType: shopProducts.productType,
+        kind: shopProducts.kind,
+        imageUrl: shopProducts.imageUrl,
+      })
       .from(shopProducts)
       .where(eq(shopProducts.id, order.productId))
       .limit(1);
 
-    const isOwner = true; // email matched above
     return NextResponse.json({
       orderId: order.id,
       status: order.status,
       product: product?.name ?? null,
+      productType: (product as any)?.productType ?? "license",
+      kind: (product as any)?.kind ?? "onetime",
+      imageUrl: (product as any)?.imageUrl ?? null,
       createdAt: order.createdAt,
       paidAt: order.paidAt,
       fulfilledAt: order.fulfilledAt,
-      key: isOwner && order.status === "fulfilled" ? order.issuedKeyPlaintext : null,
+      amountCents: order.amountCents,
+      currency: order.currency,
+      quantity: (order as any).quantity ?? 1,
+      customerName: (order as any).customerName ?? null,
+      key: order.status === "fulfilled" ? order.issuedKeyPlaintext : null,
       maxActivations: product?.maxActivations ?? null,
       durationDays: product?.durationDays ?? null,
     });

@@ -1,8 +1,8 @@
 /**
- * Shop: sell license keys. Two payment providers ship built-in:
+ * Shop: sell anything. Two payment providers ship built-in:
  *
  *   manual — zero-config: the order sits "pending" until an admin approves
- *            it (bank transfer, PayPal friends, cash-in-hand…). Approving
+ *            it (bank transfer, PayPal friends, cash-in-hand...). Approving
  *            fulfils it instantly.
  *   stripe — when STRIPE_SECRET_KEY is set: real Stripe Checkout via raw
  *            REST (no SDK), webhook-verified, auto-fulfilled on
@@ -162,6 +162,11 @@ export function applyCoupon(input: { kind: CouponKind; value: number }, priceCen
 
 // ── DB plumbing ─────────────────────────────────────────────────────────────
 
+export const SHOP_CATEGORIES = ["general", "licenses", "servers", "digital", "physical", "services", "merch"] as const;
+export type ShopCategory = typeof SHOP_CATEGORIES[number];
+export const PRODUCT_TYPES = ["license", "server", "digital", "physical", "service", "subscription", "merch"] as const;
+export type ProductType = typeof PRODUCT_TYPES[number];
+
 /** Idempotent — upgrades predate the shop. */
 export async function ensureShopTables(): Promise<void> {
   const { db } = await import("@/db");
@@ -213,7 +218,6 @@ export async function ensureShopTables(): Promise<void> {
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     )
   `);
-  // Upgrades: coupon + subscription support added after the shop existed.
   await db.execute(sql`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS coupon_id INTEGER REFERENCES shop_coupons(id)`);
   await db.execute(sql`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS provider_sub TEXT`);
   await db.execute(sql`ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS kind VARCHAR(12) NOT NULL DEFAULT 'onetime'`);
@@ -234,6 +238,52 @@ export async function ensureShopTables(): Promise<void> {
     )
   `);
   await db.execute(sql`ALTER TABLE license_keys ADD COLUMN IF NOT EXISTS expiry_notified_at TIMESTAMP`);
+  await db.execute(sql`ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS image_url TEXT`);
+  await db.execute(sql`ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS category VARCHAR(64) NOT NULL DEFAULT 'general'`);
+  await db.execute(sql`ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS product_type VARCHAR(20) NOT NULL DEFAULT 'license'`);
+  await db.execute(sql`ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS stock_quantity INTEGER`);
+  await db.execute(sql`ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS featured BOOLEAN NOT NULL DEFAULT FALSE`);
+  await db.execute(sql`ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS sku VARCHAR(64)`);
+  await db.execute(sql`ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS badge VARCHAR(32)`);
+  await db.execute(sql`ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS compare_at_price_cents INTEGER`);
+  await db.execute(sql`ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS allow_quantity BOOLEAN NOT NULL DEFAULT TRUE`);
+  await db.execute(sql`ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS game_id INTEGER REFERENCES game_definitions(id)`);
+  await db.execute(sql`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 1`);
+  await db.execute(sql`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS customer_name VARCHAR(128)`);
+  await db.execute(sql`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS notes TEXT`);
+  await db.execute(sql`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS shipping_address JSONB`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS shop_categories (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(64) NOT NULL UNIQUE,
+      slug VARCHAR(64) NOT NULL UNIQUE,
+      description TEXT,
+      icon VARCHAR(8) DEFAULT '🛒',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS shop_cart_items (
+      id SERIAL PRIMARY KEY,
+      session_id VARCHAR(128) NOT NULL,
+      product_id INTEGER NOT NULL REFERENCES shop_products(id),
+      quantity INTEGER NOT NULL DEFAULT 1,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.execute(sql`
+    INSERT INTO shop_categories (name, slug, description, icon, sort_order)
+    VALUES
+      ('All Products', 'all', 'Everything in the store', '🛍️', 0),
+      ('Licenses', 'licenses', 'Panel licenses and activation keys', '🔑', 1),
+      ('Game Servers', 'servers', 'Pre-configured game servers', '🎮', 2),
+      ('Digital Goods', 'digital', 'Configs, plugins, maps and more', '💾', 3),
+      ('Services', 'services', 'Setup, migration and support', '🛠️', 4),
+      ('Merch', 'merch', 'Swag and physical goods', '👕', 5)
+    ON CONFLICT (slug) DO NOTHING
+  `);
 }
 
 /**
@@ -289,10 +339,10 @@ export async function cancelSubscriptionByKey(providerSub: string): Promise<{ ok
 }
 
 /**
- * Fulfil an order: mint a license key with the product's activations and
- * duration, link it, email it to the buyer. Returns the plaintext key so
- * the order page can show it once. Idempotent — an already-fulfilled order
- * just returns its existing key.
+ * Fulfil an order: for license/server/subscription products, mint a license
+ * key; for other product types (digital, physical, service, merch), just mark
+ * fulfilled and email a receipt. Returns the plaintext key when one was minted
+ * so the order page can show it once. Idempotent.
  */
 export async function fulfilOrder(orderId: number): Promise<{ ok: boolean; key?: string; reason?: string }> {
   const { db } = await import("@/db");
@@ -303,8 +353,8 @@ export async function fulfilOrder(orderId: number): Promise<{ ok: boolean; key?:
   await ensureShopTables();
   const [order] = await db.select().from(shopOrders).where(eq(shopOrders.id, orderId)).limit(1);
   if (!order) return { ok: false, reason: "Order not found" };
-  if (order.status === "fulfilled" && order.issuedKeyPlaintext) {
-    return { ok: true, key: order.issuedKeyPlaintext };
+  if (order.status === "fulfilled") {
+    return { ok: true, key: order.issuedKeyPlaintext ?? undefined };
   }
   if (!orderCanFulfil(order.status as ShopOrderStatus)) {
     return { ok: false, reason: `Order is ${order.status} and cannot be fulfilled` };
@@ -312,6 +362,39 @@ export async function fulfilOrder(orderId: number): Promise<{ ok: boolean; key?:
 
   const [product] = await db.select().from(shopProducts).where(eq(shopProducts.id, order.productId)).limit(1);
   if (!product) return { ok: false, reason: "The product for this order no longer exists" };
+
+  const productType = (product.productType as string) || "license";
+  const isLicenseLike = ["license", "server", "subscription"].includes(productType) || product.kind === "subscription";
+
+  if (!isLicenseLike) {
+    await db
+      .update(shopOrders)
+      .set({
+        status: "fulfilled",
+        paidAt: order.paidAt ?? new Date(),
+        fulfilledAt: new Date(),
+      })
+      .where(eq(shopOrders.id, order.id));
+
+    try {
+      const { sendEmail } = await import("./email");
+      const shippingNote =
+        productType === "physical" || productType === "merch"
+          ? "The operator will arrange shipping and contact you if needed."
+          : "You can access your purchase in your account or via the link the operator provided.";
+      await sendEmail(
+        order.email,
+        `Your order #${order.id} is ready - ${product.name}`,
+        `<p>Thanks for your purchase - order <b>#${order.id}</b> (${product.name}) x${order.quantity ?? 1}.</p>` +
+          `<p>Your order has been fulfilled. ${shippingNote}</p>` +
+          `<p>Order total: <b>${(order.amountCents / 100).toFixed(2)} ${order.currency.toUpperCase()}</b></p>`
+      );
+    } catch {
+      /* best-effort */
+    }
+
+    return { ok: true };
+  }
 
   await ensureLicenseTables();
   const key = await generateLicenseKey();
@@ -321,9 +404,7 @@ export async function fulfilOrder(orderId: number): Promise<{ ok: boolean; key?:
       ? intervalToDays(product.billingInterval as "month" | "year")
       : null;
   const effectiveDays = subDays ?? product.durationDays;
-  const expiresAt = effectiveDays
-    ? new Date(Date.now() + effectiveDays * 86_400_000)
-    : null;
+  const expiresAt = effectiveDays ? new Date(Date.now() + effectiveDays * 86_400_000) : null;
 
   const [licenseRow] = await db
     .insert(licenseKeys)
@@ -349,22 +430,19 @@ export async function fulfilOrder(orderId: number): Promise<{ ok: boolean; key?:
     })
     .where(eq(shopOrders.id, order.id));
 
-  // Deliver the key by email when SMTP is configured. Best-effort.
   try {
     const { sendEmail } = await import("./email");
-    const expiryLine = expiresAt
-      ? `It expires on <b>${expiresAt.toISOString().slice(0, 10)}</b>.`
-      : "It never expires.";
+    const expiryLine = expiresAt ? `It expires on <b>${expiresAt.toISOString().slice(0, 10)}</b>.` : "It never expires.";
     await sendEmail(
       order.email,
       "Your GameServer Manager license key",
-      `<p>Thanks for your purchase — order <b>#${order.id}</b> (${product.name}).</p>` +
+      `<p>Thanks for your purchase - order <b>#${order.id}</b> (${product.name}).</p>` +
         `<p>Your license key:</p><p><code style="font-size:15px">${plaintext}</code></p>` +
         `<p>${expiryLine} Activations allowed: <b>${product.maxActivations}</b>.</p>` +
         `<p>Install with the key, or check it any time at the license page.</p>`
     );
   } catch {
-    /* email is best-effort; the key is also shown on the order page */
+    /* best-effort */
   }
 
   return { ok: true, key: plaintext };

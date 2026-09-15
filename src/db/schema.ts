@@ -383,7 +383,7 @@ export const serverEvents = pgTable("server_events", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// ── Shop (sell license keys) ───────────────────────────────────
+// ── Shop (sell anything: licenses, servers, digital goods, physical) ───
 export const shopProducts = pgTable("shop_products", {
   id: serial("id").primaryKey(),
   name: varchar("name", { length: 128 }).notNull(),
@@ -397,6 +397,17 @@ export const shopProducts = pgTable("shop_products", {
   billingInterval: varchar("billing_interval", { length: 5 }), // month | year
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  // ── Extended shop fields ──
+  imageUrl: text("image_url"),
+  category: varchar("category", { length: 64 }).default("general"),
+  productType: varchar("product_type", { length: 20 }).notNull().default("license"), // license | server | digital | physical | service | subscription
+  stockQuantity: integer("stock_quantity"), // null = unlimited
+  featured: boolean("featured").notNull().default(false),
+  sku: varchar("sku", { length: 64 }),
+  badge: varchar("badge", { length: 32 }), // e.g. Popular, New, Sale
+  compareAtPriceCents: integer("compare_at_price_cents"), // strikethrough price for sales
+  allowQuantity: boolean("allow_quantity").notNull().default(true),
+  gameId: integer("game_id").references(() => gameDefinitions.id), // optional link to a game template for server products
 });
 
 export const shopCoupons = pgTable("shop_coupons", {
@@ -442,6 +453,29 @@ export const shopOrders = pgTable("shop_orders", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   paidAt: timestamp("paid_at"),
   fulfilledAt: timestamp("fulfilled_at"),
+  quantity: integer("quantity").notNull().default(1),
+  customerName: varchar("customer_name", { length: 128 }),
+  notes: text("notes"),
+  shippingAddress: jsonb("shipping_address"),
+});
+
+export const shopCartItems = pgTable("shop_cart_items", {
+  id: serial("id").primaryKey(),
+  sessionId: varchar("session_id", { length: 128 }).notNull(),
+  productId: integer("product_id").references(() => shopProducts.id).notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const shopCategories = pgTable("shop_categories", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 64 }).notNull().unique(),
+  slug: varchar("slug", { length: 64 }).notNull().unique(),
+  description: text("description"),
+  icon: varchar("icon", { length: 8 }).default("🛒"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 // ── License keys (master-panel licensing) ──────────────────────
