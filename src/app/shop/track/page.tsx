@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
 export default function TrackOrderPage() {
   const [orderId, setOrderId] = useState("");
@@ -8,6 +9,7 @@ export default function TrackOrderPage() {
   const [result, setResult] = useState<{ status: string; key: string | null; product: string | null; maxActivations: number | null; durationDays: number | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   async function check() {
     if (!orderId.trim() || !email.trim()) return;
@@ -38,35 +40,48 @@ export default function TrackOrderPage() {
   };
 
   return (
-    <main style={{ minHeight: "100vh", background: "#0b0f17", color: "#e2e8f0", fontFamily: "ui-sans-serif, system-ui, sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div style={{ width: "100%", maxWidth: 560, background: "#111827", border: "1px solid #1f2937", borderRadius: 16, padding: 32 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>📦 Track your order</h1>
-        <p style={{ fontSize: 13, color: "#94a3b8", marginBottom: 22 }}>Enter your order number and the email you purchased with.</p>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <input value={orderId} onChange={(e) => setOrderId(e.target.value)} placeholder="Order # (e.g. 42)" style={{ flex: 1, minWidth: 120, background: "#0b0f17", border: "1px solid #1f2937", borderRadius: 10, padding: "12px 14px", color: "#e2e8f0", fontSize: 14, outline: "none" }} />
-          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" type="email" style={{ flex: 2, minWidth: 200, background: "#0b0f17", border: "1px solid #1f2937", borderRadius: 10, padding: "12px 14px", color: "#e2e8f0", fontSize: 14, outline: "none" }} />
-          <button onClick={() => void check()} disabled={busy} style={{ background: "#6366f1", color: "white", border: "none", borderRadius: 10, padding: "12px 18px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>{busy ? "…" : "Track"}</button>
+    <main className="min-h-screen bg-[#0b0f17] text-[#e2e8f0] flex items-center justify-center p-4">
+      <div className="w-full max-w-xl space-y-4">
+        <div className="flex gap-2">
+          <Link href="/shop" className="px-3 py-1.5 rounded-lg bg-[#111827] border border-[#1f2937] text-sm hover:border-[#6366f1]/50 transition-colors">← Shop</Link>
+          <Link href="/" className="px-3 py-1.5 rounded-lg bg-[#111827] border border-[#1f2937] text-sm hover:border-[#6366f1]/50 transition-colors">Home</Link>
         </div>
-
-        {error && <p style={{ marginTop: 18, color: "#ef4444", fontSize: 14 }}>{error}</p>}
-
-        {result && (
-          <div style={{ marginTop: 22, border: "1px solid #1f2937", borderRadius: 12, padding: 18 }}>
-            <p style={{ margin: "0 0 6px", fontSize: 15, fontWeight: 700, color: (STATUS[result.status] ?? ["", "#e2e8f0"])[1] }}>
-              {(STATUS[result.status] ?? [result.status, "#e2e8f0"])[0]} · {result.product ?? "License"}
-            </p>
-            <p style={{ margin: "0 0 10px", fontSize: 12, color: "#94a3b8" }}>
-              {result.maxActivations} activation{result.maxActivations === 1 ? "" : "s"} · {result.durationDays ? `valid ${result.durationDays} days` : "never expires"}
-            </p>
-            {result.status === "pending" && <p style={{ margin: 0, fontSize: 13, color: "#94a3b8" }}>Waiting for payment approval — your key is issued automatically once it clears.</p>}
-            {result.status === "fulfilled" && result.key && (
-              <>
-                <p style={{ margin: "0 0 6px", fontSize: 12, color: "#94a3b8" }}>Your license key:</p>
-                <code style={{ display: "block", background: "#0b0f17", border: "1px solid #1f2937", borderRadius: 8, padding: "10px 12px", fontSize: 13, wordBreak: "break-all" }}>{result.key}</code>
-              </>
-            )}
+        <div className="rounded-2xl border border-[#1f2937] bg-[#111827] p-6 sm:p-8 space-y-5">
+          <div>
+            <h1 className="text-xl font-bold">📦 Track your order</h1>
+            <p className="text-sm text-[#94a3b8] mt-1">Enter your order number and the email you purchased with.</p>
           </div>
-        )}
+          <div className="flex flex-wrap gap-2">
+            <input value={orderId} onChange={(e) => setOrderId(e.target.value)} placeholder="Order # (e.g. 42)" className="flex-1 min-w-[120px] rounded-xl border border-[#1f2937] bg-[#0b0f17] px-4 py-2.5 text-sm text-white placeholder:text-[#64748b] focus:outline-none focus:ring-2 focus:ring-[#6366f1]" />
+            <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" type="email" className="flex-[2] min-w-[200px] rounded-xl border border-[#1f2937] bg-[#0b0f17] px-4 py-2.5 text-sm text-white placeholder:text-[#64748b] focus:outline-none focus:ring-2 focus:ring-[#6366f1]" />
+            <button onClick={() => void check()} disabled={busy} className="px-5 py-2.5 bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-xl text-sm font-semibold disabled:opacity-50 transition-colors">{busy ? "…" : "Track"}</button>
+          </div>
+
+          {error && <div className="rounded-xl border border-[#ef4444]/30 bg-[#ef4444]/10 px-4 py-3 text-sm text-[#ef4444]">{error}</div>}
+
+          {result && (
+            <div className="rounded-xl border border-[#1f2937] bg-[#0b0f17] p-5 space-y-3">
+              <p className="text-sm font-bold" style={{ color: (STATUS[result.status] ?? ["", "#e2e8f0"])[1] }}>
+                {(STATUS[result.status] ?? [result.status, "#e2e8f0"])[0]} · {result.product ?? "License"}
+              </p>
+              <p className="text-xs text-[#94a3b8]">
+                {result.maxActivations} activation{result.maxActivations === 1 ? "" : "s"} · {result.durationDays ? `valid ${result.durationDays} days` : "never expires"}
+              </p>
+              {result.status === "pending" && <p className="text-sm text-[#94a3b8]">Waiting for payment approval — your key is issued automatically once it clears.</p>}
+              {result.status === "fulfilled" && result.key && (
+                <>
+                  <p className="text-xs text-[#94a3b8]">Your license key:</p>
+                  <div className="flex gap-2">
+                    <code className="flex-1 block rounded-xl bg-[#111827] border border-[#1f2937] px-4 py-3 text-sm font-mono break-all text-white">{result.key}</code>
+                    <button onClick={async () => { try { await navigator.clipboard.writeText(result.key!); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch {} }} className="px-4 py-2 bg-[#22c55e] hover:bg-[#16a34a] text-white rounded-xl text-sm font-semibold transition-colors">{copied ? "Copied!" : "Copy"}</button>
+                  </div>
+                  <Link href={`/shop/order/${orderId}?email=${encodeURIComponent(email)}`} className="inline-block mt-2 text-xs text-[#818cf8] hover:underline">Open detailed order page →</Link>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+        <p className="text-center text-xs text-[#64748b]">Need help? <Link href="/shop" className="text-[#818cf8] hover:underline">Back to shop</Link></p>
       </div>
     </main>
   );

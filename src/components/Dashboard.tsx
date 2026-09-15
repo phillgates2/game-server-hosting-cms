@@ -23,6 +23,7 @@ import ApiKeysPanel from "./panels/ApiKeysPanel";
 import LicensesPanel from "./panels/LicensesPanel";
 import SettingsPanel from "./panels/SettingsPanel";
 import LadderPanel from "./panels/LadderPanel";
+import ShopPanel from "./panels/ShopPanel";
 import { ThemeToggleButton } from "./ThemeToggle";
 import { NotificationBell } from "./NotificationCenter";
 import { LanguageSelector } from "@/lib/i18n";
@@ -38,7 +39,7 @@ interface AuthUser {
 }
 interface Props { user: AuthUser; onLogout: () => void; onGoHome?: () => void }
 
-type Tab = "overview" | "servers" | "files" | "transfer" | "rcon" | "nodes" | "games" | "audit" | "monitor" | "forum" | "cms" | "ladder" | "users" | "roles" | "profile" | "database" | "activity" | "scheduler" | "apikeys" | "licenses" | "settings";
+type Tab = "overview" | "servers" | "files" | "transfer" | "rcon" | "nodes" | "games" | "audit" | "monitor" | "forum" | "cms" | "ladder" | "shop" | "users" | "roles" | "profile" | "database" | "activity" | "scheduler" | "apikeys" | "licenses" | "settings";
 
 interface NavItem { key: Tab; label: string; permission?: string; section: string; shortcut?: string }
 
@@ -52,6 +53,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: "games", label: "Games", permission: "games.view", section: "main", shortcut: "G" },
   { key: "audit", label: "Audit", permission: "games.install", section: "main", shortcut: "A" },
   { key: "monitor", label: "Monitor", permission: "monitor.view", section: "main", shortcut: "M" },
+  { key: "shop", label: "Shop", permission: "shop.view", section: "main", shortcut: "H" },
   { key: "forum", label: "Forum", permission: "forum.view", section: "community" },
   { key: "cms", label: "CMS", permission: "cms.view", section: "community" },
   { key: "ladder", label: "League Ladder", permission: "ladder.view", section: "community", shortcut: "L" },
@@ -78,6 +80,7 @@ const TAB_META: Record<Tab, { title: string; subtitle: string }> = {
   games: { title: "Games", subtitle: "Install, edit, import, and create server templates." },
   audit: { title: "Audit", subtitle: "Verify templates, binaries, and live install paths." },
   monitor: { title: "Monitor", subtitle: "Track system health, memory, and buffer/cache usage." },
+  shop: { title: "Shop", subtitle: "Sell licenses, servers, digital goods — full storefront and order management." },
   forum: { title: "Forum", subtitle: "Community discussions, moderation, and user profiles." },
   cms: { title: "CMS", subtitle: "Publish blog posts, pages, and changelogs." },
   ladder: { title: "League Ladder", subtitle: "Season standings, team rankings, and competitive records." },
@@ -237,6 +240,7 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
       case "games": return <GamesPanel />;
       case "audit": return <AuditPanel />;
       case "monitor": return <MonitorPanel user={user} />;
+      case "shop": return <ShopPanel />;
       case "forum": return <ForumPanel user={user} />;
       case "cms": return <CmsPanel />;
       case "ladder": return <LadderPanel />;

@@ -31,6 +31,10 @@ export async function GET(req: NextRequest) {
         createdAt: shopOrders.createdAt,
         fulfilledAt: shopOrders.fulfilledAt,
         productName: shopProducts.name,
+        quantity: shopOrders.quantity,
+        customerName: shopOrders.customerName,
+        couponId: shopOrders.couponId,
+        resellerId: shopOrders.resellerId,
       })
       .from(shopOrders)
       .leftJoin(shopProducts, eq(shopOrders.productId, shopProducts.id))

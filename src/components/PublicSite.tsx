@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import PublicChatWidget from "@/components/PublicChatWidget";
+import PublicShop from "@/components/PublicShop";
 
 /* ── Types ──────────────────────────────────────────────────────────────────── */
 interface CmsPost {
@@ -45,7 +46,7 @@ interface Props {
   onLogout: () => void;
 }
 
-type Tab = "home" | "forums" | "ladder" | "blog" | "changelog" | "post"
+type Tab = "home" | "forums" | "ladder" | "shop" | "blog" | "changelog" | "post"
   | "forum-cat" | "forum-thread" | "site-editor";
 
 
@@ -202,7 +203,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
     return c ? <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${c}`}>{r}</span> : null;
   };
 
-  const navTabs: [Tab, string][] = [["home","Home"],["forums","Forums"],["ladder","Ladder"],["blog","Blog"],["changelog","Changelog"]];
+  const navTabs: [Tab, string][] = [["home","Home"],["shop","🛒 Shop"],["forums","Forums"],["ladder","Ladder"],["blog","Blog"],["changelog","Changelog"]];
 
   /* ═══════════════════════════════════════════════════════════════════════════ */
   return (
@@ -314,6 +315,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                 {user
                   ? <button onClick={onDashboardClick} className="px-5 sm:px-6 py-2.5 sm:py-3 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors text-sm sm:text-base">⚙️ Control Panel</button>
                   : <button onClick={onLoginClick} className="px-5 sm:px-6 py-2.5 sm:py-3 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors text-sm sm:text-base">Get Started →</button>}
+                <button onClick={() => goTab("shop")} className="px-4 sm:px-6 py-2.5 sm:py-3 bg-gradient-to-r from-accent to-purple text-white rounded-lg font-medium transition-colors text-sm sm:text-base shadow-lg hover:shadow-accent/20">🛒 Shop</button>
                 <button onClick={() => goTab("forums")} className="px-4 sm:px-6 py-2.5 sm:py-3 bg-bg-card border border-border hover:border-accent/30 rounded-lg font-medium transition-colors text-sm sm:text-base">💬 Forums</button>
                 <button onClick={() => goTab("ladder")} className="px-4 sm:px-6 py-2.5 sm:py-3 bg-bg-card border border-border hover:border-accent/30 rounded-lg font-medium transition-colors text-sm sm:text-base">🏆 Ladder</button>
                 <button onClick={() => goTab("blog")} className="px-4 sm:px-6 py-2.5 sm:py-3 bg-bg-card border border-border hover:border-accent/30 rounded-lg font-medium transition-colors text-sm sm:text-base">📝 Blog</button>
@@ -512,6 +514,13 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
           </div>
         )}
 
+        {/* ═══ SHOP ═══ */}
+        {tab === "shop" && (
+          <div className="animate-fade-in">
+            <PublicShop />
+          </div>
+        )}
+
         {/* ═══ FORUMS ═══ */}
         {tab === "forums" && (
           <div className="animate-fade-in">
@@ -682,6 +691,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
           <div className="flex gap-3 sm:gap-4 flex-wrap justify-center">
             {user ? (<><button onClick={onDashboardClick} className="hover:text-text-primary transition-colors">Control Panel</button><button onClick={onLogout} className="hover:text-text-primary transition-colors">Logout</button></>)
               : (<button onClick={onLoginClick} className="hover:text-text-primary transition-colors">Login</button>)}
+            <button onClick={() => goTab("shop")} className="hover:text-text-primary transition-colors">Shop</button>
             <button onClick={() => goTab("forums")} className="hover:text-text-primary transition-colors">Forums</button>
             <button onClick={() => goTab("ladder")} className="hover:text-text-primary transition-colors">Ladder</button>
             <button onClick={() => goTab("blog")} className="hover:text-text-primary transition-colors">Blog</button>
