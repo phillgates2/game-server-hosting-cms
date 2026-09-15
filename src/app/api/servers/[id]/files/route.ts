@@ -49,8 +49,15 @@ export async function GET(
   const server = await getServer(Number(id));
   if (!server) return NextResponse.json({ error: "Server not found" }, { status: 404 });
 
-  if (server.userId !== auth.userId && !(await hasPermission(auth.userId, "servers.edit", auth.keyScope))) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  // Owner, a panel-wide `servers.edit` holder, or someone the server was
+  // shared with *with file transfer enabled*. The per-server grant is what lets
+  // a collaborator upload here without being handed every other server.
+  const canEditAny = await hasPermission(auth.userId, "servers.edit", auth.keyScope);
+  if (!canEditAny) {
+    const { canTransferToServer } = await import("@/lib/server-collab");
+    if (!(await canTransferToServer(server.id, auth.userId, auth.keyScope))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
   }
 
   const url = new URL(req.url);
@@ -124,8 +131,15 @@ export async function POST(
   const server = await getServer(Number(id));
   if (!server) return NextResponse.json({ error: "Server not found" }, { status: 404 });
 
-  if (server.userId !== auth.userId && !(await hasPermission(auth.userId, "servers.edit", auth.keyScope))) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  // Owner, a panel-wide `servers.edit` holder, or someone the server was
+  // shared with *with file transfer enabled*. The per-server grant is what lets
+  // a collaborator upload here without being handed every other server.
+  const canEditAny = await hasPermission(auth.userId, "servers.edit", auth.keyScope);
+  if (!canEditAny) {
+    const { canTransferToServer } = await import("@/lib/server-collab");
+    if (!(await canTransferToServer(server.id, auth.userId, auth.keyScope))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
   }
 
   try {

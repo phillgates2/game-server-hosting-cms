@@ -47,6 +47,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         id: serverCollaborators.id,
         userId: serverCollaborators.userId,
         role: serverCollaborators.role,
+        canTransfer: serverCollaborators.canTransfer,
         createdAt: serverCollaborators.createdAt,
         email: users.email,
       })
@@ -60,6 +61,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         userId: r.userId,
         email: r.email,
         role: r.role,
+        /** Per-server file-transfer grant (FTP + uploads for THIS server only). */
+        canTransfer: r.canTransfer === true,
         createdAt: r.createdAt,
       })),
     });
@@ -84,6 +87,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!isCollaboratorRole(role)) {
     return NextResponse.json({ error: "role must be viewer or operator" }, { status: 400 });
   }
+  // Opt-in and defaulted off: sharing a server for viewing (or even for
+  // start/stop) must not silently hand over its files.
+  if (b.canTransfer !== undefined && typeof b.canTransfer !== "boolean") {
+    return NextResponse.json({ error: "canTransfer must be true or false" }, { status: 400 });
+  }
+  const canTransfer = b.canTransfer === true;
 
   try {
     const { id } = await params;
@@ -133,6 +142,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         serverId: server.id,
         userId: targetUserId,
         role: role as CollaboratorRole,
+        canTransfer,
         grantedBy: auth.userId as number,
       })
       .returning({ id: serverCollaborators.id });
@@ -143,7 +153,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         action: "server.collaborator.add",
         entityType: "server",
         entityId: server.id,
-        details: { targetUserId, role, serverName: server.name },
+        details: { targetUserId, role, canTransfer, serverName: server.name },
         ipAddress:
           (req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown").slice(0, 45),
       });
@@ -174,8 +184,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
     return NextResponse.json({ error: "userId must be a positive integer" }, { status: 400 });
   }
-  if (!isCollaboratorRole(role)) {
+  const wantsRole = role !== undefined;
+  const wantsTransfer = b.canTransfer !== undefined;
+  if (!wantsRole && !wantsTransfer) {
+    return NextResponse.json({ error: "Provide role and/or canTransfer" }, { status: 400 });
+  }
+  if (wantsRole && !isCollaboratorRole(role)) {
     return NextResponse.json({ error: "role must be viewer or operator" }, { status: 400 });
+  }
+  if (wantsTransfer && typeof b.canTransfer !== "boolean") {
+    return NextResponse.json({ error: "canTransfer must be true or false" }, { status: 400 });
   }
 
   try {
@@ -189,12 +207,49 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     await ensureServerCollaboratorsTable();
     const [updated] = await db
       .update(serverCollaborators)
-      .set({ role: role as CollaboratorRole })
+      .set({
+        ...(wantsRole ? { role: role as CollaboratorRole } : {}),
+        ...(wantsTransfer ? { canTransfer: b.canTransfer === true } : {}),
+      })
       .where(and(eq(serverCollaborators.serverId, server.id), eq(serverCollaborators.userId, targetUserId)))
       .returning({ id: serverCollaborators.id });
     if (!updated) return NextResponse.json({ error: "Collaborator not found" }, { status: 404 });
 
-    return NextResponse.json({ ok: true });
+    // A withdrawn file-transfer grant has to take effect now, not at the next
+    // reconnect: drop that user's live FTP sessions for this server.
+    let sessionsDropped = 0;
+    if (wantsTransfer && b.canTransfer === false) {
+      const { kickTransferSessions } = await import("@/lib/file-transfer-service");
+      const { listAccountsForUser } = await import("@/lib/file-transfer");
+      const accounts = await listAccountsForUser(targetUserId);
+      for (const account of accounts) {
+        if (account.serverId === null || account.serverId === server.id) {
+          sessionsDropped += kickTransferSessions(account.username);
+        }
+      }
+    }
+
+    try {
+      await db.insert(auditLog).values({
+        userId: auth.userId as number,
+        action: "server.collaborator.update",
+        entityType: "server",
+        entityId: server.id,
+        details: {
+          targetUserId,
+          serverName: server.name,
+          ...(wantsRole ? { role } : {}),
+          ...(wantsTransfer ? { canTransfer: b.canTransfer === true } : {}),
+          sessionsDropped,
+        },
+        ipAddress:
+          (req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown").slice(0, 45),
+      });
+    } catch {
+      /* best-effort */
+    }
+
+    return NextResponse.json({ ok: true, sessionsDropped });
   } catch (e: unknown) {
     return apiError(e, "Failed to update collaborator", 500);
   }

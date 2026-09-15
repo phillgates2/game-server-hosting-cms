@@ -140,3 +140,47 @@ export async function listManagedRules(): Promise<string[]> {
     .filter((line) => line.includes("GSM:"))
     .map((line) => line.trim());
 }
+
+// ── File transfer (FTP/FTPS) ─────────────────────────────────────────────────
+
+/**
+ * Allow the FTP control port and its passive data range — TCP only, since FTP
+ * has no UDP side. Called on request from the File Transfer panel rather than
+ * automatically: `ufw` needs root, and an operator who already opens ports by
+ * hand (or runs a cloud firewall) should not get surprise rules.
+ *
+ * The passive range goes in as a UFW range (`50000:50100/tcp`), which is one
+ * rule instead of a hundred.
+ */
+export async function allowTransferPorts(
+  controlPort: number,
+  passiveMin: number,
+  passiveMax: number,
+  label = "GSM: FTP",
+): Promise<{ ok: boolean; rules: string[] }> {
+  const rules: string[] = [];
+
+  const control = await ufw(["allow", `${controlPort}/tcp`, "comment", label]);
+  if (control.ok) rules.push(`${controlPort}/tcp`);
+
+  if (Number.isInteger(passiveMin) && Number.isInteger(passiveMax) && passiveMax >= passiveMin) {
+    const range = `${passiveMin}:${passiveMax}`;
+    const passive = await ufw(["allow", `${range}/tcp`, "comment", label]);
+    if (passive.ok) rules.push(`${range}/tcp`);
+  }
+
+  return { ok: control.ok, rules };
+}
+
+/** Remove the rules {@link allowTransferPorts} added. */
+export async function denyTransferPorts(
+  controlPort: number,
+  passiveMin: number,
+  passiveMax: number,
+): Promise<void> {
+  // `ufw delete allow` matches on the rule itself, so no comment is needed.
+  await ufw(["--force", "delete", "allow", `${controlPort}/tcp`]);
+  if (Number.isInteger(passiveMin) && Number.isInteger(passiveMax) && passiveMax >= passiveMin) {
+    await ufw(["--force", "delete", "allow", `${passiveMin}:${passiveMax}/tcp`]);
+  }
+}

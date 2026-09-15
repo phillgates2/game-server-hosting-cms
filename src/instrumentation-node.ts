@@ -98,6 +98,29 @@ export async function startLocalHeartbeatTimer() {
   }
 }
 
+/**
+ * Start the built-in FTP/FTPS server for large file transfers.
+ *
+ * It runs in this process because it needs the same database (logins) and the
+ * same disk (the game servers' install paths); a separate daemon would need
+ * both handed to it. Best-effort like the rest: a port already in use is
+ * logged and surfaced in the File Transfer panel, never fatal to boot.
+ */
+export async function startFileTransferServer() {
+  if (process.env.GSM_DISABLE_FTP === "true") return;
+  try {
+    const { startFileTransferService } = await import("./lib/file-transfer-service");
+    const stats = await startFileTransferService();
+    if (!stats) {
+      console.log("[ftp] file transfer is off or could not bind — see the File Transfer panel");
+      return;
+    }
+    console.log(`[ftp] listening on ${stats.host}:${stats.port} (${stats.connections} connections)`);
+  } catch (e: unknown) {
+    console.warn("[ftp] file transfer unavailable:", e instanceof Error ? e.message : e);
+  }
+}
+
 /** Load operator settings so auth.ts has them before the first request. */
 export async function loadAuthPolicy() {
   try {
