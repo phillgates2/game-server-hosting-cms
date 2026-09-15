@@ -1245,8 +1245,14 @@ case "${1:-}" in
   restart)
     su - "$GSM_USER" -c "pm2 restart gsm-panel" ;;
   update)
-    bash "$0/../public/update.sh" ${@:2} 2>/dev/null \
-      || bash /opt/gsm-panel/public/update.sh ${@:2} ;;
+    # The panel may live in a custom directory (install --install-dir);
+    # prefer the location recorded at install time, then the default.
+    GSM_UPDATE_SRC="$(grep -E '^INSTALL_DIR=' /opt/gsm-panel/.install-info 2>/dev/null | tail -1 | cut -d= -f2-)"
+    if [ -n "${GSM_UPDATE_SRC:-}" ] && [ -f "$GSM_UPDATE_SRC/public/update.sh" ]; then
+      bash "$GSM_UPDATE_SRC/public/update.sh" ${@:2}
+    else
+      bash /opt/gsm-panel/public/update.sh ${@:2}
+    fi ;;
   stop)
     su - "$GSM_USER" -c "pm2 stop gsm-panel" ;;
   start)

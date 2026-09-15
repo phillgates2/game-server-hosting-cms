@@ -736,6 +736,7 @@ The updater runs seven steps: **backup** *(`.env`, configs, database dump, curre
 | `--no-backup` | Skip the pre-update backup |
 | `--branch NAME` | Track a different branch *(default `main`)* |
 | `--rollback` | Restore the most recent backup |
+| `--install-dir DIR` | Panel directory to update *(default `/opt/gsm-panel`)* |
 
 ### Rolling back
 
