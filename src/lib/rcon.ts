@@ -223,31 +223,39 @@ export async function sendWebRcon(
 ): Promise<RconResult> {
   const start = Date.now();
 
-  // Rust WebSocket RCON uses a simple JSON protocol over HTTP
-  // The panel makes an HTTP request to simulate it since we don't persist WS connections
-  const url = `http://${host}:${port}/${password}`;
+  // Rust RCON is a WebSocket endpoint, not an HTTP POST endpoint. The old
+  // implementation used fetch(), which leaves the panel waiting until the
+  // timeout because Rust never speaks HTTP on this port.
+  const url = `ws://${host}:${port}/${encodeURIComponent(password)}`;
 
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ Identifier: 1, Message: command, Name: "GSM Panel" }),
-      signal: AbortSignal.timeout(timeout),
+    return await new Promise<RconResult>((resolve) => {
+      const ws = new WebSocket(url);
+      let settled = false;
+      const finish = (result: RconResult) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try { ws.close(); } catch { /* already closed */ }
+        resolve(result);
+      };
+      const timer = setTimeout(() => finish({ success: false, response: "", error: "WebRCON connection timed out", duration: Date.now() - start }), timeout);
+
+      ws.addEventListener("open", () => {
+        ws.send(JSON.stringify({ Identifier: 1, Message: command, Name: "GSM Panel" }));
+      });
+      ws.addEventListener("message", (event) => {
+        try {
+          const data = JSON.parse(String(event.data)) as { Message?: string; Error?: string };
+          if (data.Error) finish({ success: false, response: "", error: data.Error, duration: Date.now() - start });
+          else finish({ success: true, response: data.Message || "", duration: Date.now() - start });
+        } catch { finish({ success: true, response: String(event.data), duration: Date.now() - start }); }
+      });
+      ws.addEventListener("error", () => finish({ success: false, response: "", error: "WebRCON socket error (check the Rust rcon.web and rcon.password settings)", duration: Date.now() - start }));
+      ws.addEventListener("close", () => finish({ success: false, response: "", error: "WebRCON connection closed", duration: Date.now() - start }));
     });
-
-    if (!res.ok) {
-      return { success: false, response: "", error: `HTTP ${res.status}`, duration: Date.now() - start };
-    }
-
-    const data = await res.json();
-    return { success: true, response: data.Message || JSON.stringify(data), duration: Date.now() - start };
   } catch (e: unknown) {
-    return {
-      success: false,
-      response: "",
-      error: e instanceof Error ? e.message : "WebRCON failed",
-      duration: Date.now() - start,
-    };
+    return { success: false, response: "", error: e instanceof Error ? e.message : "WebRCON failed", duration: Date.now() - start };
   }
 }
 

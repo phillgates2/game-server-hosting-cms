@@ -82,7 +82,7 @@ interface Category {
   active: boolean;
 }
 
-type Tab = "overview" | "products" | "orders" | "coupons" | "resellers" | "categories";
+type Tab = "overview" | "products" | "orders" | "coupons" | "resellers" | "categories" | "payments";
 
 export default function ShopPanel() {
   const toast = useToast();
@@ -94,6 +94,7 @@ export default function ShopPanel() {
   const [resellers, setResellers] = useState<Reseller[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [analytics, setAnalytics] = useState<any>(null);
+  const [stripeEnabled, setStripeEnabled] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -153,6 +154,7 @@ export default function ShopPanel() {
       if (prodRes.status === "fulfilled" && prodRes.value.ok) {
         const d = await prodRes.value.json();
         setProducts(d.products ?? []);
+        setStripeEnabled(d.stripeEnabled === true);
       }
       if (orderRes.status === "fulfilled" && orderRes.value.ok) {
         const d = await orderRes.value.json();
@@ -472,6 +474,7 @@ export default function ShopPanel() {
           ["coupons", `🎟️ Coupons (${coupons.length})`],
           ["resellers", `🤝 Resellers (${resellers.length})`],
           ["categories", `📂 Categories (${categories.length})`],
+          ["payments", "💳 Payments"],
         ].map(([k, label]) => (
           <button
             key={k}
@@ -482,6 +485,29 @@ export default function ShopPanel() {
           </button>
         ))}
       </div>
+
+      {/* Payment settings */}
+      {tab === "payments" && (
+        <div className="space-y-4 max-w-3xl">
+          <div className="rounded-xl border border-border bg-bg-card p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div><h3 className="font-semibold">Stripe payments</h3><p className="text-xs text-text-muted mt-1">Secure card checkout for one-time purchases and subscriptions.</p></div>
+              <span className={`rounded-full px-3 py-1 text-xs font-medium ${stripeEnabled ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>{stripeEnabled ? "Enabled" : "Not configured"}</span>
+            </div>
+            <div className="mt-5 space-y-3 text-sm">
+              <p>Set these server environment variables, then restart the application:</p>
+              <pre className="overflow-x-auto rounded-lg bg-bg-secondary p-3 text-xs text-text-secondary">STRIPE_SECRET_KEY=sk_live_...{`\n`}STRIPE_WEBHOOK_SECRET=whsec_...</pre>
+              <p className="text-xs text-text-muted">In Stripe, add a webhook endpoint:</p>
+              <code className="block rounded-lg bg-bg-secondary p-3 text-xs text-accent">{typeof window !== "undefined" ? window.location.origin : "https://your-domain"}/api/shop/stripe-webhook</code>
+              <p className="text-xs text-text-muted">Subscribe to <strong>checkout.session.completed</strong> and <strong>checkout.session.expired</strong>. The webhook activates and fulfils paid orders automatically. Without Stripe, orders remain available for manual approval.</p>
+            </div>
+          </div>
+          <div className="rounded-xl border border-border bg-bg-card p-5 text-sm">
+            <h3 className="font-semibold mb-2">Payment flow</h3>
+            <ul className="list-disc pl-5 space-y-1 text-text-secondary text-xs"><li>Cards are handled by Stripe; card details never touch this server.</li><li>Use test keys beginning with <code>sk_test_</code> while validating checkout.</li><li>Never paste secret keys into product descriptions or browser code.</li></ul>
+          </div>
+        </div>
+      )}
 
       {/* Overview */}
       {tab === "overview" && analytics && (
