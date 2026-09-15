@@ -179,6 +179,7 @@ Then visit `http://your-server:3000` to finish setup in the install wizard.
 - **Auto-restart** crashed servers — with a crash-loop breaker: 3 crashes in 10 minutes parks the server instead of restarting forever
 - **Start on boot** after a reboot
 - **File manager** — browse, edit, upload
+- **FTP/FTPS uploads** — a built-in transfer server so users can push large files (mod packs, maps, world saves) straight into their server folder, with per-server logins
 - **Scheduler** — cron restarts, backups, updates & commands, executed by the panel itself
 - **Backups** with one-click restore — automatic before every Steam update (button *and* scheduled), retention-capped and disk-space guarded
 - **Age verification** — registration requires a date of birth; under-16s are refused per the Australian Online Safety Amendment Act 2024
@@ -358,6 +359,12 @@ Only running non-Steam games? Skip it entirely with `--no-steamcmd`.
 | `GSM_LICENSE_SERVER` | optional | URL of the master panel that validates installation license keys. Required for normal installations (`install.sh` fails closed without it); only the master/key-desk instance may omit it |
 | `GSM_LICENSE_MODE` | optional | `master` = this instance is the key desk (skips license validation); anything else = standard licensed installation |
 | `GSM_TRUST_PROXY` | optional | `1` when a trusted edge proxy (Caddy) fronts the panel: client IPs are read from the **last** `X-Forwarded-For` hop (the one your proxy appended). Unset/`0` = forwarded headers are not trusted, so the IP allowlist fails closed against header-claimed identities. `install.sh` sets it automatically when Caddy is enabled |
+| `GSM_FTP_PORT` | optional | Built-in FTP/FTPS control port *(default `2121`)*. The listener is on by default; `GSM_DISABLE_FTP=true` keeps it off |
+| `GSM_FTP_PASSIVE_PORTS` | optional | Passive data range for FTP transfers *(default `50000-50100`)* — open it in the firewall too |
+| `GSM_FTP_MASQUERADE_HOST` | optional | Hostname FTP clients are told to dial back, for NAT / tunnel / reverse-proxy setups |
+| `GSM_FTP_TLS_CERT` / `GSM_FTP_TLS_KEY` | optional | PEM certificate + key enabling explicit FTPS (`AUTH TLS`). Without them the server runs plain FTP |
+| `GSM_FTP_MAX_UPLOAD_MB` | optional | Per-file upload cap, `0` = unlimited *(default `0`)* |
+| `GSM_FILE_TRANSFER_SECRET` | optional | Key that encrypts stored FTP passwords. Defaults to `JWT_SECRET` |
 | `GSM_PANEL_MASTER_KEY` | optional | The **master key** — the panel's only key (min 16 chars). Guards fresh installs (the "install key"), validates as an unlimited license key, and administers shop/license APIs via the `X-Master-Key` header. `install.sh` generates one by default; you can also generate/rotate it in the panel (API Keys) — stored hash-only, shown once |
 | `GSM_DISABLE_AUTOSTART` | optional | Set `true` to stop servers marked *Start on node boot* from launching when the panel starts |
 | `GSM_LOG_FORMAT` | optional | `text` *(default)* or `json` for machine-readable logs |
@@ -593,6 +600,91 @@ Settings page; a webhook alone cannot create channels.
 
 </details>
 
+<details>
+<summary><b>📦 Uploading large files (built-in FTP/FTPS server)</b></summary>
+
+<br>
+
+The browser uploader has to read a whole file into the panel's memory before it
+reaches disk — fine for a config file, hopeless for a 40 GB world save. So the
+panel runs its own FTP/FTPS server: files land in the folder the user can
+already manage, and nothing is buffered in the web process.
+
+**Where:** Servers → **File Transfer**, and the same page carries the listener
+settings for whoever runs it.
+
+| Setting | Default |
+|:--|:--|
+| Port | `2121` |
+| Passive range | `50000-50100` |
+| Encryption | plain FTP until a certificate is set, then explicit FTPS (`AUTH TLS`) |
+| Upload cap | unlimited |
+| Idle timeout / connection limit | 5 minutes / 64 |
+
+**Who can do what** — the feature has its own permissions (Roles → **File
+Transfer**), so FTP access can be granted without handing over the web file
+manager, and the reverse:
+
+| Permission | Grants |
+|:--|:--|
+| `transfer.view` | Open the panel and **use** existing FTP logins. Revoking it kills the logins too |
+| `transfer.manage` | Create, rotate, enable/disable and delete **own** logins |
+| `transfer.disconnect` | Drop sessions that are already open, without re-keying the password |
+| `transfer.any` | Manage **every** user's logins (the all-logins table) and act on their sessions |
+| `transfer.settings` | Change the listener settings and the firewall buttons |
+
+A fresh install gives administrators all five and moderators the first three;
+the default `user` role gets none, matching the file manager (which needs
+`servers.files`). Grant them per role under **Roles → File Transfer**.
+
+**Which servers, though — those keys are capabilities, not scope.** A transfer
+permission never means "every server". The servers a login can reach are:
+
+| Reachable | Why |
+|:--|:--|
+| Servers you own | Ownership |
+| Servers shared with you **with 📡 file transfer** enabled | A per-server grant, set by that server's owner under **Sharing** |
+| Every server | Only `transfer.any` (the panel-wide oversight key, admins by default) |
+
+So a role that may edit every server still cannot upload into every disk: an
+operator has to be handed a server before FTP will serve it. Sharing a server
+as a *viewer* or *operator* does not include files — **📡 file transfer** is a
+separate switch on each sharing row, off by default, and withdrawing it cuts
+that user's live FTP sessions immediately.
+
+That makes the safe grant for outside help: a role with `transfer.view` +
+`transfer.manage`, plus **📡 file transfer** on the one server they work on.
+They get a login that reaches that server and nothing else.
+
+- **Two kinds of login.** The general account serves every server the user can
+  reach (own + granted). A **server-scoped** login (`name.42`) lands directly
+  inside one server's folder — the safe thing to hand to a mod team.
+- **Passwords are readable in the panel.** They are encrypted at rest, not
+  hashed, because people paste them into FileZilla weeks later. **Rotate** drops
+  that login's live sessions immediately, and **disable**/**delete** cut
+  access without touching the other logins.
+- **Everything is audited** — logins, failed logins, uploads, deletes, renames.
+- **Firewall:** allow the control port and the passive range (TCP). The panel
+  has one-click UFW buttons for exactly those rules; by hand it is
+
+```bash
+sudo ufw allow 2121/tcp
+sudo ufw allow 50000:50100/tcp
+```
+
+- **Remote-node servers are not served over FTP** — their files live on another
+  machine, which the panel reaches through the node agent instead.
+- **Uploads are atomic.** A transfer that dies half-way leaves no `.part` file
+  behind, and the file it was replacing is untouched until the new one is whole.
+
+```bash
+# what a user runs — the panel shows these with their own host and login filled in
+curl -T world.zip ftp://ftp.example.com:2121/survival-12/world.zip --user 'alice:password'
+lftp -u alice,password -e 'set ftp:ssl-allow true; put modpack.zip -o /survival-12/modpack.zip' ftp.example.com -p 2121
+```
+
+</details>
+
 ---
 
 ## 🛠️ Operations
@@ -720,7 +812,7 @@ One command chains every check, exiting non-zero on the first failure — drop i
 | `npm run lint` | ESLint, including React hooks rules |
 | `npm run verify:templates` | All 1,753 template options — types, enums, defaults, and that every declared variable is actually consumed |
 | `npm run verify:installers` | Renders every game's install script, runs `bash -n` + shellcheck, then **executes** it in a sandbox with SteamCMD/curl/apt mocked, and asserts the artifacts the panel needs were produced |
-| `npm run verify:security` | 384 regression checks pinning the security audit fixes and every feature stage since: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, the 16+ age gate, the pre-update backup safety net, backup retention & disk guard, the crash-loop breaker, the resource-limit watchdog, password-reset token handling, host threshold alerts, Source modding wiring, Discord OAuth sign-in rules, metrics-history access control, the anonymous status-link whitelist, scheduler webhook wiring, **the gate-free login model + install-key and master-key rails, installer-script key wiring, staged-rollout halt rails, restore verification gates, collaborator permission matrix, blueprint caps, maintenance-window release rules, idle-update busy guards, console read windows, leaderboard visibility, and the webhook delivery log** — plus a sweep for leaked exception messages |
+| `npm run verify:security` | 461 regression checks pinning the security audit fixes and every feature stage since: path containment, backup-name allowlisting, SQL identifier quoting, JWT policy, security headers, the 16+ age gate, the pre-update backup safety net, backup retention & disk guard, the crash-loop breaker, the resource-limit watchdog, password-reset token handling, host threshold alerts, Source modding wiring, Discord OAuth sign-in rules, metrics-history access control, the anonymous status-link whitelist, scheduler webhook wiring, **the gate-free login model + install-key and master-key rails, installer-script key wiring, staged-rollout halt rails, restore verification gates, collaborator permission matrix, blueprint caps, maintenance-window release rules, idle-update busy guards, console read windows, leaderboard visibility, the webhook delivery log, and the file-transfer permission set** — plus a sweep for leaked exception messages |
 
 All of these run automatically in CI on every push and pull request, along
 with a production build and a high-severity dependency audit.
