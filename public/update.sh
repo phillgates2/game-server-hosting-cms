@@ -18,6 +18,10 @@
 #    --rollback       Restore the last backup instead of updating
 #    --help, -h       Show this help
 #
+#  Environment:
+#    GSM_BACKUP_DIR   Where pre-update backups are stored
+#                     (default: /opt/gsm-panel-backups)
+#
 #  What this script does:
 #    1. Backs up the current installation (.env, drizzle config, ecosystem)
 #    2. Pulls the latest code from GitHub
@@ -31,6 +35,10 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 
 set -euo pipefail
+
+# Fail fast if git ever needs credentials, instead of hanging the whole update
+# at a "Username for 'https://github.com':" prompt.
+export GIT_TERMINAL_PROMPT=0
 
 # ── Colors & helpers ──────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -46,6 +54,21 @@ warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
 err()   { echo -e "${RED}[✗]${NC} $*" >&2; }
 die()   { err "$*"; exit 1; }
 
+# ask_yes_no "prompt" <default: y|n>
+# Asks on a TTY; when stdin is not a terminal (e.g. the one-liner run over
+# ssh or piped) it falls back to the default answer, so a `read` hitting EOF
+# can never kill the script silently under set -e.
+ask_yes_no() {
+  local prompt="$1" def="$2" ans=""
+  if [[ -t 0 ]]; then
+    read -rp "$prompt" ans || ans=""
+  else
+    warn "No interactive terminal — using the default answer."
+  fi
+  ans="${ans:-$def}"
+  [[ "$ans" =~ ^[yY] ]]
+}
+
 # ── Defaults ──────────────────────────────────────────────────────────────────
 INSTALL_DIR="/opt/gsm-panel"
 GSM_USER="gsm"
@@ -53,7 +76,7 @@ BRANCH="main"
 FORCE="false"
 NO_BACKUP="false"
 ROLLBACK="false"
-BACKUP_DIR="/opt/gsm-panel-backups"
+BACKUP_DIR="${GSM_BACKUP_DIR:-/opt/gsm-panel-backups}"
 
 # ── Read install-info if it exists ────────────────────────────────────────────
 if [[ -f "$INSTALL_DIR/.install-info" ]]; then
@@ -121,6 +144,10 @@ echo ""
 
 cd "$INSTALL_DIR"
 
+# Shell-quoted form of the install dir, for use inside `su -c "..."` strings
+# (a custom --install-dir with spaces would otherwise break those commands).
+INSTALL_DIR_Q=$(printf '%q' "$INSTALL_DIR")
+
 # ── Fix git safe.directory ────────────────────────────────────────────────────
 # When the repo is owned by 'gsm' but the updater runs as root, git refuses
 # to operate due to safe.directory checks.  Mark this directory as safe.
@@ -183,8 +210,10 @@ if [[ "$ROLLBACK" == "true" ]]; then
   echo ""
 
   if [[ "$FORCE" != "true" ]]; then
-    read -rp "  Restore this backup? [y/N]: " confirm
-    [[ "${confirm,,}" == "y" ]] || { log "Cancelled."; exit 0; }
+    if ! ask_yes_no "  Restore this backup? [y/N]: " n; then
+      log "Cancelled."
+      exit 0
+    fi
   fi
 
   log "Stopping panel..."
@@ -199,23 +228,25 @@ if [[ "$ROLLBACK" == "true" ]]; then
   # Restore the git state
   if [[ -f "$LATEST_BACKUP/git-commit.txt" ]]; then
     RESTORE_COMMIT=$(cat "$LATEST_BACKUP/git-commit.txt")
-    git checkout "$RESTORE_COMMIT" 2>/dev/null || warn "Could not checkout commit $RESTORE_COMMIT"
+    # -f: the worktree still holds the current (newer) code, and any local
+    # edits must not block the restore.
+    git checkout -f "$RESTORE_COMMIT" 2>/dev/null || warn "Could not checkout commit $RESTORE_COMMIT"
   fi
 
   # Rebuild
   log "Reinstalling dependencies..."
-  su - "$GSM_USER" -c "cd $INSTALL_DIR && npm ci" > /dev/null 2>&1 || true
+  su - "$GSM_USER" -c "cd $INSTALL_DIR_Q && npm ci" > /dev/null 2>&1 || true
   log "Rebuilding..."
-  su - "$GSM_USER" -c "cd $INSTALL_DIR && rm -rf .next && npx next build" > /tmp/gsm-rollback-build.log 2>&1 || true
-  if ! su - "$GSM_USER" -c "test -f $INSTALL_DIR/.next/BUILD_ID" 2>/dev/null; then
+  su - "$GSM_USER" -c "cd $INSTALL_DIR_Q && rm -rf .next && npx next build" > /tmp/gsm-rollback-build.log 2>&1 || true
+  if ! su - "$GSM_USER" -c "test -f $INSTALL_DIR_Q/.next/BUILD_ID" 2>/dev/null; then
     err "Rollback rebuild failed!"
     tail -30 /tmp/gsm-rollback-build.log
     die "The restored code did not build. Full log: /tmp/gsm-rollback-build.log"
   fi
-  su - "$GSM_USER" -c "cd $INSTALL_DIR && npm prune --omit=dev" > /dev/null 2>&1 || true
+  su - "$GSM_USER" -c "cd $INSTALL_DIR_Q && npm prune --omit=dev" > /dev/null 2>&1 || true
 
   log "Starting panel..."
-  su - "$GSM_USER" -c "pm2 restart gsm-panel" 2>/dev/null || su - "$GSM_USER" -c "cd $INSTALL_DIR && pm2 start ecosystem.config.cjs" 2>/dev/null || true
+  su - "$GSM_USER" -c "pm2 restart gsm-panel" 2>/dev/null || su - "$GSM_USER" -c "cd $INSTALL_DIR_Q && pm2 start ecosystem.config.cjs" 2>/dev/null || true
 
   ok "Rollback complete to $(cat "$LATEST_BACKUP/git-commit.txt" 2>/dev/null || echo 'previous backup')"
   echo ""
@@ -243,8 +274,7 @@ if [[ "$LOCAL_HEAD" == "$REMOTE_HEAD" ]]; then
   echo ""
 
   if [[ "$FORCE" != "true" ]]; then
-    read -rp "  Force rebuild anyway? [y/N]: " confirm
-    if [[ "${confirm,,}" != "y" ]]; then
+    if ! ask_yes_no "  Force rebuild anyway? [y/N]: " n; then
       log "Nothing to do."
       exit 0
     fi
@@ -268,8 +298,7 @@ fi
 
 # ── Confirmation ──────────────────────────────────────────────────────────────
 if [[ "$FORCE" != "true" ]]; then
-  read -rp "  Proceed with update? [Y/n]: " confirm
-  if [[ "${confirm,,}" == "n" ]]; then
+  if ! ask_yes_no "  Proceed with update? [Y/n]: " y; then
     log "Update cancelled."
     exit 0
   fi
@@ -324,11 +353,16 @@ else
     warn "pg_dump not found — skipping database dump"
   fi
 
-  chown -R "$GSM_USER:$GSM_USER" "$BACKUP_DIR" 2>/dev/null || true
+  # Backups hold .env, the database dump and the license key — they must
+  # stay unreadable to the unprivileged panel user. Root-only, mode 700.
+  chown -R root:root "$BACKUP_DIR" 2>/dev/null || true
+  chmod 700 "$BACKUP_DIR" 2>/dev/null || true
   ok "Backup saved to $THIS_BACKUP"
 
   # Prune old backups (keep last 5)
-  BACKUP_COUNT=$(ls -1d "$BACKUP_DIR"/gsm-backup-* 2>/dev/null | wc -l || echo 0)
+  # (`wc -l` always prints a number, even for an empty directory — the old
+  # `|| echo 0` appended a second line and broke the numeric comparison.)
+  BACKUP_COUNT=$(ls -1d "$BACKUP_DIR"/gsm-backup-* 2>/dev/null | wc -l || true)
   if [[ $BACKUP_COUNT -gt 5 ]]; then
     ls -1d "$BACKUP_DIR"/gsm-backup-* | sort | head -n -5 | while read -r old; do
       rm -rf "$old"
@@ -452,13 +486,13 @@ fi
 step "Installing dependencies"
 
 log "Running npm ci (full install including devDependencies)..."
-su - "$GSM_USER" -c "cd $INSTALL_DIR && npm ci" > /tmp/gsm-update-npm.log 2>&1 || true
+su - "$GSM_USER" -c "cd $INSTALL_DIR_Q && npm ci" > /tmp/gsm-update-npm.log 2>&1 || true
 
 # Verify
-if ! su - "$GSM_USER" -c "test -d $INSTALL_DIR/node_modules/next" 2>/dev/null; then
+if ! su - "$GSM_USER" -c "test -d $INSTALL_DIR_Q/node_modules/next" 2>/dev/null; then
   warn "npm ci failed — falling back to npm install..."
-  su - "$GSM_USER" -c "cd $INSTALL_DIR && npm install" > /tmp/gsm-update-npm.log 2>&1 || true
-  if ! su - "$GSM_USER" -c "test -d $INSTALL_DIR/node_modules/next" 2>/dev/null; then
+  su - "$GSM_USER" -c "cd $INSTALL_DIR_Q && npm install" > /tmp/gsm-update-npm.log 2>&1 || true
+  if ! su - "$GSM_USER" -c "test -d $INSTALL_DIR_Q/node_modules/next" 2>/dev/null; then
     err "npm install failed!"
     tail -20 /tmp/gsm-update-npm.log
     die "Cannot continue without dependencies."
@@ -471,8 +505,8 @@ ok "Dependencies installed"
 # ═══════════════════════════════════════════════════════════════════════════════
 step "Applying database migrations"
 
-su - "$GSM_USER" -c "cd $INSTALL_DIR && npx drizzle-kit push" > /tmp/gsm-update-drizzle.log 2>&1 || true
-tail -3 /tmp/gsm-update-drizzle.log
+su - "$GSM_USER" -c "cd $INSTALL_DIR_Q && npx drizzle-kit push" > /tmp/gsm-update-drizzle.log 2>&1 || true
+tail -3 /tmp/gsm-update-drizzle.log 2>/dev/null || true
 
 if grep -qi "Changes applied\|No changes\|already up" /tmp/gsm-update-drizzle.log 2>/dev/null; then
   ok "Database schema up to date"
@@ -485,13 +519,13 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════════
 step "Building production bundle"
 
-su - "$GSM_USER" -c "cd $INSTALL_DIR && rm -rf .next && npx next build" > /tmp/gsm-update-build.log 2>&1 || true
+su - "$GSM_USER" -c "cd $INSTALL_DIR_Q && rm -rf .next && npx next build" > /tmp/gsm-update-build.log 2>&1 || true
 
 # A failed build still leaves a partial .next directory behind, so check for
 # BUILD_ID, which Next only writes once the build completes successfully.
-if ! su - "$GSM_USER" -c "test -f $INSTALL_DIR/.next/BUILD_ID" 2>/dev/null; then
+if ! su - "$GSM_USER" -c "test -f $INSTALL_DIR_Q/.next/BUILD_ID" 2>/dev/null; then
   err "Build failed!"
-  tail -30 /tmp/gsm-update-build.log
+  tail -30 /tmp/gsm-update-build.log 2>/dev/null || true
   die "Cannot continue without a successful build. Rollback with:  bash update.sh --rollback"
 fi
 tail -8 /tmp/gsm-update-build.log
@@ -499,7 +533,7 @@ ok "Production build complete"
 
 # Prune devDependencies
 log "Pruning devDependencies..."
-su - "$GSM_USER" -c "cd $INSTALL_DIR && npm prune --omit=dev" > /dev/null 2>&1 || true
+su - "$GSM_USER" -c "cd $INSTALL_DIR_Q && npm prune --omit=dev" > /dev/null 2>&1 || true
 ok "DevDependencies pruned"
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -508,8 +542,8 @@ ok "DevDependencies pruned"
 step "Restarting panel"
 
 su - "$GSM_USER" -c "pm2 restart gsm-panel" 2>/dev/null \
-  || su - "$GSM_USER" -c "cd $INSTALL_DIR && pm2 start ecosystem.config.cjs" 2>/dev/null \
-  || su - "$GSM_USER" -c "cd $INSTALL_DIR && pm2 start npm --name gsm-panel -- start" 2>/dev/null \
+  || su - "$GSM_USER" -c "cd $INSTALL_DIR_Q && pm2 start ecosystem.config.cjs" 2>/dev/null \
+  || su - "$GSM_USER" -c "cd $INSTALL_DIR_Q && pm2 start npm --name gsm-panel -- start" 2>/dev/null \
   || true
 
 su - "$GSM_USER" -c "pm2 save" 2>/dev/null || true
