@@ -718,6 +718,14 @@ console.log("\nH2/H3 auth enforcement wiring");
     /LIMITS/.test(auditRoute) && /JSON\.parse/.test(auditRoute) &&
       /entityId: normId/.test(auditRoute)
   );
+  // jsonb details (`{ scope, username }` from file transfer) used to be
+  // dropped straight into JSX and threw React error #31.
+  const overview = read("../src/components/panels/OverviewPanel.tsx");
+  check(
+    "overview recent activity formats jsonb details instead of rendering the object",
+    /formatAuditDetails\(entry\.details/.test(overview) &&
+      !/\{entry\.details\s*\|\|/.test(overview)
+  );
 
   // Site settings: admin-only, but a bulk save must not create junk keys,
   // and JSON-baked settings must be JSON when saved, not at render time.

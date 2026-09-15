@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { eventLabel } from "@/lib/event-labels";
+import { formatAuditDetails } from "@/lib/audit-details";
 import type { FleetEvent } from "@/lib/event-feed";
 import { UPTIME_ATTENTION_PERCENT, type UptimeGrade } from "@/lib/uptime";
 import { IDLE_DEFAULT_THRESHOLD_HOURS } from "@/lib/idle-math";
@@ -49,7 +50,8 @@ interface NodeRow {
 interface ActivityEntry {
   id: number;
   action: string;
-  details: string | null;
+  /** jsonb — never render this raw; React error #31 on objects. */
+  details: unknown;
   createdAt: string;
   username: string | null;
 }
@@ -517,7 +519,7 @@ export default function OverviewPanel({ user, onNavigate }: { user: AuthUser; on
                     <p className="text-sm font-medium text-text-primary">{entry.action}</p>
                     <span className="text-[11px] text-text-muted">{formatRelativeTime(entry.createdAt)}</span>
                   </div>
-                  <p className="mt-1 text-xs text-text-muted">{entry.details || (entry.username ? `By ${entry.username}` : "Panel activity")}</p>
+                  <p className="mt-1 text-xs text-text-muted">{formatAuditDetails(entry.details, entry.username ? `By ${entry.username}` : "Panel activity")}</p>
                 </div>
               )) : <p className="rounded-lg bg-bg-secondary px-3 py-2 text-sm text-text-secondary">No recent activity yet.</p>}
             </div>
