@@ -20,7 +20,7 @@ interface TemplateVar {
   user_viewable: boolean; user_editable: boolean; rules: string; field_type: string;
   enum_values?: Record<string, string>; category?: string;
 }
-interface Collaborator { id: number; userId: number; email: string | null; role: string; createdAt: string }
+interface Collaborator { id: number; userId: number; email: string | null; role: string; canTransfer: boolean; createdAt: string }
 interface BlueprintEntry { presetId: number; count: number; namePattern: string | null }
 interface BlueprintInfo { id: number; name: string; description: string | null; entries: BlueprintEntry[]; mine: boolean }
 
@@ -122,6 +122,8 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   const [collabBusy, setCollabBusy] = useState<number | null>(null);
   const [collabEmail, setCollabEmail] = useState("");
   const [collabRoleSel, setCollabRoleSel] = useState<"viewer" | "operator">("viewer");
+  /** File transfer is granted per server — this is the opt-in for the next share. */
+  const [collabTransferSel, setCollabTransferSel] = useState(false);
   const [blueprintsOpen, setBlueprintsOpen] = useState(false);
   const [blueprints, setBlueprints] = useState<BlueprintInfo[]>([]);
   const [bpName, setBpName] = useState("");
@@ -491,10 +493,17 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
       const res = await fetch(`/api/servers/${id}/collaborators`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, role: collabRoleSel }),
+        body: JSON.stringify({ email, role: collabRoleSel, canTransfer: collabTransferSel }),
       });
       const data = await res.json().catch(() => null);
-      if (res.ok) { toast.success("Shared", `${email} can now access this server as ${collabRoleSel}.`); setCollabEmail(""); void loadCollabs(id); }
+      if (res.ok) {
+        toast.success(
+          "Shared",
+          `${email} can access this server as ${collabRoleSel}${collabTransferSel ? " and may transfer files to it" : ""}.`
+        );
+        setCollabEmail("");
+        void loadCollabs(id);
+      }
       else toast.error("Share failed", data?.error || "Could not add collaborator");
     } catch (e) { toast.error("Share failed", e instanceof Error ? e.message : "Network error"); }
     finally { setCollabBusy(null); }
@@ -513,6 +522,38 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
       if (res.ok) void loadCollabs(id);
       else toast.error("Update failed", data?.error || "Could not change role");
     } finally { setCollabBusy(null); }
+  }
+
+  /**
+   * Grant or withdraw per-server file transfer.
+   *
+   * The grant only ever covers THIS server: that is the whole point — a
+   * collaborator gets the disk they were handed, never the fleet.
+   */
+  async function setCollabTransfer(id: number, userId: number, canTransfer: boolean) {
+    if (collabBusy) return;
+    setCollabBusy(id);
+    try {
+      const res = await fetch(`/api/servers/${id}/collaborators`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, canTransfer }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok) {
+        toast.success(
+          canTransfer ? "File transfer granted" : "File transfer withdrawn",
+          canTransfer
+            ? "They can upload to this server over FTP or the file manager."
+            : `Old FTP logins for this server were cut off${data?.sessionsDropped ? ` (${data.sessionsDropped} session${data.sessionsDropped === 1 ? "" : "s"} disconnected)` : ""}.`
+        );
+        void loadCollabs(id);
+      } else {
+        toast.error("Update failed", data?.error || "Could not change file transfer access");
+      }
+    } finally {
+      setCollabBusy(null);
+    }
   }
 
   async function removeCollab(id: number, userId: number, label: string) {
@@ -1970,6 +2011,16 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                                             <option value="operator">operator — can start/stop</option>
                                           </select>
                                           <button
+                                            onClick={() => void setCollabTransfer(server.id, c.userId, !c.canTransfer)}
+                                            disabled={collabBusy === server.id}
+                                            title={c.canTransfer ? "Withdraw file transfer (FTP/uploads) on this server" : "Allow file transfer (FTP/uploads) on this server only"}
+                                            className={`rounded px-1.5 py-0.5 text-[11px] disabled:opacity-40 ${
+                                              c.canTransfer
+                                                ? "bg-success/15 text-success"
+                                                : "text-text-muted hover:text-text-secondary"
+                                            }`}
+                                          >{c.canTransfer ? "📡 files" : "📡 files off"}</button>
+                                          <button
                                             onClick={() => void removeCollab(server.id, c.userId, c.email ?? `user #${c.userId}`)}
                                             disabled={collabBusy === server.id}
                                             title="Remove access"
@@ -1994,13 +2045,26 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                                       <option value="viewer">viewer</option>
                                       <option value="operator">operator</option>
                                     </select>
+                                    <label className="flex items-center gap-1.5 text-[11px] text-text-secondary">
+                                      <input
+                                        type="checkbox"
+                                        checked={collabTransferSel}
+                                        onChange={(e) => setCollabTransferSel(e.target.checked)}
+                                      />
+                                      📡 file transfer
+                                    </label>
                                     <button
                                       onClick={() => void addCollab(server.id)}
                                       disabled={collabBusy === server.id || !collabEmail.trim()}
                                       className="px-3 py-1.5 rounded-lg text-xs font-medium bg-accent text-white hover:bg-accent-hover disabled:opacity-40"
                                     >{collabBusy === server.id ? "Working…" : "Share"}</button>
                                   </div>
-                                  <p className="text-[10px] text-text-muted">Viewers can watch this server but not touch it. Operators can also start/stop/restart. Only you{user.role === "admin" ? " (admins always have full control)" : ""} can change sharing or settings.</p>
+                                  <p className="text-[10px] text-text-muted">
+                                    Viewers can watch this server but not touch it. Operators can also start/stop/restart.
+                                    📡 file transfer is granted per server: it lets them upload to <em>this</em> server only —
+                                    over FTP (File Transfer) or the file manager — and never to the rest of the fleet. Only you
+                                    {user.role === "admin" ? " (admins always have full control)" : ""} can change sharing or settings.
+                                  </p>
                                 </div>
                               )}
                             </div>

@@ -30,6 +30,16 @@ export const PERMISSION_CATEGORIES = {
       "servers.schedule":     "Manage server schedules",
     },
   },
+  transfer: {
+    label: "File Transfer",
+    permissions: {
+      "transfer.view":       "Use the file transfer panel and FTP logins",
+      "transfer.manage":     "Create and manage own FTP logins",
+      "transfer.disconnect": "Disconnect live FTP sessions",
+      "transfer.any":        "Manage every user's FTP logins",
+      "transfer.settings":   "Change FTP/FTPS server settings",
+    },
+  },
   nodes: {
     label: "Nodes",
     permissions: {
@@ -262,6 +272,7 @@ export const DEFAULT_ROLES = [
       "servers.view": true, "servers.create": true, "servers.edit": true,
       "servers.start_stop": true, "servers.restart": true, "servers.clone": true,
       "servers.install": true, "servers.files": true,
+      "transfer.view": true, "transfer.manage": true, "transfer.disconnect": true,
       "nodes.view": true, "nodes.monitor": true,
       "games.view": true, "games.templates": true, "games.variables": true,
       "users.view": true, "users.suspend": true, "users.limits": true,
