@@ -66,6 +66,17 @@ export const API_DOCS: ApiDocGroup[] = [
     ],
   },
   {
+    title: "File transfer",
+    icon: "📡",
+    note: "The built-in FTP/FTPS server, for files too large for a browser upload.",
+    endpoints: [
+      { method: "GET", path: "/api/file-transfer", description: "Endpoint, listener state, and the caller's own FTP logins.", auth: "transfer.view" },
+      { method: "POST", path: "/api/file-transfer", description: "Create / rotate / enable / disable / delete logins, drop live sessions, restart the listener.", auth: "transfer.manage · transfer.disconnect · transfer.any · transfer.settings" },
+      { method: "PUT", path: "/api/servers/:id/files/stream", description: "Streamed upload straight to disk (no body buffering) for large files.", auth: "servers.files" },
+      { method: "POST", path: "/api/settings/file-transfer", description: "Listener settings, TLS paths, and the UFW open/close helpers.", auth: "transfer.settings" },
+    ],
+  },
+  {
     title: "Nodes",
     icon: "🖥️",
     endpoints: [

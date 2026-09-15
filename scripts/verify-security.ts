@@ -4064,6 +4064,154 @@ console.log("\nDBG48 multi-node rails");
   );
 }
 
+// ── Per-server transfer grants ──────────────────────────────────────────────
+console.log("\nFILEXFER per-server grants");
+{
+  const fs = require("node:fs");
+  const read = (rel: string) => fs.readFileSync(new URL(rel, import.meta.url), "utf8") as string;
+
+  const collab = read("../src/lib/server-collab.ts");
+  const schema = read("../src/db/schema.ts");
+  const transferLib = read("../src/lib/file-transfer.ts");
+  const transferRoute = read("../src/app/api/file-transfer/route.ts");
+  const collabRoute = read("../src/app/api/servers/[id]/collaborators/route.ts");
+  const filesRoute = read("../src/app/api/servers/[id]/files/route.ts");
+  const uploadRoute = read("../src/app/api/servers/[id]/files/upload/route.ts");
+  const streamRoute = read("../src/app/api/servers/[id]/files/stream/route.ts");
+
+  check(
+    "the per-server transfer grant exists in the schema and in the lazy DDL",
+    // panels built before the column existed never run drizzle-kit push.
+    /canTransfer: boolean\("can_transfer"\)\.notNull\(\)\.default\(false\)/.test(schema) &&
+      /ALTER TABLE server_collaborators ADD COLUMN IF NOT EXISTS can_transfer BOOLEAN NOT NULL DEFAULT FALSE/.test(collab)
+  );
+  check(
+    "the grant is per server and defaults to off",
+    /export function accessCanTransfer\(access: ServerAccess, collaboratorCanTransfer: boolean\): boolean \{/.test(collab) &&
+      /if \(access === "owner"\) return true;\n\s+return collaboratorCanTransfer;/.test(collab)
+  );
+  check(
+    "FTP folders come from ownership plus per-server grants, never servers.edit",
+    // The regression this pins: `servers.edit` used to mean "every server's
+    // disk", so a moderator could FTP into the whole fleet.
+    /const seesAll = await hasPermission\(userId, "transfer\.any", null\)/.test(transferLib) &&
+      /transferSharedServerIdsFor\(userId\)/.test(transferLib) &&
+      /or\(eq\(gameServers\.userId, userId\), inArray\(gameServers\.id, sharedIds\)\)/.test(transferLib) &&
+      !/foldersForUser[\s\S]{0,600}"servers\.edit"/.test(transferLib)
+  );
+  check(
+    "the one access question is server-specific and key-scope aware",
+    /export async function canTransferToServer\(\s*serverId: number,\s*userId: number,\s*keyScope: import\("\.\/key-scope"\)\.KeyScope\s*\): Promise<boolean>/.test(collab) &&
+      /hasPermission\(userId, "transfer\.any", keyScope\)/.test(collab) &&
+      /if \(server\.userId === userId\) return true;/.test(collab) &&
+      /canTransfer: serverCollaborators\.canTransfer/.test(collab) &&
+      // No global escape hatch: no permission check may widen this to every
+      // server (the doc comment may still explain why servers.edit is absent).
+      !/hasPermission\([^)]*"servers\.edit"/.test(collab)
+  );
+  check(
+    "creating a server-scoped login checks access to THAT server",
+    /if \(!\(await canTransferToServer\(serverId, auth\.userId, auth\.keyScope\)\)\)/.test(transferRoute) &&
+      /You do not have file transfer access to that server/.test(transferRoute)
+  );
+  check(
+    "panel uploads honour the same per-server grant (FTP and browser agree)",
+    [filesRoute, uploadRoute, streamRoute].every(
+      (text) =>
+        /const canEditAny = await hasPermission\(auth\.userId, "servers\.edit", auth\.keyScope\)/.test(text) &&
+        /canTransferToServer\(server\.id, auth\.userId, auth\.keyScope\)/.test(text)
+    )
+  );
+  check(
+    "sharing can grant and withdraw file transfer on one server",
+    /canTransfer: b\.canTransfer === true/.test(collabRoute) &&
+      /canTransfer: serverCollaborators\.canTransfer/.test(collabRoute) &&
+      /Provide role and\/or canTransfer/.test(collabRoute) &&
+      // Withdrawing it drops live sessions instead of waiting for a reconnect.
+      /kickTransferSessions\(account\.username\)/.test(collabRoute)
+  );
+}
+
+// ── File transfer permission set ────────────────────────────────────────────
+console.log("\nFILEXFER permission set rails");
+{
+  const fs = require("node:fs");
+  const read = (rel: string) => fs.readFileSync(new URL(rel, import.meta.url), "utf8") as string;
+
+  const perms = read("../src/lib/permissions.ts");
+  const transferRoute = read("../src/app/api/file-transfer/route.ts");
+  const transferSettings = read("../src/app/api/settings/file-transfer/route.ts");
+  const transferLib = read("../src/lib/file-transfer.ts");
+  const dashboard = read("../src/components/Dashboard.tsx");
+  const panel = read("../src/components/panels/FileTransferPanel.tsx");
+
+  // The feature owns a permission category instead of borrowing servers.files
+  // or panel.settings: FTP is a second door into the same disk, and operators
+  // need to be able to grant one without the other.
+  const declared = (perms.match(/"transfer\.[a-z]+"/g) || []).map((k) => k.replace(/"/g, ""));
+  const expected = ["transfer.view", "transfer.manage", "transfer.disconnect", "transfer.any", "transfer.settings"];
+  check(
+    "the transfer.* permission category is declared",
+    /transfer: \{\n\s+label: "File Transfer",/.test(perms) &&
+      expected.every((k) => declared.includes(k))
+  );
+  check(
+    "the transfer routes never gate on servers.files or panel.settings",
+    !transferRoute.includes('"servers.files"') && !transferRoute.includes('"panel.settings"') &&
+      !transferSettings.includes('"panel.settings"')
+  );
+  check(
+    "every transfer route threads the key scope on its permission checks",
+    [transferRoute, transferSettings].every((text) =>
+      [...text.matchAll(/hasPermission\((auth(?:User)?)\.userId,\s*("[^"]*")/g)].every((m) =>
+        new RegExp(`hasPermission\\(${m[1]}\\.userId,\\s*${m[2]},\\s*${m[1]}\\.keyScope\\)`).test(text)
+      )
+    )
+  );
+  check(
+    "each transfer permission key actually gates something",
+    // A key that exists in the UI but reads nothing is a permission that lies.
+    expected.every((key) => {
+      const hits = [transferRoute, transferSettings, transferLib, dashboard, panel].filter((text) =>
+        text.includes(`"${key}"`)
+      );
+      return hits.length > 0;
+    }) &&
+      /hasPermission\(auth\.userId, "transfer\.view", auth\.keyScope\)/.test(transferRoute) &&
+      /hasPermission\(auth\.userId, "transfer\.settings", auth\.keyScope\)/.test(transferSettings)
+  );
+  check(
+    "an existing FTP login dies with the permission that granted it",
+    // The login path has no API key, so the scope is null; the key must be a
+    // transfer one or revoking "file transfer" would leave the door open.
+    /if \(!\(await hasPermission\(owner\.id, "transfer\.view", null\)\)\) return null;/.test(transferLib) &&
+      !/hasPermission\(owner\.id, "servers\.files"/.test(transferLib)
+  );
+  check(
+    "the panel draws the new keys from the server, not from a guess",
+    /can: \{ manage: canManage, disconnect: canDisconnect, any: canAny, settings: canSettings \}/.test(transferRoute) &&
+      /can: \{\n\s+manage: boolean;\n\s+disconnect: boolean;\n\s+any: boolean;\n\s+settings: boolean;\n\s+\};/.test(panel) &&
+      /data\.can\.settings && form/.test(panel) &&
+      /data\.can\.manage && \(/.test(panel)
+  );
+  const boot = read("../src/instrumentation.ts");
+  check(
+    "the transfer listener boots even when game-server auto-start is off",
+    // A staging panel (GSM_DISABLE_AUTOSTART=true) must not lose FTP silently;
+    // GSM_DISABLE_FTP is the switch for the listener itself.
+    /void startFileTransferServer\(\);/.test(boot) &&
+      boot.indexOf("void startFileTransferServer();") < boot.indexOf('GSM_DISABLE_AUTOSTART === "true"') &&
+      !/startFileTransferServer[\s\S]{0,200}GSM_DISABLE_FTP/.test(boot)
+  );
+  check(
+    "administrators and moderators keep working out of the box",
+    // Fresh installs seed roles from DEFAULT_ROLES; a permission added only to
+    // the UI would leave a brand-new panel unable to use its own feature.
+    /permissions: Object\.fromEntries\(ALL_PERMISSIONS\.map\(\(p\) => \[p, true\]\)\)/.test(perms) &&
+      /"transfer\.view": true, "transfer\.manage": true, "transfer\.disconnect": true,/.test(perms)
+  );
+}
+
 console.log(`\n${checks - failures}/${checks} checks passed`);
 if (failures > 0) {
   console.error(`${failures} security check(s) FAILED`);

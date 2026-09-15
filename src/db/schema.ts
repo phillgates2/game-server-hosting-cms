@@ -509,6 +509,13 @@ export const serverCollaborators = pgTable("server_collaborators", {
   serverId: integer("server_id").references(() => gameServers.id, { onDelete: "cascade" }).notNull(),
   userId: integer("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
   role: varchar("role", { length: 16 }).notNull().default("viewer"),
+  /**
+   * Per-server file-transfer grant: this user may upload to (and manage files
+   * in) THIS server, over FTP or the panel file manager. Off by default, so
+   * sharing a server for viewing or start/stop never hands over the disk, and
+   * a transfer permission never reaches servers it was not granted on.
+   */
+  canTransfer: boolean("can_transfer").notNull().default(false),
   grantedBy: integer("granted_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -609,3 +616,28 @@ export const cmsPages = pgTable("cms_pages", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+// ── File transfer (FTP/FTPS) accounts ─────────────────────────
+// One row per login the built-in FTP server accepts. `server_id` NULL means
+// "every server this user may file-manage" (a folder per server under the
+// root); a set `server_id` makes the login rooted at that one server.
+//
+// The password is stored as AES-256-GCM ciphertext (src/lib/secret-box.ts),
+// not a hash: operators must be able to read it back out of the panel when
+// they configure a client, and a credential that can only be shown once is a
+// support ticket. The ciphertext is useless without the panel's own secret.
+export const ftpAccounts = pgTable("ftp_accounts", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  username: varchar("username", { length: 64 }).notNull().unique(),
+  passwordEncrypted: text("password_encrypted").notNull(),
+  serverId: integer("server_id").references(() => gameServers.id, { onDelete: "cascade" }),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  lastLoginAt: timestamp("last_login_at"),
+  lastLoginIp: varchar("last_login_ip", { length: 64 }),
+}, (t) => ({
+    ftp_accounts_user_idx: index("ftp_accounts_user_idx").on(t.userId),
+}));

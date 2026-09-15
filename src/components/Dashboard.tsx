@@ -15,6 +15,7 @@ import ProfilePanel from "./panels/ProfilePanel";
 import RolesPanel from "./panels/RolesPanel";
 import RconPanel from "./panels/RconPanel";
 import FilesPanel from "./panels/FilesPanel";
+import FileTransferPanel from "./panels/FileTransferPanel";
 import AuditPanel from "./panels/AuditPanel";
 import ActivityPanel from "./panels/ActivityPanel";
 import SchedulerPanel from "./panels/SchedulerPanel";
@@ -37,7 +38,7 @@ interface AuthUser {
 }
 interface Props { user: AuthUser; onLogout: () => void; onGoHome?: () => void }
 
-type Tab = "overview" | "servers" | "files" | "rcon" | "nodes" | "games" | "audit" | "monitor" | "forum" | "cms" | "ladder" | "users" | "roles" | "profile" | "database" | "activity" | "scheduler" | "apikeys" | "licenses" | "settings";
+type Tab = "overview" | "servers" | "files" | "transfer" | "rcon" | "nodes" | "games" | "audit" | "monitor" | "forum" | "cms" | "ladder" | "users" | "roles" | "profile" | "database" | "activity" | "scheduler" | "apikeys" | "licenses" | "settings";
 
 interface NavItem { key: Tab; label: string; permission?: string; section: string; shortcut?: string }
 
@@ -45,6 +46,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: "overview", label: "Overview", section: "main", shortcut: "O" },
   { key: "servers", label: "Servers", permission: "servers.view", section: "main", shortcut: "S" },
   { key: "files", label: "File Manager", permission: "servers.files", section: "main", shortcut: "F" },
+  { key: "transfer", label: "File Transfer", permission: "transfer.view", section: "main" },
   { key: "rcon", label: "RCON Console", permission: "servers.console", section: "main", shortcut: "R" },
   { key: "nodes", label: "Nodes", permission: "nodes.view", section: "main", shortcut: "N" },
   { key: "games", label: "Games", permission: "games.view", section: "main", shortcut: "G" },
@@ -70,6 +72,7 @@ const TAB_META: Record<Tab, { title: string; subtitle: string }> = {
   overview: { title: "Overview", subtitle: "Your hosting control center and quick-start checklist." },
   servers: { title: "Servers", subtitle: "Create, install, start, and manage game servers." },
   files: { title: "File Manager", subtitle: "Browse and edit server files directly in the browser." },
+  transfer: { title: "File Transfer", subtitle: "FTP/FTPS logins for uploading large files with any client." },
   rcon: { title: "RCON Console", subtitle: "Send remote console commands to supported servers." },
   nodes: { title: "Nodes", subtitle: "Manage the machines that host your servers." },
   games: { title: "Games", subtitle: "Install, edit, import, and create server templates." },
@@ -226,7 +229,9 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
     switch (tab) {
       case "overview": return <OverviewPanel user={user} onNavigate={navTo} />;
       case "servers": return <ServersPanel user={user} />;
-      case "files": return <FilesPanel user={user} />;
+      // The FTP cross-link only appears for somebody who can actually open that panel.
+      case "files": return <FilesPanel user={user} onNavigate={perms["transfer.view"] ? navTo : undefined} />;
+      case "transfer": return <FileTransferPanel />;
       case "rcon": return <RconPanel user={user} />;
       case "nodes": return <NodesPanel user={user} />;
       case "games": return <GamesPanel />;

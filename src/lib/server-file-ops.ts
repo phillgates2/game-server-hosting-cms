@@ -36,6 +36,11 @@ function relativePath(basePath: string, absolutePath: string): string {
   return relative(resolveBasePath(basePath), absolutePath) || ".";
 }
 
+/** Path of an absolute path relative to a server root ("" for the root). */
+export function relativePathOf(basePath: string, absolutePath: string): string {
+  return relativePath(basePath, absolutePath);
+}
+
 export function isRootPath(basePath: string, fullPath: string): boolean {
   return resolveBasePath(basePath) === resolve(/* turbopackIgnore: true */ fullPath);
 }

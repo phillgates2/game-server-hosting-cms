@@ -126,7 +126,70 @@ async function collectDroppedFiles(dataTransfer: DataTransfer): Promise<DroppedF
 }
 
 
-export default function FilesPanel({ user }: { user: AuthUser }) {
+/**
+ * Files at or above this size go through the streamed endpoint.
+ *
+ * The multipart route builds the whole file in memory before writing it, which
+ * is fine for a config file and ruinous for a multi-gigabyte archive on a small
+ * panel box. Below the threshold the extra request is not worth it; above it,
+ * the file is piped straight to disk and the browser can report real progress.
+ */
+const STREAM_UPLOAD_THRESHOLD = 8 * 1024 * 1024;
+
+interface UploadOutcome {
+  ok: boolean;
+  error?: string;
+  /** True when the server asked for the multipart path instead (remote node). */
+  needsFallback?: boolean;
+  size?: number;
+  name?: string;
+}
+
+/**
+ * PUT the file as the raw request body.
+ *
+ * XMLHttpRequest rather than `fetch`: it is still the only browser API that
+ * reports upload progress, and a 4 GB upload with no progress bar looks frozen.
+ * Passing the `File` straight to `send()` lets the browser stream it — nothing
+ * is copied into memory on this side of the wire either.
+ */
+function streamUpload(
+  serverId: number,
+  dir: string,
+  file: File,
+  onProgress?: (loaded: number, total: number) => void
+): Promise<UploadOutcome> {
+  return new Promise((resolve) => {
+    const url = `/api/servers/${serverId}/files/stream?path=${encodeURIComponent(dir)}&name=${encodeURIComponent(file.name)}`;
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress?.(event.loaded, event.total);
+    };
+    xhr.onload = () => {
+      let payload: { error?: string; fallback?: string; size?: number; name?: string } = {};
+      try {
+        payload = JSON.parse(xhr.responseText) as typeof payload;
+      } catch {
+        // A proxy error page is still an error.
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve({ ok: true, size: payload.size, name: payload.name });
+        return;
+      }
+      resolve({
+        ok: false,
+        error: payload.error || `Upload failed (HTTP ${xhr.status})`,
+        needsFallback: payload.fallback === "multipart",
+      });
+    };
+    xhr.onerror = () => resolve({ ok: false, error: "Network error during upload" });
+    xhr.onabort = () => resolve({ ok: false, error: "Upload cancelled" });
+    xhr.send(file);
+  });
+}
+
+export default function FilesPanel({ user, onNavigate }: { user: AuthUser; onNavigate?: (tab: "transfer") => void }) {
   const confirm = useConfirm();
   const [servers, setServers] = useState<Server[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -150,6 +213,7 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
   const [dragging, setDragging] = useState(false);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
+  const [byteProgress, setByteProgress] = useState<{ name: string; loaded: number; total: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const checkboxShiftRef = useRef(false);
@@ -422,18 +486,54 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
 
   async function uploadFile(e: React.ChangeEvent<HTMLInputElement>) {
     if (!selectedId || !e.target.files?.[0]) return;
+    const file = e.target.files[0];
     setUploading(true);
     setMessage(null);
-    const formData = new FormData();
-    formData.append("file", e.target.files[0]);
-    formData.append("path", currentPath);
     try {
-      const res = await fetch(`/api/servers/${selectedId}/files/upload`, { method: "POST", body: formData });
-      const data = await res.json();
-      if (!res.ok) setMessage({ type: "error", text: data.error });
-      else { setMessage({ type: "success", text: `Uploaded ${data.name} (${fmtSize(data.size)})` }); loadDir(selectedId, currentPath); }
-    } catch (e) { setMessage({ type: "error", text: e instanceof Error ? e.message : "Failed" }); }
-    finally { setUploading(false); if (fileInputRef.current) fileInputRef.current.value = ""; }
+      const result = await uploadOne(selectedId, currentPath, file);
+      if (!result.ok) setMessage({ type: "error", text: result.error || "Upload failed" });
+      else {
+        setMessage({
+          type: "success",
+          text: `Uploaded ${file.name} (${fmtSize(result.size ?? file.size)})${result.streamed ? " — streamed straight to disk" : ""}`,
+        });
+        loadDir(selectedId, currentPath);
+      }
+    } finally {
+      setUploading(false);
+      setByteProgress(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  /**
+   * One file, through whichever path fits it.
+   *
+   * Large files use the streamed endpoint; if the target server lives on a
+   * remote node (which has no streamed-write RPC) the server answers with a
+   * fallback hint and the same file is retried through multipart.
+   */
+  async function uploadOne(
+    serverId: number,
+    dir: string,
+    file: File
+  ): Promise<{ ok: boolean; error?: string; size?: number; streamed?: boolean }> {
+    if (file.size >= STREAM_UPLOAD_THRESHOLD) {
+      setByteProgress({ name: file.name, loaded: 0, total: file.size });
+      const streamed = await streamUpload(serverId, dir, file, (loaded, total) =>
+        setByteProgress({ name: file.name, loaded, total })
+      );
+      if (streamed.ok) return { ok: true, size: streamed.size, streamed: true };
+      if (!streamed.needsFallback) return { ok: false, error: streamed.error };
+      setByteProgress(null);
+    }
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("path", dir);
+    const res = await fetch(`/api/servers/${serverId}/files/upload`, { method: "POST", body: formData });
+    const data = await res.json();
+    if (!res.ok) return { ok: false, error: data.error };
+    return { ok: true, size: data.size };
   }
 
   /**
@@ -469,6 +569,7 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
     setUploadProgress({ current: 0, total: items.length });
     let successCount = 0;
     let failCount = 0;
+    let lastError: string | null = null;
     const createdDirs = new Set(items.map((i) => i.relativePath).filter(Boolean));
 
     for (let i = 0; i < items.length; i++) {
@@ -478,24 +579,26 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
       // with the file name, creates parents recursively and rejects anything
       // that escapes the server directory.
       const dest = relativePath ? `${targetPath}/${relativePath}`.replace(/\/+/g, "/") : targetPath;
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("path", dest);
       try {
-        const res = await fetch(`/api/servers/${selectedId}/files/upload`, { method: "POST", body: formData });
-        if (res.ok) successCount++;
-        else failCount++;
-      } catch {
+        const result = await uploadOne(selectedId, dest, file);
+        if (result.ok) successCount++;
+        else {
+          failCount++;
+          if (result.error) lastError = result.error;
+        }
+      } catch (e) {
         failCount++;
+        lastError = e instanceof Error ? e.message : "Upload failed";
       }
     }
 
     setUploadProgress(null);
+    setByteProgress(null);
     setUploading(false);
 
     const folderNote = createdDirs.size > 0 ? ` across ${createdDirs.size} folder(s)` : "";
     if (failCount > 0) {
-      setMessage({ type: "error", text: `Uploaded ${successCount} file(s)${folderNote}, ${failCount} failed` });
+      setMessage({ type: "error", text: `Uploaded ${successCount} file(s)${folderNote}, ${failCount} failed${lastError ? ` — ${lastError}` : ""}` });
     } else {
       setMessage({ type: "success", text: `Uploaded ${successCount} file(s)${folderNote}` });
     }
@@ -580,11 +683,22 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
           <h2 className="text-2xl font-bold">📂 File Manager</h2>
           <p className="text-text-secondary text-sm">Browse and edit server files</p>
         </div>
-        <select value={selectedId || ""} onChange={(e) => e.target.value && selectServer(Number(e.target.value))}
-          className="px-3 py-2 gaming-chip rounded-lg text-sm min-w-[220px]">
-          <option value="">Select a server...</option>
-          {servers.map((s) => <option key={s.id} value={s.id}>{s.gameIcon} {s.name}</option>)}
-        </select>
+        <div className="flex items-center gap-2">
+          {onNavigate && (
+            <button
+              onClick={() => onNavigate("transfer")}
+              title="Get an FTP/FTPS login for multi-gigabyte uploads"
+              className="px-3 py-2 gaming-chip rounded-lg text-xs"
+            >
+              📡 Big files? Use FTP
+            </button>
+          )}
+          <select value={selectedId || ""} onChange={(e) => e.target.value && selectServer(Number(e.target.value))}
+            className="px-3 py-2 gaming-chip rounded-lg text-sm min-w-[220px]">
+            <option value="">Select a server...</option>
+            {servers.map((s) => <option key={s.id} value={s.id}>{s.gameIcon} {s.name}</option>)}
+          </select>
+        </div>
       </div>
 
       {message && (
@@ -607,13 +721,32 @@ export default function FilesPanel({ user }: { user: AuthUser }) {
               <div className="text-center">
                 <span className="text-5xl block mb-3">📥</span>
                 <p className="text-accent font-semibold text-lg">Drop files or folders to upload</p>
-                <p className="text-accent/70 text-sm mt-1">Folder structure is preserved</p>
+                <p className="text-accent/70 text-sm mt-1">
+                  Folder structure is preserved · files over {fmtSize(STREAM_UPLOAD_THRESHOLD)} stream straight to disk
+                </p>
               </div>
             </div>
           )}
 
           {/* Upload progress */}
-          {uploadProgress && (
+          {byteProgress && (
+            <div className="bg-accent/10 border border-accent/30 rounded-lg p-3 flex items-center gap-3">
+              <div className="inline-block w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+              <span className="text-sm text-accent font-medium truncate max-w-[40%]">
+                {byteProgress.name} · {fmtSize(byteProgress.loaded)} / {fmtSize(byteProgress.total)}
+              </span>
+              <div className="flex-1 bg-bg-secondary rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-accent h-full rounded-full transition-all duration-300"
+                  style={{ width: `${byteProgress.total > 0 ? (byteProgress.loaded / byteProgress.total) * 100 : 0}%` }}
+                />
+              </div>
+              <span className="text-xs text-accent font-mono">
+                {byteProgress.total > 0 ? Math.floor((byteProgress.loaded / byteProgress.total) * 100) : 0}%
+              </span>
+            </div>
+          )}
+          {!byteProgress && uploadProgress && (
             <div className="bg-accent/10 border border-accent/30 rounded-lg p-3 flex items-center gap-3">
               <div className="inline-block w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
               <span className="text-sm text-accent font-medium">

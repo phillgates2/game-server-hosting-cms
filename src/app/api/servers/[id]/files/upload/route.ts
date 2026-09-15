@@ -31,8 +31,15 @@ export async function POST(
 
     if (!server) return NextResponse.json({ error: "Server not found" }, { status: 404 });
 
-    if (server.userId !== auth.userId && !(await hasPermission(auth.userId, "servers.edit", auth.keyScope))) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    // Owner, a panel-wide `servers.edit` holder, or a per-server file-transfer
+    // grant. Uploads are server-specific by construction: the grant is set on
+    // one server at a time, in that server's Sharing section.
+    const canEditAny = await hasPermission(auth.userId, "servers.edit", auth.keyScope);
+    if (!canEditAny) {
+      const { canTransferToServer } = await import("@/lib/server-collab");
+      if (!(await canTransferToServer(server.id, auth.userId, auth.keyScope))) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
     }
 
     const formData = await req.formData();

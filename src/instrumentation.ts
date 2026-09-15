@@ -15,10 +15,19 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   // Booting game servers during `next build` would be actively harmful.
   if (process.env.NEXT_PHASE === "phase-production-build") return;
-  if (process.env.GSM_DISABLE_AUTOSTART === "true") return;
 
   // Deferred so a slow or unreachable database does not delay readiness.
-  const { startBootServers, loadAuthPolicy, startSchedulerTimer, startStatusBoardLoop, startDiscordChatBot, startLocalHeartbeatTimer, startUptimeTrackerTimer, startIdleDetectorTimer } = await import("./instrumentation-node");
+  const { startBootServers, loadAuthPolicy, startSchedulerTimer, startStatusBoardLoop, startDiscordChatBot, startLocalHeartbeatTimer, startUptimeTrackerTimer, startIdleDetectorTimer, startFileTransferServer } = await import("./instrumentation-node");
+
+  // The FTP/FTPS listener for large uploads. Boot-time only: it re-reads its
+  // settings whenever the operator saves them.
+  //
+  // Deliberately above the auto-start guard: file transfer is a panel service
+  // rather than a game server, so silencing game-server boot on a staging copy
+  // must not quietly take FTP down with it. Its own switch is GSM_DISABLE_FTP.
+  void startFileTransferServer();
+
+  if (process.env.GSM_DISABLE_AUTOSTART === "true") return;
   // Auth settings are cheap and needed by the first request.
   void loadAuthPolicy();
   // Scheduled tasks, live status boards and the chat bot fire on server-side
