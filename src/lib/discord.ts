@@ -451,11 +451,38 @@ export function toChannelName(serverName: string, prefix = ""): string {
   return (base || "game-server").slice(0, 100);
 }
 
+/**
+ * How long Discord asked us to wait, in milliseconds.
+ *
+ * A 429 body carries `retry_after` in (fractional) seconds; the header is the
+ * fallback and older gateway versions only send that. Without this the caller
+ * can only log "rate limited" and try again on its next tick, which is how a
+ * rate-limited channel rename turns into a channel name that never updates.
+ */
+function retryAfterMs(res: Response, body: string): number | undefined {
+  let seconds: number | undefined;
+  try {
+    const parsed = JSON.parse(body) as { retry_after?: unknown };
+    if (typeof parsed.retry_after === "number" && Number.isFinite(parsed.retry_after)) {
+      seconds = parsed.retry_after;
+    }
+  } catch {
+    // Not JSON (or empty) — the header is authoritative then.
+  }
+  if (seconds === undefined) {
+    const header = Number(res.headers.get("retry-after"));
+    if (Number.isFinite(header)) seconds = header;
+  }
+  if (seconds === undefined || seconds < 0) return undefined;
+  // A tiny pad so a retry after "0.5s" is not rejected for being 3ms early.
+  return Math.ceil(seconds * 1000) + 250;
+}
+
 async function discordApi(
   cfg: BotConfig,
   path: string,
   init: RequestInit = {}
-): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; error: string }> {
+): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; error: string; retryAfterMs?: number }> {
   try {
     const res = await fetch(`${DISCORD_API}${path}`, {
       ...init,
@@ -469,6 +496,9 @@ async function discordApi(
 
     const text = await res.text().catch(() => "");
     if (!res.ok) {
+      // A 429 is the one failure with a deadline attached, and the body — not
+      // the header — is where Discord puts it for most routes.
+      const waitMs = res.status === 429 ? retryAfterMs(res, text) : undefined;
       // Map the failures an operator will actually hit onto actionable text,
       // rather than surfacing a bare numeric code.
       let error: string;
@@ -476,11 +506,11 @@ async function discordApi(
         case 401: error = "Invalid bot token"; break;
         case 403: error = "Bot lacks permission — it needs Manage Channels and Manage Webhooks in that server"; break;
         case 404: error = "Guild or category not found — check the server (guild) ID and that the bot has been invited"; break;
-        case 429: error = `Rate limited by Discord (retry-after: ${res.headers.get("retry-after") ?? "?"}s)`; break;
+        case 429: error = `Rate limited by Discord (retry-after: ${waitMs !== undefined ? Math.round(waitMs / 1000) : "?"}s)`; break;
         default:  error = `Discord API ${res.status}: ${text.slice(0, 200)}`;
       }
       console.error(`[discord] ${init.method || "GET"} ${path} failed: ${error}`);
-      return { ok: false, error };
+      return { ok: false, error, retryAfterMs: waitMs };
     }
 
     return { ok: true, data: text ? JSON.parse(text) : {} };
@@ -569,22 +599,58 @@ export async function deleteChannel(cfg: BotConfig, channelId: string): Promise<
 /**
  * Rename a channel — the WolfET-style "status in the channel name" update.
  *
- * The live status board posts a detail message, and its tick calls this to
- * keep the channel name itself current. Discord lowercases channel names and
+ * The heading is what the operator sees first in Discord, so the background
+ * loop calls this whenever a server's up/down state changes (and, less often,
+ * when the player count or map does). Discord lowercases channel names and
  * caps them at 100 characters; both are handled here.
+ *
+ * `retryAfterMs` is passed through from Discord's 429 so the caller can back
+ * off instead of spending its next attempt on a doomed request.
  */
 export async function renameChannel(
   cfg: BotConfig,
   channelId: string,
   name: string
-): Promise<{ ok: true } | { ok: false; error?: string }> {
-  const safe = name.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 100);
+): Promise<{ ok: true; name: string } | { ok: false; error?: string; retryAfterMs?: number }> {
+  const safe = truncateChannelName(name);
   if (!safe || !/^\d{5,25}$/.test(channelId)) return { ok: false, error: "Invalid channel name or id" };
   const res = await discordApi(cfg, `/channels/${encodeURIComponent(channelId)}`, {
     method: "PATCH",
     body: JSON.stringify({ name: safe }),
   });
-  return res.ok ? { ok: true } : { ok: false, error: res.error };
+  return res.ok ? { ok: true, name: safe } : { ok: false, error: res.error, retryAfterMs: res.retryAfterMs };
+}
+
+/**
+ * Normalise a channel name the way Discord will store it.
+ *
+ * Lowercased, whitespace collapsed, capped at 100 characters — and capped by
+ * *code points*, not UTF-16 units, so a name ending in an emoji (two units)
+ * is never cut in half and rejected as invalid.
+ */
+export function truncateChannelName(name: string): string {
+  const safe = name.toLowerCase().replace(/\s+/g, " ").trim();
+  const points = [...safe];
+  return points.length > 100 ? points.slice(0, 100).join("") : safe;
+}
+
+/** Discord refuses an empty channel name; this is the fallback. */
+export const DEFAULT_CHANNEL_LABEL = "server";
+
+/**
+ * The short label a channel heading uses for a game: "ET", "counter",
+ * "minecraft".
+ *
+ * The WolfET bots title their channels `🟢 et: (5) - et_beach`, and that is the
+ * shape operators recognise, so the label is derived from the game rather than
+ * the (often long) server name.
+ */
+export function statusChannelLabel(gameSlug: string | null | undefined, gameName: string | null | undefined): string {
+  if (gameSlug === "wolfenstein-et") return "ET";
+  // Split on punctuation as well as spaces, so "Counter-Strike 2" reads as
+  // "counter" and not "counterstrik".
+  const first = (gameName ?? "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)[0] ?? "";
+  return first.slice(0, 12) || DEFAULT_CHANNEL_LABEL;
 }
 
 /**

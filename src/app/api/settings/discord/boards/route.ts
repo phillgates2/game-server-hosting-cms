@@ -9,6 +9,8 @@ import { getDiscordSettings } from "@/lib/discord-settings";
 import {
   refreshServerBoard,
   clampInterval,
+  syncChannelHeading,
+  channelHeadingState,
   type ServerForBoard,
 } from "@/lib/status-board";
 
@@ -36,6 +38,7 @@ async function listBoards() {
       discordStatusMessageId: gameServers.discordStatusMessageId,
       discordStatusUpdatedAt: gameServers.discordStatusUpdatedAt,
       discordStatusError: gameServers.discordStatusError,
+      discordChannelId: gameServers.discordChannelId,
       gameName: gameDefinitions.name,
       gameSlug: gameDefinitions.slug,
     })
@@ -43,17 +46,29 @@ async function listBoards() {
     .leftJoin(gameDefinitions, eq(gameServers.gameId, gameDefinitions.id))
     .orderBy(gameServers.name);
 
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    gameName: r.gameName || "Unknown",
-    status: r.status,
-    hasWebhook: Boolean(r.discordWebhook),
-    enabled: Boolean(r.discordStatusEnabled),
-    messageId: r.discordStatusMessageId,
-    updatedAt: r.discordStatusUpdatedAt,
-    error: r.discordStatusError,
-  }));
+  return rows.map((r) => {
+    const heading = channelHeadingState(r.id);
+    return {
+      id: r.id,
+      name: r.name,
+      gameName: r.gameName || "Unknown",
+      status: r.status,
+      hasWebhook: Boolean(r.discordWebhook),
+      enabled: Boolean(r.discordStatusEnabled),
+      messageId: r.discordStatusMessageId,
+      updatedAt: r.discordStatusUpdatedAt,
+      error: r.discordStatusError,
+      // The channel heading (🟢/🔴 in the channel name) is updated by the same
+      // loop but independently of the board toggle — it needs a bot token and
+      // a panel-owned channel, not a webhook — so it gets its own state here.
+      hasChannel: Boolean(r.discordChannelId),
+      heading: {
+        name: heading.name ?? null,
+        updatedAt: heading.renamedAt ? new Date(heading.renamedAt) : null,
+        error: heading.error ?? null,
+      },
+    };
+  });
 }
 
 /**
@@ -67,8 +82,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Permission denied" }, { status: 403 });
   }
   try {
-    const { statusIntervalMinutes } = await getDiscordSettings();
-    return NextResponse.json({ intervalMinutes: statusIntervalMinutes, servers: await listBoards() });
+    const { statusIntervalMinutes, botToken, guildId } = await getDiscordSettings();
+    return NextResponse.json({
+      intervalMinutes: statusIntervalMinutes,
+      // Renaming a channel needs the bot; a webhook cannot do it. The panel
+      // says so instead of offering a heading update that cannot work.
+      botReady: Boolean(botToken && guildId),
+      servers: await listBoards(),
+    });
   } catch (e: unknown) {
     return apiError(e, "Could not read status board state", 500);
   }
@@ -77,10 +98,12 @@ export async function GET(req: NextRequest) {
 /**
  * POST /api/settings/discord/boards
  *
- * Body: { serverId, action: "enable" | "disable" | "refresh" }
+ * Body: { serverId, action: "enable" | "disable" | "refresh" | "heading" }
  *   enable   posts the board message and turns on the auto-update loop
  *   disable  stops updates (the message is left where it is)
  *   refresh  probes and updates right now
+ *   heading  renames the channel to the live status right now (works with the
+ *            board off, and is how an operator checks the heading by hand)
  * Body: { action: "interval", minutes } sets the refresh interval.
  */
 export async function POST(req: NextRequest) {
@@ -116,8 +139,8 @@ export async function POST(req: NextRequest) {
     if (!Number.isInteger(serverId) || serverId <= 0) {
       return NextResponse.json({ error: "serverId is required" }, { status: 400 });
     }
-    if (action !== "enable" && action !== "disable" && action !== "refresh") {
-      return NextResponse.json({ error: "action must be enable, disable, refresh or interval" }, { status: 400 });
+    if (action !== "enable" && action !== "disable" && action !== "refresh" && action !== "heading") {
+      return NextResponse.json({ error: "action must be enable, disable, refresh, heading or interval" }, { status: 400 });
     }
 
     const [server] = await db
@@ -135,6 +158,7 @@ export async function POST(req: NextRequest) {
         discordStatusEnabled: gameServers.discordStatusEnabled,
         discordStatusMessageId: gameServers.discordStatusMessageId,
         discordStatusUpdatedAt: gameServers.discordStatusUpdatedAt,
+        discordChannelId: gameServers.discordChannelId,
         gameName: gameDefinitions.name,
         gameSlug: gameDefinitions.slug,
       })
@@ -144,6 +168,32 @@ export async function POST(req: NextRequest) {
       .limit(1);
 
     if (!server) return NextResponse.json({ error: "Server not found" }, { status: 404 });
+
+    // ── Channel heading (independent of the board) ───────────────────────────
+    if (action === "heading") {
+      if (!server.discordChannelId) {
+        return NextResponse.json(
+          { error: "The panel did not create this server's channel, so it cannot rename it — run ‘Create missing channels’ first" },
+          { status: 400 }
+        );
+      }
+      const result = await syncChannelHeading(server, { force: true });
+      const notes: Record<string, string> = {
+        "no-bot": "A bot token and server (guild) ID are required to rename a channel — webhooks cannot",
+        unchanged: "The heading already matches the live status",
+        cooldown: "Updated a moment ago — Discord allows two renames per channel per 10 minutes",
+        backoff: "Discord asked the panel to wait before the next rename",
+        "probe-failed": "The server's query port did not answer, so the heading was left as it is",
+      };
+      return NextResponse.json({
+        ok: result.ok,
+        error: result.error ?? undefined,
+        skipped: result.skipped,
+        name: result.name,
+        message: result.skipped ? notes[result.skipped] : undefined,
+        servers: await listBoards(),
+      });
+    }
 
     if (action === "disable") {
       await db

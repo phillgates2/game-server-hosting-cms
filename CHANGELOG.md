@@ -4,6 +4,42 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [1.45.0] — 2026-09-19
+
+### 🟢 The Channel Heading Says Whether The Server Is Up
+The 🟢/🔴 in a server's Discord channel name only ever moved as a side
+effect of its **status board** — the message you have to switch on per
+server in Settings → Discord. A panel with a bot token configured, a
+channel per server, and no board enabled therefore sat there with a plain
+`#my-server` and no way to tell from Discord whether the game was up or
+down. The heading is now a first-class feature of the status-board loop:
+
+- **It is updated independently of the board toggle.** Every server whose
+  channel the panel created gets its name kept current — no board message,
+  no webhook, no gateway needed. Only the bot token is required (a webhook
+  cannot rename a channel), and the panel now says so instead of leaving
+  the heading silently stuck.
+- **Start, stop, restart, crash, auto-restart and watchdog stops apply the
+  heading immediately** rather than at the next loop tick, so the channel
+  is right by the time the operator looks at it.
+- **It respects Discord's rename budget.** Channel name changes are capped
+  at 2 per 10 minutes per channel, so an up/down change is applied at once
+  while a changed player count or map waits for the cool-down (the previous
+  code fired a rename on every board refresh, which is how a heading ends
+  up rate-limited and stale). A 429 is now honoured — the retry-after from
+  the body or header is parsed and the channel is left alone until then,
+  instead of one doomed request per tick.
+- **The panel shows the heading**: the live name per server, why it cannot
+  update (no bot token, or a channel the panel did not create), the last
+  error, and a **Heading** button that renames it right now.
+- Channel names are truncated by code points, so a 100-character name that
+  ends in an emoji can no longer be cut in half and rejected by Discord.
+- **1,383 tests** (10 new: the rename policy, the 429 back-off, no game
+  query for a down server, a failed probe never downgrading a good heading,
+  the label and truncation helpers).
+
+---
+
 ## [1.44.0] — 2026-09-11
 
 ### 🔑 Key Hygiene
