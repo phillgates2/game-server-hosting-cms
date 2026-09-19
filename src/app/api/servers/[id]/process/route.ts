@@ -60,6 +60,22 @@ const autoRestarting = new Set<number>();
 // Recent crash timestamps per server, feeding the crash-loop breaker. Pure
 // in-process state like autoRestarting: single-process deployment by design.
 const crashHistory = new Map<number, number[]>();
+
+/**
+ * Fire-and-forget update of a server's Discord channel heading — the 🟢/🔴 in
+ * the channel name.
+ *
+ * The background loop would get there within a minute, but "is my server up?"
+ * is exactly the thing an operator checks the instant after pressing Start or
+ * Stop, so the transition is applied here. Best-effort by construction: the
+ * helper swallows its own errors and the promise is never awaited, so process
+ * control cannot be slowed down or failed by Discord.
+ */
+function refreshHeading(serverId: number): void {
+  void import("@/lib/status-board")
+    .then((m) => m.refreshChannelHeading(serverId))
+    .catch(() => undefined);
+}
 // Consecutive over-limit samples per server, feeding the resource watchdog.
 const limitStrikes = new Map<number, number>();
 // Last-seen player rosters, feeding the join/leave notifications. Cleared
@@ -210,6 +226,7 @@ export async function POST(
                 const { recordServerEvent } = await import("@/lib/server-events");
                 void recordServerEvent(server.id, "watchdog-stop", violations.join("; "));
                 await db.update(gameServers).set({ status: "stopped", pid: null, lastStopped: new Date(), updatedAt: new Date() }).where(eq(gameServers.id, server.id));
+                refreshHeading(server.id);
                 console.log(`[resource-watchdog] stopped "${server.name}" after ${LIMIT_STRIKES_ENFORCE} over-limit samples: ${reason}`);
                 if (hook) {
                   await sendDiscordWebhook(hook, {
@@ -260,6 +277,9 @@ export async function POST(
           lastStopped: alive ? undefined : new Date(),
           updatedAt: new Date(),
         }).where(eq(gameServers.id, server.id));
+
+        // A crash is the transition an operator most needs to see in Discord.
+        refreshHeading(server.id);
       }
 
       // Wake the owner by email too — Discord is where the community watches,
@@ -331,6 +351,8 @@ export async function POST(
           if (back) {
             const { recordServerEvent } = await import("@/lib/server-events");
             void recordServerEvent(server.id, "auto-restarted", `pid ${pid}`);
+            // Recovered: the heading goes green again without waiting a tick.
+            refreshHeading(server.id);
           }
 
           if (back && server.discordNotifyRestart !== false) {
@@ -441,6 +463,9 @@ export async function POST(
         updatedAt: new Date(),
       }).where(eq(gameServers.id, server.id));
 
+      // The channel heading goes red now, not on the next tick.
+      refreshHeading(server.id);
+
       if (stopHook) {
         const { sendDiscordWebhook } = await import("@/lib/discord");
         await sendDiscordWebhook(stopHook, {
@@ -481,6 +506,10 @@ export async function POST(
         lastStarted: new Date(),
         updatedAt: new Date(),
       }).where(eq(gameServers.id, server.id));
+
+      // Green as soon as it is up (the probe in the helper fills in the map and
+      // player count), red when the launch failed to take.
+      refreshHeading(server.id);
 
       const wantsNotify = action === "restart"
         ? server.discordNotifyRestart !== false

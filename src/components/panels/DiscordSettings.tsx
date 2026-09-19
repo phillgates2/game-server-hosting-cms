@@ -43,6 +43,10 @@ interface BoardServer {
   messageId: string | null;
   updatedAt: string | null;
   error: string | null;
+  /** The panel created this channel, so it can rename it (needs the bot). */
+  hasChannel: boolean;
+  /** The 🟢/🔴 channel heading (channel name), updated with or without a board. */
+  heading: { name: string | null; updatedAt: string | null; error: string | null };
 }
 
 const inputCls =
@@ -64,8 +68,9 @@ export default function DiscordSettings() {
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [boards, setBoards] = useState<BoardServer[] | null>(null);
   const [boardInterval, setBoardInterval] = useState(3);
+  const [boardBotReady, setBoardBotReady] = useState(false);
   const [boardBusy, setBoardBusy] = useState<number | "interval" | null>(null);
-  const [boardMsg, setBoardMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [boardMsg, setBoardMsg] = useState<{ kind: "ok" | "err" | "info"; text: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -93,6 +98,7 @@ export default function DiscordSettings() {
       const data = await res.json();
       setBoards(data.servers || []);
       setBoardInterval(data.intervalMinutes ?? 3);
+      setBoardBotReady(Boolean(data.botReady));
     } catch {
       setBoards([]);
     }
@@ -128,7 +134,14 @@ export default function DiscordSettings() {
         if (data.intervalMinutes) setBoardInterval(data.intervalMinutes);
         if (label === "interval") setBoardMsg({ kind: "ok", text: `✅ Boards will refresh every ${data.intervalMinutes} min` });
         else if (data.error) setBoardMsg({ kind: "err", text: data.error });
-        else setBoardMsg({ kind: "ok", text: "✅ Status board updated" });
+        else if (body.action === "heading") {
+          setBoardMsg({
+            kind: data.skipped ? "info" : "ok",
+            text: data.skipped
+              ? `ℹ️ ${data.message || "The heading was left as it is"}`
+              : `✅ Channel heading is now “${data.name}”`,
+          });
+        } else setBoardMsg({ kind: "ok", text: "✅ Status board updated" });
       }
     } catch (e: unknown) {
       setBoardMsg({ kind: "err", text: e instanceof Error ? e.message : "Request failed" });
@@ -438,6 +451,13 @@ export default function DiscordSettings() {
             map, and who is online. Refreshed automatically every few minutes — no bot gateway needed,
             it uses the server&apos;s webhook.
           </p>
+          <p className="text-xs text-text-muted mt-1">
+            The <strong>channel heading</strong> carries the same 🟢/🔴 status (as the community bot
+            does: <code className="text-accent">🟢 et: (5) - et_beach</code> /{" "}
+            <code className="text-accent">🔴 et: Server Offline</code>). It updates on its own —
+            including when no board is posted here — as long as the panel created the channel and a
+            bot token is configured, and it changes as soon as a server starts, stops or crashes.
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -485,8 +505,37 @@ export default function DiscordSettings() {
                     {srv.updatedAt && ` · updated ${new Date(srv.updatedAt).toLocaleString()}`}
                     {srv.error && <span className="text-danger"> · {srv.error}</span>}
                   </p>
+                  <p className="text-[11px] text-text-muted mt-0.5">
+                    <span className="text-text-secondary">Heading:</span>{" "}
+                    {srv.heading.name ? (
+                      <span className="font-mono">{srv.heading.name}</span>
+                    ) : (
+                      <span>not updated yet</span>
+                    )}
+                    {srv.heading.updatedAt && ` · ${new Date(srv.heading.updatedAt).toLocaleTimeString()}`}
+                    {!srv.hasChannel && (
+                      <span className="text-warning">
+                        {" "}
+                        · the panel does not own this channel (no channel id) — run “Create missing
+                        channels”
+                      </span>
+                    )}
+                    {srv.hasChannel && !boardBotReady && (
+                      <span className="text-warning"> · needs a bot token to rename the channel</span>
+                    )}
+                    {srv.heading.error && <span className="text-danger"> · {srv.heading.error}</span>}
+                  </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void boardAction({ serverId: srv.id, action: "heading" }, srv.id)}
+                    disabled={boardBusy !== null || !srv.hasChannel || !boardBotReady}
+                    title="Rename the channel to the live status right now"
+                    className="px-3 py-1.5 bg-bg-secondary border border-border rounded-lg text-xs disabled:opacity-40 hover:border-accent/30"
+                  >
+                    {boardBusy === srv.id ? "Working…" : "Heading"}
+                  </button>
                   <button
                     type="button"
                     onClick={() => void boardAction({ serverId: srv.id, action: "refresh" }, srv.id)}
@@ -520,7 +569,7 @@ export default function DiscordSettings() {
           </ul>
         )}
         {boardMsg && (
-          <p className={`text-sm ${boardMsg.kind === "ok" ? "text-success" : "text-danger"}`}>{boardMsg.text}</p>
+          <p className={`text-sm ${boardMsg.kind === "ok" ? "text-success" : boardMsg.kind === "info" ? "text-text-secondary" : "text-danger"}`}>{boardMsg.text}</p>
         )}
       </div>
 

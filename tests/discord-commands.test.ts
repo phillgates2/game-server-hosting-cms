@@ -17,7 +17,12 @@ import {
   top10Embeds,
   desyncEmbeds,
 } from "../src/lib/discord-commands";
-import { statusChannelName, isValidWebhookUrl } from "../src/lib/discord";
+import {
+  statusChannelName,
+  statusChannelLabel,
+  truncateChannelName,
+  isValidWebhookUrl,
+} from "../src/lib/discord";
 
 const XP = (v: number[]) =>
   Buffer.from(v.map((n, i) => `S${i}\\${n}`).join("\\"), "utf8").toString("base64");
@@ -170,8 +175,37 @@ describe("statusChannelName (channel rename)", () => {
 
   test("the channel name never exceeds Discord's 100 characters", () => {
     const name = `🟢 ET: (${"9".repeat(32)}) - ${"x".repeat(200)}`;
-    const label = name.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 100);
-    assert.ok(label.length <= 100);
+    const label = truncateChannelName(name);
+    assert.ok([...label].length <= 100);
+  });
+
+  test("truncation counts code points, so an emoji is never cut in half", () => {
+    // 100 plain characters plus an emoji is 101 code points (102 UTF-16 units):
+    // a plain slice(0, 100) would keep the high surrogate alone, and Discord
+    // rejects a name containing half an emoji outright.
+    const name = `${"x".repeat(100)}🟢`;
+    const safe = truncateChannelName(name);
+    assert.equal([...safe].length, 100, "the emoji is dropped whole, not split");
+    assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(safe), "no lone surrogate");
+  });
+});
+
+describe("statusChannelLabel", () => {
+  test("the ET slug gets the community bot's label, any game gets its own", () => {
+    assert.equal(statusChannelLabel("wolfenstein-et", "Wolfenstein: Enemy Territory"), "ET");
+    assert.equal(statusChannelLabel("cs2", "Counter-Strike 2"), "counter");
+    assert.equal(statusChannelLabel("minecraft", "Minecraft (Java)"), "minecraft");
+  });
+
+  test("a missing or unusable game name still yields a name Discord accepts", () => {
+    assert.equal(statusChannelLabel(null, null), "server");
+    assert.equal(statusChannelLabel("custom", "!!! ???"), "server");
+  });
+
+  test("a heading built from a long game name still truncates cleanly", () => {
+    const label = statusChannelLabel("custom", "A".repeat(80));
+    const name = statusChannelName({ online: true, players: 5, map: "et_beach" }, label);
+    assert.ok(truncateChannelName(name).length > 0);
   });
 });
 

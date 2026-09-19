@@ -318,3 +318,278 @@ describe("refreshServerBoard — webhook round trip", () => {
     }
   });
 });
+
+describe("headingDue (the rename policy)", () => {
+  const NOW = 1_700_000_000_000;
+
+  test("a heading nobody has seen yet is written", async () => {
+    const { headingDue } = await import("../src/lib/status-board");
+    assert.equal(headingDue({}, true, NOW), "status");
+    assert.equal(headingDue({ name: "x" } as never, false, NOW), "status");
+  });
+
+  test("an up/down change is applied at once, count churn waits for the cool-down", async () => {
+    const { headingDue, CHANNEL_RENAME_COOLDOWN_MS } = await import("../src/lib/status-board");
+    // The dot on screen says "up"; the server just stopped.
+    assert.equal(headingDue({ online: true, renamedAt: NOW - 1_000 }, false, NOW), "status");
+    // Same dot, cool-down still running: leave Discord alone.
+    assert.equal(headingDue({ online: true, renamedAt: NOW - 1_000 }, true, NOW), null);
+    // Same dot, cool-down over: the count or map may have moved.
+    assert.equal(
+      headingDue({ online: true, renamedAt: NOW - CHANNEL_RENAME_COOLDOWN_MS }, true, NOW),
+      "refresh"
+    );
+  });
+
+  test("two renames per channel per ten minutes is the budget, and a 429 is obeyed", async () => {
+    const { headingDue, CHANNEL_RENAME_COOLDOWN_MS, CHANNEL_RENAME_RETRY_MS } = await import("../src/lib/status-board");
+    // Discord's documented channel-name limit — changing this silently would
+    // mean rate-limited channels, which is what the heading cannot afford.
+    assert.equal(CHANNEL_RENAME_COOLDOWN_MS, 10 * 60_000);
+    assert.equal(CHANNEL_RENAME_RETRY_MS, 10 * 60_000);
+    // A backoff outranks even a status change: Discord said "wait".
+    assert.equal(headingDue({ online: true, renamedAt: NOW, blockedUntil: NOW + 60_000 }, false, NOW), null);
+    assert.equal(headingDue({ online: true, renamedAt: NOW, blockedUntil: NOW - 1 }, false, NOW), "status");
+  });
+});
+
+/**
+ * The channel heading: the 🟢/🔴 in the Discord channel name.
+ *
+ * These are the cases that were broken in the field: the heading only moved
+ * when a board message was posted, and every board refresh tried a rename
+ * whether or not it was inside Discord's two-per-ten-minutes budget. So the
+ * tests below drive the real transport against a stubbed Discord API and a
+ * fake game server, and assert what actually reaches Discord.
+ */
+describe("channel heading (🟢/🔴 in the channel name)", () => {
+  test("down servers go red without querying the game, up servers say who is on", async () => {
+    process.env.DATABASE_URL = "postgres://u:p@127.0.0.1:5432/db";
+    process.env.DISCORD_BOT_TOKEN = "test-bot-token";
+    process.env.DISCORD_GUILD_ID = "100000000000000001";
+
+    const { createServer } = await import("node:http");
+    const { createSocket } = await import("node:dgram");
+    const {
+      syncChannelHeading,
+      resetChannelHeadingState,
+    } = await import("../src/lib/status-board");
+
+    resetChannelHeadingState();
+
+    // Fake ET server: answers the Quake 3 getstatus the ET probe sends, and
+    // counts every query so "a down server is never queried" can be asserted.
+    let gameQueries = 0;
+    const fake = createSocket("udp4");
+    fake.on("message", (msg, rinfo) => {
+      gameQueries++;
+      fake.send(Buffer.concat([
+        Buffer.from([0xff, 0xff, 0xff, 0xff]),
+        Buffer.from(
+          "statusResponse\n\\sv_hostname\\ET Heading\\mapname\\et_beach\\sv_maxclients\\24\n5 42 \"^5Rifleman^7\"\n",
+          "latin1"
+        ),
+      ]), rinfo.port, rinfo.address);
+    });
+    await new Promise<void>((resolve) => fake.bind(0, "127.0.0.1", () => resolve()));
+    const gamePort = (fake.address() as { port: number }).port;
+
+    // Stub Discord: records every channel rename.
+    const renames: string[] = [];
+    const srv = createServer((req, res) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        if (req.method === "PATCH" && /\/channels\/\d+$/.test(req.url || "")) {
+          renames.push(String((JSON.parse(raw) as { name?: string }).name ?? ""));
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ id: "123456789012345678", name: renames[renames.length - 1] }));
+          return;
+        }
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end("{}");
+      });
+    });
+    await new Promise<void>((resolve) => srv.listen(0, "127.0.0.1", () => resolve()));
+    const apiPort = (srv.address() as { port: number }).port;
+
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((url: string, init: RequestInit) =>
+      realFetch(`http://127.0.0.1:${apiPort}${new URL(String(url)).pathname}`, init)) as typeof fetch;
+
+    const server = {
+      id: 4711,
+      name: "ET Heading",
+      ipv4: "127.0.0.1",
+      ipv6: null,
+      port: gamePort,
+      queryPort: gamePort,
+      variables: null,
+      config: null,
+      status: "stopped",
+      gameName: "Wolfenstein: Enemy Territory",
+      gameSlug: "wolfenstein-et",
+      discordChannelId: "123456789012345678",
+    };
+
+    try {
+      // A server that is down needs no game query at all — the heading is a
+      // status fact the panel already knows.
+      const down = await syncChannelHeading(server);
+      assert.equal(down.ok, true, `heading rename failed: ${down.error}`);
+      assert.equal(down.renamed, true);
+      // Discord lowercases channel names, so the applied name comes back lower.
+      assert.equal(down.name, "🔴 et: server offline");
+      assert.equal(gameQueries, 0, "a down server must not be queried");
+
+      // Same state again, inside the cool-down: nothing is sent to Discord.
+      const repeat = await syncChannelHeading(server);
+      assert.equal(repeat.skipped, "cooldown");
+      assert.equal(renames.length, 1);
+
+      // Up: the probe supplies the map and count, and the dot goes green.
+      const running = { ...server, status: "running" };
+      const up = await syncChannelHeading(running);
+      assert.equal(up.ok, true, `heading rename failed: ${up.error}`);
+      assert.equal(up.name, "🟢 et: (1) - et_beach");
+      assert.ok(gameQueries > 0, "an up server is probed for map and players");
+      assert.deepEqual(renames, ["🔴 et: server offline", "🟢 et: (1) - et_beach"]);
+
+      // A count change inside the cool-down waits — Discord only allows two
+      // renames per ten minutes per channel, and a 429 leaves the heading
+      // stale, which is exactly the reported bug.
+      const cached = await import("../src/lib/status-cache");
+      cached.setCachedView(server.id, {
+        serverName: "ET Heading",
+        gameName: "Wolfenstein: Enemy Territory",
+        address: "`127.0.0.1:27960`",
+        online: true,
+        players: 9,
+        maxPlayers: 24,
+        map: "goldrush",
+      });
+      const churn = await syncChannelHeading(running);
+      assert.equal(churn.skipped, "cooldown", "count churn waits for the cool-down");
+      assert.equal(renames.length, 2);
+
+      // …but going down is applied immediately, cool-down or not.
+      const back = await syncChannelHeading(server);
+      assert.equal(back.renamed, true, "a status change must bypass the cool-down");
+      assert.equal(renames[2], "🔴 et: server offline");
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env.DISCORD_BOT_TOKEN;
+      delete process.env.DISCORD_GUILD_ID;
+      await new Promise<void>((r) => srv.close(() => r()));
+      fake.close();
+    }
+  });
+
+  test("a probe that times out does not downgrade a good heading", async () => {
+    process.env.DATABASE_URL = "postgres://u:p@127.0.0.1:5432/db";
+    process.env.DISCORD_BOT_TOKEN = "test-bot-token";
+    process.env.DISCORD_GUILD_ID = "100000000000000001";
+
+    const { createServer } = await import("node:http");
+    const { createSocket } = await import("node:dgram");
+    const { syncChannelHeading, resetChannelHeadingState } = await import("../src/lib/status-board");
+    resetChannelHeadingState();
+
+    // A UDP port that never answers: the server is up, the query port is not.
+    const silent = createSocket("udp4");
+    await new Promise<void>((resolve) => silent.bind(0, "127.0.0.1", () => resolve()));
+    const gamePort = (silent.address() as { port: number }).port;
+
+    let renames = 0;
+    const srv = createServer((req, res) => {
+      renames++;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ id: "123456789012345678", name: "x" }));
+    });
+    await new Promise<void>((resolve) => srv.listen(0, "127.0.0.1", () => resolve()));
+    const apiPort = (srv.address() as { port: number }).port;
+
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((url: string, init: RequestInit) =>
+      realFetch(`http://127.0.0.1:${apiPort}${new URL(String(url)).pathname}`, init)) as typeof fetch;
+
+    const server = {
+      id: 4713, name: "Slow Query", ipv4: "127.0.0.1", ipv6: null,
+      port: gamePort, queryPort: gamePort, variables: null, config: null,
+      status: "running", gameName: "WolfET", gameSlug: "wolfenstein-et",
+      discordChannelId: "123456789012345678",
+    };
+
+    const { CHANNEL_RENAME_COOLDOWN_MS } = await import("../src/lib/status-board");
+
+    try {
+      // First sight of this server: nothing is known about the heading, so the
+      // dot is written even though the players are not — "is it up?" is the
+      // question the heading answers.
+      const first = await syncChannelHeading(server);
+      assert.equal(first.renamed, true, `expected a green dot, got ${first.skipped}`);
+      assert.equal(first.name, "🟢 et: (?) - unknown-map");
+      assert.equal(renames, 1);
+
+      // From here the dot on screen is already correct. Once the cool-down has
+      // passed and the query port still does not answer, the count and map are
+      // left alone rather than downgraded again.
+      const later = await syncChannelHeading(server, { now: Date.now() + CHANNEL_RENAME_COOLDOWN_MS + 1_000 });
+      assert.equal(later.skipped, "probe-failed");
+      assert.equal(renames, 1, "a failed probe must not spend a rename");
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env.DISCORD_BOT_TOKEN;
+      delete process.env.DISCORD_GUILD_ID;
+      await new Promise<void>((r) => srv.close(() => r()));
+      silent.close();
+    }
+  });
+
+  test("a 429 backs the heading off instead of burning the next tick", async () => {
+    process.env.DATABASE_URL = "postgres://u:p@127.0.0.1:5432/db";
+    process.env.DISCORD_BOT_TOKEN = "test-bot-token";
+    process.env.DISCORD_GUILD_ID = "100000000000000001";
+
+    const { createServer } = await import("node:http");
+    const { syncChannelHeading, resetChannelHeadingState } = await import("../src/lib/status-board");
+    resetChannelHeadingState();
+
+    let attempts = 0;
+    const srv = createServer((req, res) => {
+      attempts++;
+      res.writeHead(429, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ message: "You are being rate limited.", retry_after: 300 }));
+    });
+    await new Promise<void>((resolve) => srv.listen(0, "127.0.0.1", () => resolve()));
+    const apiPort = (srv.address() as { port: number }).port;
+
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((url: string, init: RequestInit) =>
+      realFetch(`http://127.0.0.1:${apiPort}${new URL(String(url)).pathname}`, init)) as typeof fetch;
+
+    const server = {
+      id: 4712, name: "Rate Limited", ipv4: "127.0.0.1", ipv6: null,
+      port: 27960, queryPort: 27961, variables: null, config: null,
+      status: "stopped", gameName: "WolfET", gameSlug: "wolfenstein-et",
+      discordChannelId: "123456789012345678",
+    };
+
+    try {
+      const first = await syncChannelHeading(server);
+      assert.equal(first.ok, false);
+      assert.match(String(first.error), /rate limit/i);
+      assert.equal(attempts, 1);
+
+      // Discord said "wait 300s": the next attempt must not even call out.
+      const second = await syncChannelHeading(server);
+      assert.equal(second.skipped, "backoff");
+      assert.equal(attempts, 1, "no second request inside the retry-after window");
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env.DISCORD_BOT_TOKEN;
+      delete process.env.DISCORD_GUILD_ID;
+      await new Promise<void>((r) => srv.close(() => r()));
+    }
+  });
+});

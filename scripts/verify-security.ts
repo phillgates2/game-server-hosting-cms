@@ -860,11 +860,18 @@ console.log("\nH2/H3 auth enforcement wiring");
       /rosterRoleColors\(view\.names\)/.test(read("../src/lib/status-board.ts"))
   );
   check(
-    "WolfET channel renames use PATCH /channels and the three-state name",
+    "WolfET channel renames PATCH /channels, and carry the 🟢/🔴 name whether or not a board is posted",
     /renameChannel/.test(read("../src/lib/discord.ts")) &&
+      /method: "PATCH",/.test(read("../src/lib/discord.ts")) &&
+      /\/channels\/\$\{encodeURIComponent\(channelId\)\}/.test(read("../src/lib/discord.ts")) &&
       /statusChannelName/.test(read("../src/lib/discord.ts")) &&
-      /updateChannelName/.test(read("../src/lib/status-board.ts")) &&
-      /🟢/.test(read("../src/lib/discord.ts")) && /🔴/.test(read("../src/lib/discord.ts"))
+      /🟢/.test(read("../src/lib/discord.ts")) && /🔴/.test(read("../src/lib/discord.ts")) &&
+      // The heading is synced by its own pass, and by lifecycle hooks — not
+      // only as a side effect of a board message.
+      /export async function syncChannelHeading\(/.test(read("../src/lib/status-board.ts")) &&
+      /await syncChannelHeadings\(\)/.test(read("../src/lib/status-board.ts")) &&
+      /export async function refreshChannelHeading\(/.test(read("../src/lib/status-board.ts")) &&
+      /refreshHeading\(server\.id\)/.test(read("../src/app/api/servers/[id]/process/route.ts"))
   );
   check(
     "!etallofoz also probes ET servers configured outside the panel",
