@@ -2,11 +2,27 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useConfirm } from "@/components/ConfirmDialog";
+import DbBrowser from "@/components/panels/DbBrowser";
 
 interface AuthUser { id: number; username: string; role: string }
 interface Server { id: number; name: string; gameName: string | null; gameIcon: string | null; gameSlug: string | null; status: string }
 interface FileEntry { name: string; path: string; isDir: boolean; size: number; modified: string; ext: string | null }
-interface FileContent { type: "file"; path: string; name: string; size: number; content: string | null; tooLarge?: boolean; binary?: boolean; reason?: string; modified?: string }
+interface FileContent { type: "file"; path: string; name: string; size: number; content: string | null; tooLarge?: boolean; binary?: boolean; reason?: string; modified?: string; sqlite?: boolean }
+interface DbView { path: string; name: string; size: number }
+
+// Extensions that open straight into the database browser. The server still
+// verifies the magic bytes before opening anything — a .db that is not
+// really SQLite gets a clear error, not a crash. (Kept in sync with
+// looksLikeDbFile in src/lib/sqlite-browser.ts; duplicated here so the
+// client bundle does not pull in the server-only sqlite module.)
+const DB_EXTS = new Set(["db", "sqlite", "sqlite3", "db3", "s3db"]);
+
+function isDbName(fileName: string): boolean {
+  // A leading dot means a dotfile (".db"), not an extension.
+  const base = fileName.startsWith(".") ? fileName.slice(1) : fileName;
+  if (!base.includes(".")) return false;
+  return DB_EXTS.has(base.split(".").pop()!.toLowerCase());
+}
 
 function fmtSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -197,6 +213,7 @@ export default function FilesPanel({ user, onNavigate }: { user: AuthUser; onNav
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [basePath, setBasePath] = useState("");
   const [editingFile, setEditingFile] = useState<FileContent | null>(null);
+  const [dbView, setDbView] = useState<DbView | null>(null);
   const [editContent, setEditContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -247,6 +264,7 @@ export default function FilesPanel({ user, onNavigate }: { user: AuthUser; onNav
   function selectServer(id: number) {
     setSelectedId(id);
     setEditingFile(null);
+    setDbView(null);
     setCurrentPath(".");
     setSelectedPaths([]);
     setLastSelectedPath(null);
@@ -257,6 +275,7 @@ export default function FilesPanel({ user, onNavigate }: { user: AuthUser; onNav
   function navigate(path: string) {
     if (!selectedId) return;
     setEditingFile(null);
+    setDbView(null);
     setSelectedPaths([]);
     setLastSelectedPath(null);
     loadDir(selectedId, path);
@@ -272,6 +291,13 @@ export default function FilesPanel({ user, onNavigate }: { user: AuthUser; onNav
   async function openFile(entry: FileEntry) {
     if (!selectedId) return;
     if (entry.isDir) { navigate(entry.path); return; }
+    // SQLite databases open in the read-only database browser instead of
+    // the text editor (which would refuse them as binary anyway).
+    if (isDbName(entry.name)) {
+      setEditingFile(null);
+      setDbView({ path: entry.path, name: entry.name, size: entry.size });
+      return;
+    }
     try {
       const res = await fetch(`/api/servers/${selectedId}/files?path=${encodeURIComponent(entry.path)}&action=read`);
       const data = await res.json();
@@ -707,7 +733,7 @@ export default function FilesPanel({ user, onNavigate }: { user: AuthUser; onNav
         </div>
       )}
 
-      {selectedId && !editingFile && (
+      {selectedId && !editingFile && !dbView && (
         <div
           onDragEnter={handleDragEnter}
           onDragLeave={handleDragLeave}
@@ -971,8 +997,15 @@ export default function FilesPanel({ user, onNavigate }: { user: AuthUser; onNav
             <div className="gaming-surface rounded-xl p-8 text-center">
               <span className="text-3xl block mb-2">📦</span>
               <p className="text-text-secondary">File too large to edit in browser ({fmtSize(editingFile.size)})</p>
-              <button onClick={() => { if (selectedId) downloadFile({ name: editingFile.name, path: editingFile.path, isDir: false, size: editingFile.size, modified: "", ext: null }); }}
-                className="mt-3 px-4 py-2 bg-accent text-white rounded-lg text-sm">Download File</button>
+              <div className="mt-3 flex gap-2 justify-center">
+                {editingFile.sqlite && (
+                  <button
+                    onClick={() => { setDbView({ path: editingFile.path, name: editingFile.name, size: editingFile.size }); setEditingFile(null); }}
+                    className="px-4 py-2 bg-success text-white rounded-lg text-sm">🗄️ Open as Database</button>
+                )}
+                <button onClick={() => { if (selectedId) downloadFile({ name: editingFile.name, path: editingFile.path, isDir: false, size: editingFile.size, modified: "", ext: null }); }}
+                  className="px-4 py-2 bg-accent text-white rounded-lg text-sm">Download File</button>
+              </div>
             </div>
           ) : isEditable ? (
             <textarea value={editContent} onChange={(e) => setEditContent(e.target.value)}
@@ -991,11 +1024,31 @@ export default function FilesPanel({ user, onNavigate }: { user: AuthUser; onNav
                   ? "This file is not valid UTF-8 text — editing it here would corrupt it."
                   : "Binary file — cannot edit in browser"}
               </p>
-              <button onClick={() => { if (selectedId) downloadFile({ name: editingFile.name, path: editingFile.path, isDir: false, size: editingFile.size, modified: "", ext: null }); }}
-                className="mt-3 px-4 py-2 bg-accent text-white rounded-lg text-sm">Download File</button>
+              <div className="mt-3 flex gap-2 justify-center">
+                {editingFile.sqlite && (
+                  <button
+                    onClick={() => { setDbView({ path: editingFile.path, name: editingFile.name, size: editingFile.size }); setEditingFile(null); }}
+                    className="px-4 py-2 bg-success text-white rounded-lg text-sm">🗄️ Open as Database</button>
+                )}
+                <button onClick={() => { if (selectedId) downloadFile({ name: editingFile.name, path: editingFile.path, isDir: false, size: editingFile.size, modified: "", ext: null }); }}
+                  className="px-4 py-2 bg-accent text-white rounded-lg text-sm">Download File</button>
+              </div>
             </div>
           )}
         </div>
+      )}
+
+      {/* Database browser */}
+      {dbView && selectedId && (
+        <DbBrowser
+          key={`${selectedId}:${dbView.path}`}
+          serverId={selectedId}
+          path={dbView.path}
+          name={dbView.name}
+          size={dbView.size}
+          onBack={() => { setDbView(null); loadDir(selectedId, currentPath); }}
+          onDownload={() => downloadFile({ name: dbView.name, path: dbView.path, isDir: false, size: dbView.size, modified: "", ext: null })}
+        />
       )}
 
       {!selectedId && (
