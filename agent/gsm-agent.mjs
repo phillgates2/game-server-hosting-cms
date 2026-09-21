@@ -207,7 +207,7 @@ async function fsRead(root, rel) {
   const sniff = raw.subarray(0, 8192);
   const isText = !sniff.includes(0);
   if (!isText) {
-    return { type: "file", path: relative(root, full), name: basename(full), size: s.size, modified: s.mtime.toISOString(), binary: true, content: null };
+    return { type: "file", path: relative(root, full), name: basename(full), size: s.size, modified: s.mtime.toISOString(), binary: true, sqlite: isSqliteBytes(raw), content: null };
   }
   return { type: "file", path: relative(root, full), name: basename(full), size: s.size, modified: s.mtime.toISOString(), content: raw.toString("utf8") };
 }
@@ -222,6 +222,154 @@ async function fsReadBin(root, rel) {
   if (s.size > BIN_READ_MAX_BYTES) return { error: "File too large to download through the agent (20 MB cap)", code: 413 };
   const raw = await readFile(full);
   return { base64: raw.toString("base64"), fileName: basename(full), size: s.size };
+}
+
+// ── SQLite browsing (read-only) ─────────────────────────────────────────────
+// Same shapes as the panel's src/lib/sqlite-browser.ts, duplicated here
+// because the agent is a zero-dependency standalone file.
+
+const SQLITE_MAGIC_STR = "SQLite format 3\0";
+
+function isSqliteBytes(sample) {
+  if (!sample || sample.length < SQLITE_MAGIC_STR.length) return false;
+  for (let i = 0; i < SQLITE_MAGIC_STR.length; i++) {
+    if (sample[i] !== SQLITE_MAGIC_STR.charCodeAt(i)) return false;
+  }
+  return true;
+}
+
+let agentSqlite = null;
+let agentSqliteTried = false;
+
+async function loadAgentSqlite() {
+  if (agentSqlite) return agentSqlite;
+  if (agentSqliteTried) return null;
+  agentSqliteTried = true;
+  try {
+    const mod = await import("node:sqlite");
+    if (mod && typeof mod.DatabaseSync === "function") agentSqlite = mod;
+  } catch {
+    agentSqlite = null;
+  }
+  return agentSqlite;
+}
+
+function quoteAgentIdentifier(name) {
+  return `"${String(name).replace(/"/g, '""')}"`;
+}
+
+const AGENT_BLOB_PREVIEW_BYTES = 256;
+
+function serialiseAgentValue(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "bigint") return value.toString();
+  if (value instanceof Uint8Array) {
+    const head = value.subarray(0, AGENT_BLOB_PREVIEW_BYTES);
+    return { $blob: true, bytes: value.length, truncated: value.length > head.length, preview: Buffer.from(head).toString("base64") };
+  }
+  return String(value);
+}
+
+function friendlyAgentDbError(e) {
+  const msg = e && e.message ? e.message : String(e);
+  if (/not a database|malformed/i.test(msg)) return { error: "That file is not a readable SQLite database", code: 400 };
+  if (/unable to open|no such file|ENOENT/i.test(msg)) return { error: "Database file not found", code: 404 };
+  return { error: msg || "Database browse failed", code: 500 };
+}
+
+function openAgentDb(DatabaseSync, full) {
+  try {
+    return { db: new DatabaseSync(full, { open: true, readOnly: true, timeout: 5000 }) };
+  } catch (e) {
+    return friendlyAgentDbError(e);
+  }
+}
+
+async function fsDbTables(root, rel) {
+  const full = containedPath(root, rel);
+  if (!full) return { error: "Path outside the allowed root", code: 400 };
+  const s = await stat(full);
+  if (!s.isFile()) return { error: "Path is not a file", code: 400 };
+  const mod = await loadAgentSqlite();
+  if (!mod) return { error: "SQLite browsing needs Node.js 22.5 or newer on the agent host", code: 501 };
+  const opened = openAgentDb(mod.DatabaseSync, full);
+  if (!opened.db) return opened;
+  const db = opened.db;
+  try {
+    let master;
+    try {
+      master = db.prepare("SELECT name, type, sql FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ESCAPE '\\' ORDER BY name").all();
+    } catch (e) {
+      return friendlyAgentDbError(e);
+    }
+    const tables = [];
+    for (const row of master) {
+      let count = null;
+      try {
+        const r = db.prepare(`SELECT COUNT(*) AS n FROM ${quoteAgentIdentifier(row.name)}`).get();
+        count = typeof r.n === "bigint" ? Number(r.n) : r.n;
+      } catch {
+        count = null;
+      }
+      tables.push({ name: row.name, kind: row.type === "view" ? "view" : "table", rows: count, sql: row.sql });
+    }
+    return { type: "db", path: relative(root, full), name: basename(full), size: s.size, tables };
+  } finally {
+    db.close();
+  }
+}
+
+async function fsDbRows(root, rel, table, limit, offset) {
+  const full = containedPath(root, rel);
+  if (!full) return { error: "Path outside the allowed root", code: 400 };
+  const s = await stat(full);
+  if (!s.isFile()) return { error: "Path is not a file", code: 400 };
+  if (typeof table !== "string" || table.length === 0) return { error: "Table is required", code: 400 };
+  const lim = Math.min(500, Math.max(1, Math.floor(Number(limit) || 100)));
+  const off = Math.max(0, Math.floor(Number(offset) || 0));
+  const mod = await loadAgentSqlite();
+  if (!mod) return { error: "SQLite browsing needs Node.js 22.5 or newer on the agent host", code: 501 };
+  const opened = openAgentDb(mod.DatabaseSync, full);
+  if (!opened.db) return opened;
+  const db = opened.db;
+  try {
+    let master;
+    try {
+      master = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name = ?").all(table);
+    } catch (e) {
+      return friendlyAgentDbError(e);
+    }
+    if (master.length === 0) return { error: `Table \"${table}\" does not exist`, code: 404 };
+    const quoted = quoteAgentIdentifier(table);
+    let total = null;
+    try {
+      const r = db.prepare(`SELECT COUNT(*) AS n FROM ${quoted}`).get();
+      total = typeof r.n === "bigint" ? Number(r.n) : r.n;
+    } catch {
+      total = null;
+    }
+    let stmt;
+    try {
+      stmt = db.prepare(`SELECT * FROM ${quoted} LIMIT ? OFFSET ?`);
+    } catch (e) {
+      return { error: e && e.message ? e.message : `Cannot read table \"${table}\"`, code: 400 };
+    }
+    const columns = stmt.columns().map((c) => ({ name: c.name, type: "" }));
+    const rows = stmt.all(lim, off).map((r) => columns.map((c) => serialiseAgentValue(r[c.name])));
+    try {
+      const literal = `'${String(table).replace(/'/g, "''")}'`;
+      for (const col of db.prepare(`SELECT name, type FROM pragma_table_info(${literal})`).all()) {
+        const found = columns.find((c) => c.name === col.name);
+        if (found) found.type = col.type ?? "";
+      }
+    } catch {
+      /* views carry no declared types */
+    }
+    return { type: "dbrows", path: relative(root, full), name: basename(full), size: s.size, table, columns, rows, total, limit: lim, offset: off };
+  } finally {
+    db.close();
+  }
 }
 
 async function fsWrite(root, rel, content) {
@@ -543,6 +691,14 @@ export function createAgentHandler(cfg) {
           if (op === "list") return send(res, 200, await fsList(base, rel));
           if (op === "read") return send(res, 200, await fsRead(base, rel));
           if (op === "readbin") return send(res, 200, await fsReadBin(base, rel));
+          if (op === "dbtables") {
+            const r = await fsDbTables(base, rel);
+            return send(res, r.code || 200, r);
+          }
+          if (op === "dbrows") {
+            const r = await fsDbRows(base, rel, body.table, body.limit, body.offset);
+            return send(res, r.code || 200, r);
+          }
           if (op === "write") {
             const r = await fsWrite(base, rel, body.content);
             return send(res, r.code || 200, r);

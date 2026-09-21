@@ -1,6 +1,7 @@
-import { readdir, stat, readFile, writeFile, mkdir, rm, rename } from "node:fs/promises";
+import { readdir, stat, readFile, writeFile, mkdir, rm, rename, open } from "node:fs/promises";
 import { join, resolve, relative, extname, basename, dirname, sep } from "node:path";
 import { looksLikeText } from "./text-detect";
+import { isSqliteBytes } from "./sqlite-browser";
 
 export interface ServerFileItem {
   name: string;
@@ -66,12 +67,29 @@ export async function readText(basePath: string, requestedPath: string, maxBytes
   }
 
   if (s.size > maxBytes) {
+    // A multi-megabyte SQLite database is "too large" for the text editor
+    // but opens fine in the database browser, which pages through it without
+    // loading it into memory. Peek at the header so the UI can offer that.
+    let sqlite = false;
+    try {
+      const fh = await open(fullPath, "r");
+      try {
+        const head = Buffer.alloc(16);
+        await fh.read(head, 0, 16, 0);
+        sqlite = isSqliteBytes(head);
+      } finally {
+        await fh.close();
+      }
+    } catch {
+      sqlite = false;
+    }
     return {
       type: "file" as const,
       path: relPath,
       name: basename(fullPath),
       size: s.size,
       tooLarge: true,
+      sqlite,
       content: null,
     };
   }
@@ -93,6 +111,9 @@ export async function readText(basePath: string, requestedPath: string, maxBytes
       modified: s.mtime.toISOString(),
       binary: true as const,
       reason: check.reason,
+      // Lets the file manager offer "Open as database" for SQLite files
+      // regardless of extension (some games use extensionless sidecars).
+      sqlite: isSqliteBytes(raw.subarray(0, 16)),
       content: null,
     };
   }

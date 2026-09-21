@@ -4,6 +4,45 @@ All notable changes to GameServer Manager are documented here.
 
 ---
 
+## [Unreleased]
+
+### 🗄️ The File Manager Opens .db Files
+Game servers scatter SQLite databases around their install directories
+(player stats, claims, economies, ban lists), and until now those were
+dead ends in the file manager: binary files you could only download and
+open locally. Clicking a `.db` / `.sqlite` / `.sqlite3` file now opens a
+read-only database browser instead of the "cannot edit in browser" notice:
+
+- **Table picker with row counts**, covering tables and views
+  (`sqlite_%` internals hidden), plus a collapsible `CREATE TABLE` schema
+  view per table.
+- **Paginated rows grid** (100 per page) with declared column types,
+  `NULL` rendering, blob badges (blobs are truncated server-side so a
+  10 MB blob never rides back as base64), and long-text truncation.
+- **Strictly read-only**: the database is opened with `readOnly: true`,
+  so browsing a live game database cannot modify it — not even its
+  locking state beyond a shared read lock. A busy timeout keeps reads
+  working while the game server itself is writing.
+- **No new dependencies**: browsing runs on Node's built-in
+  `node:sqlite` (needs Node 22.5+). The previous hand-rolled reader
+  stays for ET stats; the browser handles everything it could not
+  (WITHOUT ROWID, FTS, odd schemas) because it is real SQLite.
+- **Magic-byte detection, not just extensions**: the server sniffs the
+  `SQLite format 3` header, so extensionless sidecars and databases past
+  the text editor's 2 MB cap get an "Open as Database" button too, while
+  a `.db` that is really LevelDB gets a clear error instead of a crash.
+- **Remote nodes included**: the agent gained `dbtables` / `dbrows` ops
+  with the same shapes, guards and read-only opens, so databases on
+  remote game machines browse identically.
+- Table names are validated against `sqlite_master` and quoted as
+  identifiers — a table literally named `x"; DROP TABLE users;--` is
+  browsed, not executed (pinned by test).
+- **1,401 tests** (18 new: detection, listing, pagination, blob
+  truncation, injection-named tables, friendly errors, the `readText`
+  sqlite hint, and the agent ops over HTTP).
+
+---
+
 ## [1.45.0] — 2026-09-19
 
 ### 🟢 The Channel Heading Says Whether The Server Is Up
