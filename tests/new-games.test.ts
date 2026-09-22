@@ -93,8 +93,9 @@ describe("mindustry", () => {
 });
 
 describe("vintage-story", () => {
-  test("pins a server version and downloads from the official CDN", () => {
-    assert.equal(vintageStory.variables.find((v) => v.env_variable === "VS_VERSION")?.default_value, "1.22.7");
+  test("defaults to latest stable metadata and downloads from the official CDN", () => {
+    assert.equal(vintageStory.variables.find((v) => v.env_variable === "VS_VERSION")?.default_value, "");
+    assert.match(vintageStory.installScript, /api\.vintagestory\.at\/stable\.json/);
     assert.match(vintageStory.installScript, /cdn\.vintagestory\.at\/gamefiles\/stable/);
     assert.match(vintageStory.installScript, /vs_server_linux-x64_\$VS_VERSION\.tar\.gz/);
   });

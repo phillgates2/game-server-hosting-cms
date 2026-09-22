@@ -86,17 +86,19 @@ chmod +x OpenRA.AppImage
 # command prefers the extracted tree so the server runs anywhere.
 echo "Extracting AppImage runtime tree..."
 EXTRACT_OK=0
+rm -rf squashfs-root
 if ./OpenRA.AppImage --appimage-extract >/dev/null 2>&1 && [ -f squashfs-root/AppRun ]; then
   EXTRACT_OK=1
 elif [ -f squashfs-root/AppRun ]; then
   EXTRACT_OK=1
 fi
 if [ "$EXTRACT_OK" = "1" ]; then
+  rm -rf openra-extracted
   mv squashfs-root openra-extracted
   echo "Extracted runtime tree: openra-extracted/"
 else
   echo "WARNING: AppImage self-extraction failed - the server will need FUSE (or a runtime that honours APPIMAGE_EXTRACT_AND_RUN)" >&2
-  rm -rf squashfs-root
+  rm -rf squashfs-root openra-extracted
 fi
 
 # Validate that we have something runnable.

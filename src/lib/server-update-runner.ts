@@ -23,11 +23,22 @@ export async function runSteamUpdate(options: {
   steamcmdDir?: string;
   timeoutMs?: number;
 }): Promise<{ stdout: string; stderr: string }> {
-  const bashPath = await findBash();
-  const timeoutMs = options.timeoutMs ?? 1000 * 60 * 30;
+  return runUpdateScript({
+    installPath: options.installPath,
+    script: buildSteamUpdateScript(options),
+    timeoutMs: options.timeoutMs,
+  });
+}
+
+export function buildSteamUpdateScript(options: {
+  installPath: string;
+  gameName: string;
+  steamAppId: string;
+  steamcmdDir?: string;
+}): string {
   const steamcmdDir = (options.steamcmdDir ?? "").trim() || "/opt/steamcmd";
 
-  const script = `#!/usr/bin/env bash
+  return `#!/usr/bin/env bash
 set -e
 STEAMCMD_BIN="${steamcmdDir}/steamcmd.sh"
 if [ ! -x "$STEAMCMD_BIN" ]; then
@@ -40,9 +51,19 @@ echo "Updating ${options.gameName} (AppID: ${options.steamAppId})..."
 echo "Update complete"
 `;
 
+}
+
+/** Run an update without regenerating the panel's configs or start scripts. */
+export async function runUpdateScript(options: {
+  installPath: string;
+  script: string;
+  timeoutMs?: number;
+}): Promise<{ stdout: string; stderr: string }> {
+  const bashPath = await findBash();
+  const timeoutMs = options.timeoutMs ?? 1000 * 60 * 30;
   const tempDir = await mkdtemp(join(/* turbopackIgnore: true */ tmpdir(), "gsm-update-"));
   const scriptPath = join(/* turbopackIgnore: true */ tempDir, "update.sh");
-  await writeFile(scriptPath, script, "utf8");
+  await writeFile(scriptPath, options.script, "utf8");
   await chmod(scriptPath, 0o755);
 
   try {

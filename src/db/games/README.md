@@ -113,3 +113,40 @@ The check fails the build if a template has a `{{PLACEHOLDER}}` with no matching
 variable, declares a variable nothing consumes, has a select whose default is
 not one of its own options, has a numeric default outside its own min/max, or
 renders a config that still contains unresolved tokens.
+
+## Updating existing servers
+
+The server's **Update** action supports both SteamCMD and non-Steam games, on
+local nodes and remote node agents. Stop the server first. By default, the panel
+creates a backup on the node that holds the files and aborts if that backup fails.
+Concurrent Update requests for the same server are rejected.
+
+Steam games run `app_update ... validate`. Non-Steam games rerun the current
+bundled `installScript` (or the game definition's script for custom games), using
+the server's saved variables and template defaults. Downloaders that resolve
+`latest` fetch the latest available release; explicitly configured version pins
+are retained. Custom games need a download/install script to enable updates.
+
+Updating does not invoke the panel's config/start-script generation or migrate
+the install directory. However, a downloader or upstream archive can itself
+replace existing files, so keep the pre-update backup enabled. Local updates
+record a file-change report; remote updates record the backup and update event
+without a local filesystem report.
+
+### Latest stable releases
+
+ET:Legacy resolves its engine archives and Legacy mod pack together from the
+current official stable-release page; the mod modules and PK3s are refreshed on
+every update, not only when missing. Xonotic resolves its archive from the
+current official download page. Vintage Story uses its public `stable.json`
+metadata when `VS_VERSION` is empty or `latest`. These resolvers stop with an
+error if upstream metadata cannot be understood; they do not silently fall back
+to an old release. ET:Legacy and unpinned Vintage Story require **Python 3** on
+the game node to parse metadata.
+
+Existing explicit version settings are not rewritten. In particular, older
+Vintage Story servers may still store the old default version: clear
+`VS_VERSION` (or set it to `latest`) to follow stable releases. Fabric and
+NeoForge pins likewise remain intentional. Third-party ET mods (Jaymod, ETPub,
+N!tmod) retain their compatibility-specific downloads; the ET:Legacy engine and
+Legacy mod pack follow the current stable release independently of those mods.

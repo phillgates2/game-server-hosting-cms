@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { gameServers, gameDefinitions, nodes, settings } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { access, constants } from "node:fs/promises";
 
 export const runtime = "nodejs";
@@ -22,6 +22,7 @@ export async function POST(
 
   const { id } = await params;
 
+  let updateClaimed = false;
   try {
     const [server] = await db
       .select({
@@ -29,6 +30,10 @@ export async function POST(
         installPath: gameServers.installPath, status: gameServers.status,
         steamAppId: gameDefinitions.steamAppId, gameName: gameDefinitions.name,
         steamcmdPath: nodes.steamcmdPath,
+        gameSlug: gameDefinitions.slug, installScript: gameDefinitions.installScript,
+        port: gameServers.port, queryPort: gameServers.queryPort, rconPort: gameServers.rconPort,
+        variables: gameServers.variables, config: gameServers.config,
+        nodeIsLocal: nodes.isLocal, nodeApiUrl: nodes.apiUrl, nodeApiKey: nodes.apiKey,
       })
       .from(gameServers)
       .leftJoin(gameDefinitions, eq(gameServers.gameId, gameDefinitions.id))
@@ -38,22 +43,40 @@ export async function POST(
 
     if (!server) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (auth.role !== "admin" && server.userId !== auth.userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    if (server.status === "running") return NextResponse.json({ error: "Stop the server before updating" }, { status: 400 });
+    if (server.status !== "stopped") return NextResponse.json({ error: "Stop the server before updating; an install or update must not already be in progress" }, { status: 409 });
 
-    // Check for the shared system SteamCMD install (path from the node config)
+    const remote = server.nodeIsLocal === false;
+    if (remote && (!server.nodeApiUrl || !server.nodeApiKey)) {
+      return NextResponse.json({ error: "Remote updates require a node agent API URL and key" }, { status: 400 });
+    }
+    const endpoint = { apiUrl: server.nodeApiUrl || "", apiKey: server.nodeApiKey || "" };
     const steamcmdDir = (server.steamcmdPath ?? "").trim() || "/opt/steamcmd";
-    const steamcmdPath = `${steamcmdDir}/steamcmd.sh`;
-    const hasSteamcmd = await access(steamcmdPath, constants.X_OK).then(() => true).catch(() => false);
-
-    if (!hasSteamcmd || !server.steamAppId) {
-      return NextResponse.json({ error: "This server does not use SteamCMD or SteamCMD is not installed on the host. Use Install Files instead." }, { status: 400 });
+    const { buildSteamUpdateScript, runUpdateScript } = await import("@/lib/server-update-runner");
+    const { buildTemplateUpdateScript } = await import("@/lib/server-update-script");
+    const script = server.steamAppId
+      ? buildSteamUpdateScript({ installPath: server.installPath, gameName: server.gameName || "game", steamAppId: String(server.steamAppId), steamcmdDir })
+      : buildTemplateUpdateScript(server);
+    if (!script) {
+      return NextResponse.json({ error: "This game has no download/install script. Configure one in the game definition to enable updates." }, { status: 400 });
+    }
+    if (server.steamAppId && !remote) {
+      const available = await access(`${steamcmdDir}/steamcmd.sh`, constants.X_OK).then(() => true).catch(() => false);
+      if (!available) return NextResponse.json({ error: "SteamCMD is not installed at the configured node path" }, { status: 400 });
     }
 
-    // Safety net: archive the server before Steam overwrites files. On by
+    // Claim before backing up so two Update clicks cannot run concurrently.
+    const claimed = await db.update(gameServers)
+      .set({ status: "installing", updatedAt: new Date() })
+      .where(and(eq(gameServers.id, server.id), eq(gameServers.status, "stopped")))
+      .returning({ id: gameServers.id });
+    if (!claimed.length) return NextResponse.json({ error: "Server is no longer stopped" }, { status: 409 });
+    updateClaimed = true;
+
+    // Safety net: archive the server before the updater overwrites files. On by
     // default ("update_auto_backup" in Settings → Panel). A failed backup
     // aborts the update rather than proceeding without a restore point —
     // that is the exact failure mode this feature exists to prevent. The
-    // status stays "stopped" when it aborts, so nothing else can act on it.
+    // claimed status is released when the backup aborts.
     const [autoBackupRow] = await db
       .select({ value: settings.value })
       .from(settings)
@@ -64,11 +87,19 @@ export async function POST(
     let backupName: string | null = null;
     if (autoBackup) {
       try {
-        const { createServerBackup } = await import("@/lib/backup");
-        const backup = await createServerBackup(server.installPath);
-        backupName = backup.name;
+        if (remote) {
+          const { remoteBackupCreate } = await import("@/lib/node-client");
+          const backup = await remoteBackupCreate(endpoint, server.installPath);
+          if (!backup.ok || !backup.name) throw new Error("Node agent did not confirm the backup");
+          backupName = backup.name;
+        } else {
+          const { createServerBackup } = await import("@/lib/backup");
+          backupName = (await createServerBackup(server.installPath)).name;
+        }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
+        await db.update(gameServers).set({ status: "stopped", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
+        updateClaimed = false;
         return NextResponse.json(
           {
             error: `Automatic pre-update backup failed (${msg}). The update was aborted and no files were changed. Turn off "Automatic backup before update" in Settings → Panel to update without a backup.`,
@@ -78,22 +109,26 @@ export async function POST(
       }
     }
 
-    await db.update(gameServers).set({ status: "installing", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
-
-    // Snapshot before Steam touches anything so we can report what changed.
+    // Snapshot before the updater touches anything so we can report what changed.
     // Best-effort: a failing walk must never block the update itself.
     const { snapshotInstallPath, diffSnapshots, configFilesChanged, formatUpdateReport } = await import("@/lib/update-diff");
-    const pre = await snapshotInstallPath(server.installPath).catch(() => null);
+    const pre = remote ? null : await snapshotInstallPath(server.installPath).catch(() => null);
 
-    const { runSteamUpdate } = await import("@/lib/server-update-runner");
-    const result = await runSteamUpdate({
-      installPath: server.installPath,
-      gameName: server.gameName || "game",
-      steamAppId: String(server.steamAppId),
-      steamcmdDir,
-    });
+    let result: { stdout: string; stderr: string };
+    if (remote) {
+      const { nodeRpc } = await import("@/lib/node-client");
+      const response = await nodeRpc<{ ok: boolean; output?: string; exitCode?: number }>(
+        endpoint, "/rpc/install", { installPath: server.installPath, script }, { timeoutMs: 45 * 60_000 }
+      );
+      if (!response.ok) throw Object.assign(new Error(`Remote update failed (exit ${response.exitCode ?? "unknown"})`), { stdout: response.output });
+      result = { stdout: response.output || "", stderr: "" };
+    } else {
+      result = await runUpdateScript({ installPath: server.installPath, script, timeoutMs: 45 * 60_000 });
+    }
 
     await db.update(gameServers).set({ status: "stopped", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
+
+    updateClaimed = false;
 
     // Diff + persist the report (best-effort, like all history writes).
     let report: { added: number; removed: number; changed: number; configsChanged: string[]; truncated: boolean } | null = null;
@@ -133,7 +168,7 @@ export async function POST(
     return NextResponse.json({ ok: true, backup: backupName, report, message: `${server.gameName} updated successfully${backupNote}${configNote}`, output: result.stdout.slice(-4000) });
   } catch (e: unknown) {
     const err = e as { message?: string; stdout?: string; stderr?: string };
-    try { await db.update(gameServers).set({ status: "stopped", updatedAt: new Date() }).where(eq(gameServers.id, Number(id))); } catch { /**/ }
+    try { if (updateClaimed) await db.update(gameServers).set({ status: "stopped", updatedAt: new Date() }).where(eq(gameServers.id, Number(id))); } catch { /**/ }
     return NextResponse.json({ error: err.message || "Update failed", output: err.stdout?.slice(-4000) || "" }, { status: 500 });
   }
 }

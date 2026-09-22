@@ -579,7 +579,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
       title: staged ? "Staged rollout" : "Batch update",
       message: staged
         ? `Update ${stoppedCount} stopped server${stoppedCount === 1 ? "" : "s"} as a staged rollout? The FIRST one is updated and boot-verified; only if it survives does the rest of the batch follow. A bad canary halts the rollout and leaves the fleet untouched.`
-        : `Update ${ids.length} server${ids.length === 1 ? "" : "s"} via Steam? ${stoppedCount} stopped server${stoppedCount === 1 ? "" : "s"} will be updated (each gets its pre-update backup); running/installing ones are skipped.`,
+        : `Update ${ids.length} server${ids.length === 1 ? "" : "s"} using their configured downloaders? ${stoppedCount} stopped server${stoppedCount === 1 ? "" : "s"} will be updated (each gets its pre-update backup); running/installing ones are skipped.`,
       confirmLabel: staged ? `Staged rollout (${stoppedCount})` : `Update ${ids.length}`,
     });
     if (!ok) return;
@@ -771,7 +771,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   async function updateServer(id: number) {
     const srv = servers.find((s) => s.id === id);
     if (srv?.status === "running") { toast.warning("Stop First", "Stop the server before updating."); return; }
-    const ok = await confirm({ title: "Update Server", message: `Re-run SteamCMD app_update for "${srv?.name}"? This downloads the latest version. A backup is created first (can be turned off in Settings → Panel).`, confirmLabel: "Update" });
+    const ok = await confirm({ title: "Update Server", message: `Download the latest server files for "${srv?.name}"? This uses the game’s downloader and keeps configured version pins. Downloaded files may replace existing configs. A backup is created first (can be turned off in Settings → Panel).`, confirmLabel: "Update" });
     if (!ok) return;
     try {
       const res = await fetch(`/api/servers/${id}/update`, { method: "POST" });
@@ -1489,7 +1489,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                 <Btn onClick={() => void batchAction("restart")} color="warning" icon="🔄" label={batchBusy === "restart" ? "Restarting…" : "Restart all"} disabled={batchBusy !== null} title="Restart every server shown" />
                 <Btn onClick={() => void batchAction("restart", true)} color="warning" icon="🔁" label={batchBusy === "restart" ? "Rolling…" : "Rolling restart"} disabled={batchBusy !== null} title="Restart servers one at a time; each must come back up before the next is touched. Halts if one fails to return." />
                 <Btn onClick={() => void batchAction("stop")} color="danger" icon="⏹" label={batchBusy === "stop" ? "Stopping…" : "Stop all"} disabled={batchBusy !== null} title="Stop every server shown" />
-                <Btn onClick={() => void batchUpdate()} color="accent" icon="📥" label={batchBusy === "update" ? "Updating…" : "Update stopped"} disabled={batchBusy !== null} title="Steam-update every stopped server shown (running ones are skipped)" />
+                <Btn onClick={() => void batchUpdate()} color="accent" icon="📥" label={batchBusy === "update" ? "Updating…" : "Update stopped"} disabled={batchBusy !== null} title="Update every stopped server shown (running ones are skipped)" />
                 <Btn onClick={() => void batchUpdate(true)} color="accent" icon="🪜" label={batchBusy === "update" ? "Rolling out…" : "Staged rollout"} disabled={batchBusy !== null} title="Update one canary first and boot-verify it; only then update the rest. Halts the whole rollout if the canary fails." />
                 <Btn onClick={openBlueprints} color="warning" icon="🧬" label={blueprintsOpen ? "Close blueprints" : "Blueprints"} disabled={false} title="Multi-server deploy definitions built from your presets" />
               </div>
@@ -1703,7 +1703,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                         {server.status === "running" ? (<><Btn onClick={() => controlProcess(server.id, "stop")} color="danger" icon="⏹" label="Stop" /><Btn onClick={() => controlProcess(server.id, "restart")} color="warning" icon="🔄" label="Restart" /></>) : (<Btn onClick={() => controlProcess(server.id, "start")} color="success" icon="▶" label="Start" />)}
                         <div className="w-px h-5 bg-border mx-1" />
                         <Btn onClick={() => installServerFiles(server.id)} color="accent" icon="📥" label={isInstalling ? "Installing..." : "Install"} disabled={isInstalling} />
-                        <Btn onClick={() => updateServer(server.id)} color="accent" icon="🔄" label="Update" />
+                        <Btn onClick={() => updateServer(server.id)} color="accent" icon="🔄" label="Update" disabled={isInstalling || server.status !== "stopped"} />
                         <Btn onClick={() => backupServer(server.id)} color="muted" icon="💾" label="Backup" />
                         <Btn onClick={() => void drillBackup(server.id)} color="muted" icon="🧪" label="Drill" title="Test-restore the newest backup (proves it works; live files untouched)" />
                         <Btn onClick={() => void restoreBackup(server.id)} color="danger" icon="🛡️" label="Restore" title="Replace the server files with the newest verified backup (server must be stopped)" />

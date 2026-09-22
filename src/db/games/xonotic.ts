@@ -117,15 +117,23 @@ cd "$INSTALL_DIR"
 
 ## Download Xonotic
 echo "Downloading Xonotic..."
-curl -fSL --retry 3 -o xonotic.zip "https://dl.xonotic.org/xonotic-0.8.6.zip"
+DOWNLOAD_PAGE=$(curl -fsSL --retry 3 --max-time 60 "https://xonotic.org/download/")
+DOWNLOAD_URL=$(printf '%s' "$DOWNLOAD_PAGE" | grep -oE 'https://dl\\.xonotic\\.org/xonotic-[0-9]+\\.[0-9]+\\.[0-9]+\\.zip' | head -1)
+if [ -z "$DOWNLOAD_URL" ]; then
+  echo "ERROR: could not resolve the latest stable Xonotic archive" >&2
+  exit 1
+fi
+echo "Xonotic release archive: $DOWNLOAD_URL"
+curl -fSL --retry 3 -o xonotic.zip "$DOWNLOAD_URL"
 if ! unzip -t xonotic.zip > /dev/null 2>&1; then
   echo "ERROR: downloaded Xonotic archive is corrupt" >&2
   rm -f xonotic.zip
   exit 1
 fi
 unzip -o xonotic.zip
-mv Xonotic/* . 2>/dev/null || true
-rmdir Xonotic 2>/dev/null || true
+# Merge refreshed data into an existing install; mv would leave old data/ intact.
+cp -a Xonotic/. .
+rm -rf Xonotic
 rm -f xonotic.zip
 chmod +x xonotic-linux64-dedicated xonotic-dedicated 2>/dev/null || true
 

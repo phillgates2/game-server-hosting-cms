@@ -136,6 +136,12 @@ done
 
 emit_json() {
   case "$url" in
+    https://www.etlegacy.com/download)
+      echo '<h2>ET: Legacy stable release 2.86.0</h2><a href="/download/file/757">x86_64 archive</a><a href="/download/file/758">i386 archive</a><a href="/download/file/769">All supported archive</a>' ;;
+    https://xonotic.org/download/)
+      echo '<a href="https://dl.xonotic.org/xonotic-0.8.7.zip">Download</a>' ;;
+    https://api.vintagestory.at/stable.json)
+      echo '{"1.22.8":{"linuxserver":{"latest":1}},"1.22.7":{"linuxserver":{}}}' ;;
     *meta.fabricmc.net*versions/loader*)
       echo '[{"separator":".","build":6,"maven":"net.fabricmc:fabric-loader:0.19.6","version":"0.19.6","stable":false},{"separator":".","build":5,"maven":"net.fabricmc:fabric-loader:0.19.5","version":"0.19.5","stable":true}]' ;;
     *meta.fabricmc.net*versions/game*)
@@ -194,6 +200,11 @@ make_archive() {
       printf '#!/bin/bash\necho mock\n' > "$d/payload/$n"
       chmod +x "$d/payload/$n"
     done
+  fi
+  if [[ "$MOCK_ARTIFACTS" == *etlded* ]]; then
+    mkdir -p "$d/payload/legacy"
+    printf 'new module' > "$d/payload/legacy/qagame.mp.x86_64.so"
+    printf 'new module' > "$d/payload/legacy/qagame.mp.i386.so"
   fi
   printf 'mock\n' > "$d/payload/README.txt"
   # Several upstreams nest everything one level deep and the scripts either
