@@ -1,11 +1,8 @@
+import { VINTAGE_STORY_RELEASE_PARSER, pythonCommand } from "./release-resolvers";
 import { V, group, COMMON_VARS, type GameTemplate } from "./types";
 
-// Vintage Story 1.22.x dedicated server: the tar.gz from the official CDN is
-// a .NET 10 apphost (VintagestoryServer). The runtime is NOT bundled, so the
-// template installs a server-local .NET 10 runtime (same pattern as the
-// TShock fix). Version is pinned: the CDN publishes no version-listing API
-// (the download page is account/JS gated), so VS_VERSION is the knob and is
-// bumped in releases.
+// Resolve stable server releases via the official public metadata API.
+// Explicit VS_VERSION values remain available for compatibility-pinned worlds.
 export const vintageStory: GameTemplate = {
   slug: "vintage-story",
   name: "Vintage Story",
@@ -21,7 +18,7 @@ export const vintageStory: GameTemplate = {
     ...COMMON_VARS,
 
     ...group("Server", [
-      V("Server Version", "VS_VERSION", "Vintage Story server version (e.g. 1.22.7)", "1.22.7", { required: false }),
+      V("Server Version", "VS_VERSION", "Leave empty or use latest for the current stable release; set a version to pin it", "", { required: false }),
       V("Save Name", "SAVE_NAME", "World/save name", "DefaultWorld", { required: false }),
       V("World Seed", "WORLD_SEED", "Seed for a new world, empty = random", "", { required: false }),
       V("Password", "PASSWORD", "Password required to join, empty = public", "", { required: false, type: "password" }),
@@ -35,6 +32,15 @@ mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
 VS_VERSION="{{VS_VERSION}}"
+if [ -z "$VS_VERSION" ] || [ "$VS_VERSION" = "latest" ]; then
+  command -v python3 >/dev/null || { echo "ERROR: install Python 3 to resolve Vintage Story releases" >&2; exit 1; }
+  VS_METADATA=$(curl -fsSL --retry 3 --max-time 60 "https://api.vintagestory.at/stable.json")
+  VS_VERSION=$(printf '%s' "$VS_METADATA" | ${pythonCommand(VINTAGE_STORY_RELEASE_PARSER)})
+fi
+if ! [[ "$VS_VERSION" =~ ^[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then
+  echo "ERROR: invalid Vintage Story stable version: $VS_VERSION" >&2
+  exit 1
+fi
 BASE="https://cdn.vintagestory.at/gamefiles/stable"
 echo "Downloading Vintage Story $VS_VERSION server..."
 curl -fSL --retry 5 --retry-delay 2 -o vs.tar.gz "$BASE/vs_server_linux-x64_$VS_VERSION.tar.gz"

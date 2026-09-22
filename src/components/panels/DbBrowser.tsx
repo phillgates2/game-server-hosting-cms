@@ -184,7 +184,7 @@ export default function DbBrowser({
           <span className="text-3xl block mb-2">🗄️</span>
           <p className="text-text-secondary">{error}</p>
           <p className="text-text-muted text-xs mt-2">
-            Only SQLite databases (.db, .sqlite, .sqlite3) can be browsed here. Other formats can still be downloaded.
+            Browsing failed. You can still download this file. A .db extension alone does not guarantee SQLite format.
           </p>
           <div className="mt-3 flex gap-2 justify-center">
             <button onClick={onBack} className="px-4 py-2 bg-bg-secondary text-text-muted rounded-lg text-sm">

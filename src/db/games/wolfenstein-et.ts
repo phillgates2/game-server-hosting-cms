@@ -1,3 +1,4 @@
+import { ETLEGACY_RELEASE_PARSER, pythonCommand } from "./release-resolvers";
 import { V, COMMON_VARS, type GameTemplate } from "./types";
 
 // Wolfenstein: Enemy Territory / ET:Legacy. The full server.cfg cvar set is
@@ -264,15 +265,25 @@ echo "Selected mod: $ET_MOD"
 # ── Determine which binary architecture to use ───────────────
 if [ "$ET_MOD" = "legacy" ]; then
   USE_ARCH="x86_64"
-  # File/715 = x86_64 archive from https://www.etlegacy.com/download
-  ETL_URL="https://www.etlegacy.com/download/file/715"
   echo "→ Using x86_64 (64-bit) ET:Legacy for the legacy mod"
 else
   USE_ARCH="i386"
-  # File/716 = i386 archive from https://www.etlegacy.com/download
-  ETL_URL="https://www.etlegacy.com/download/file/716"
   echo "→ Using i386 (32-bit) ET:Legacy for third-party mod compatibility"
 fi
+
+# Resolve engine and mod links from the SAME current stable release page.
+# No fixed file IDs: upstream assigns new IDs for every release.
+command -v python3 >/dev/null || { echo "ERROR: install Python 3 to resolve ET:Legacy releases" >&2; exit 1; }
+ETL_PAGE=$(curl -fsSL --retry 3 --max-time 60 "https://www.etlegacy.com/download")
+ETL_RELEASE=$(printf '%s' "$ETL_PAGE" | ${pythonCommand(ETLEGACY_RELEASE_PARSER)})
+ETL_VERSION=$(printf '%s\\n' "$ETL_RELEASE" | sed -n '1p')
+if [ "$USE_ARCH" = "x86_64" ]; then
+  ETL_URL=$(printf '%s\\n' "$ETL_RELEASE" | sed -n '2p')
+else
+  ETL_URL=$(printf '%s\\n' "$ETL_RELEASE" | sed -n '3p')
+fi
+ETL_MOD_URL=$(printf '%s\\n' "$ETL_RELEASE" | sed -n '4p')
+echo "Resolved ET:Legacy stable release: $ETL_VERSION ($USE_ARCH)"
 
 # ── Step 1: Download ET:Legacy archive ───────────────────────
 echo "Downloading ET:Legacy $USE_ARCH archive..."
@@ -317,37 +328,20 @@ for pak in pak0.pk3 pak1.pk3 pak2.pk3; do
   fi
 done
 
-# ── Step 3: Download Legacy mod pack (game modules) ──────────
-# The legacy mod modules go into the legacy/ folder (not etmain/).
-# File/727 = "All supported archive" — contains .so files for
-# the legacy mod (qagame, cgame, ui modules).
-echo "Downloading ET:Legacy mod pack (game modules)..."
+# ── Step 3: Refresh matching Legacy mod files on EVERY update ──
+# Extract into a clean staging directory so old modules cannot satisfy checks.
+echo "Downloading Legacy $ETL_VERSION mod pack..."
+MOD_STAGE=$(mktemp -d)
+curl -fL --retry 3 -o "$MOD_STAGE/legacy-mod.zip" "$ETL_MOD_URL" || { rm -rf "$MOD_STAGE"; exit 1; }
+unzip -o "$MOD_STAGE/legacy-mod.zip" -d "$MOD_STAGE/files" >/dev/null || { rm -rf "$MOD_STAGE"; exit 1; }
+if ! find "$MOD_STAGE/files" -name "qagame*.$USE_ARCH.so" -print -quit | grep -q .; then
+  echo "ERROR: Legacy mod archive lacks the $USE_ARCH server module" >&2
+  rm -rf "$MOD_STAGE"
+  exit 1
+fi
 mkdir -p legacy
-if [ "$USE_ARCH" = "x86_64" ]; then
-  SO_PATTERN="x86_64"
-else
-  SO_PATTERN="i386"
-fi
-if [ ! -f "legacy/qagame.mp.$SO_PATTERN.so" ]; then
-  curl -fL -o legacy-mod.zip "https://www.etlegacy.com/download/file/727" || {
-    echo "  WARNING: Mod pack download failed — server may not start with legacy mod"
-  }
-  if [ -f legacy-mod.zip ]; then
-    unzip -o legacy-mod.zip -d . 2>/dev/null || true
-    rm -f legacy-mod.zip
-    # Find and copy .so files matching our architecture into legacy/
-    for d in legacy etlegacy-mod etmain .; do
-      if [ -d "$d" ]; then
-        find "$d" \\( -name "qagame*.$SO_PATTERN.so" -o -name "cgame*.$SO_PATTERN.so" -o -name "ui*.$SO_PATTERN.so" \\) 2>/dev/null | \\
-          while read -r f; do cp -v "$f" legacy/ 2>/dev/null || true; done
-      fi
-    done
-    # Also copy any .pk3 files into legacy/
-    find . -maxdepth 2 -name "legacy*.pk3" -o -name "etl_bin*.pk3" 2>/dev/null | \\
-      while read -r f; do cp -v "$f" legacy/ 2>/dev/null || true; done
-  fi
-fi
-
+find "$MOD_STAGE/files" -type f \\( -name "*.$USE_ARCH.so" -o -name 'legacy*.pk3' -o -name 'etl_bin*.pk3' \\) -exec cp -f {} legacy/ \\;
+rm -rf "$MOD_STAGE"
 
 # ── Step 4: Install selected mod ─────────────────────────────
 echo ""

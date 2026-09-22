@@ -30,12 +30,11 @@ Adoptium Temurin JRE|https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/j
 NeoForge maven metadata|https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml
 Fabric meta API|https://meta.fabricmc.net/v2/versions/loader
 Mindustry releases API|https://api.github.com/repos/Anuken/Mindustry/releases/latest
-Vintage Story 1.22.7 server|https://cdn.vintagestory.at/gamefiles/stable/vs_server_linux-x64_1.22.7.tar.gz
-Fabric installer|https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.2/fabric-installer-1.1.2.jar
+Vintage Story stable metadata|https://api.vintagestory.at/stable.json
+Fabric installer metadata|https://meta.fabricmc.net/v2/versions/installer
 Factorio headless|https://factorio.com/get-download/stable/headless/linux64
-Xonotic 0.8.6|https://dl.xonotic.org/xonotic-0.8.6.zip
-ET:Legacy x86_64|https://www.etlegacy.com/download/file/715
-ET:Legacy i386|https://www.etlegacy.com/download/file/716
+Xonotic stable download page|https://xonotic.org/download/
+ET:Legacy stable download page|https://www.etlegacy.com/download
 Mojang manifest|https://piston-meta.mojang.com/mc/game/version_manifest_v2.json
 PaperMC API|https://fill.papermc.io/v3/projects/paper
 EOF
