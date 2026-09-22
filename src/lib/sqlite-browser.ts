@@ -21,7 +21,7 @@
  *   back as base64 inside a 100-row page.
  */
 
-import { runtimeImport } from "./runtime-import";
+import { createRequire } from "node:module";
 
 type SqliteModule = typeof import("node:sqlite");
 
@@ -30,14 +30,23 @@ let sqliteModule: SqliteModule | null = null;
 async function loadSqlite(): Promise<SqliteModule> {
   if (sqliteModule) return sqliteModule;
   try {
-    // A variable specifier keeps Turbopack from trying to bundle the
-    // builtin; like a native module it is resolved by Node at runtime.
-    sqliteModule = await runtimeImport<SqliteModule>(/*turbopackIgnore: true*/ "node:sqlite");
+    // Resolve the optional built-in through Node, not a bundler-generated
+    // dynamic-import context. Keep loading lazy for hosts without node:sqlite.
+    const require = createRequire(`${process.cwd()}/package.json`);
+    sqliteModule = require("node:sqlite") as SqliteModule;
   } catch {
-    throw new Error("SQLite browsing needs Node.js 22.5 or newer on this host");
+    throw new SqliteBrowseError(
+      "SQLite browsing is unavailable on this host. Upgrade the panel's Node.js runtime to 22.16 or newer and restart it.",
+      501
+    );
   }
-  if (!sqliteModule || typeof sqliteModule.DatabaseSync !== "function") {
-    throw new Error("SQLite browsing needs Node.js 22.5 or newer on this host");
+  if (!sqliteModule || typeof sqliteModule.DatabaseSync !== "function" ||
+      typeof sqliteModule.StatementSync?.prototype.columns !== "function") {
+    sqliteModule = null;
+    throw new SqliteBrowseError(
+      "SQLite browsing needs Node.js 22.16 or newer on this host. Upgrade the panel's runtime and restart it.",
+      501
+    );
   }
   return sqliteModule;
 }

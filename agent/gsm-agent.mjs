@@ -247,7 +247,8 @@ async function loadAgentSqlite() {
   agentSqliteTried = true;
   try {
     const mod = await import("node:sqlite");
-    if (mod && typeof mod.DatabaseSync === "function") agentSqlite = mod;
+    if (mod && typeof mod.DatabaseSync === "function" &&
+        typeof mod.StatementSync?.prototype.columns === "function") agentSqlite = mod;
   } catch {
     agentSqlite = null;
   }
@@ -292,7 +293,7 @@ async function fsDbTables(root, rel) {
   const s = await stat(full);
   if (!s.isFile()) return { error: "Path is not a file", code: 400 };
   const mod = await loadAgentSqlite();
-  if (!mod) return { error: "SQLite browsing needs Node.js 22.5 or newer on the agent host", code: 501 };
+  if (!mod) return { error: "SQLite browsing needs Node.js 22.16 or newer on the agent host. Upgrade the agent runtime and restart it", code: 501 };
   const opened = openAgentDb(mod.DatabaseSync, full);
   if (!opened.db) return opened;
   const db = opened.db;
@@ -329,7 +330,7 @@ async function fsDbRows(root, rel, table, limit, offset) {
   const lim = Math.min(500, Math.max(1, Math.floor(Number(limit) || 100)));
   const off = Math.max(0, Math.floor(Number(offset) || 0));
   const mod = await loadAgentSqlite();
-  if (!mod) return { error: "SQLite browsing needs Node.js 22.5 or newer on the agent host", code: 501 };
+  if (!mod) return { error: "SQLite browsing needs Node.js 22.16 or newer on the agent host. Upgrade the agent runtime and restart it", code: 501 };
   const opened = openAgentDb(mod.DatabaseSync, full);
   if (!opened.db) return opened;
   const db = opened.db;
