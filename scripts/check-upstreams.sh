@@ -104,6 +104,28 @@ BR=$(curl -fsSL --max-time 25 "https://net-secondary.web.minecraft-services.net/
      | grep -oP '"downloadType":"serverBedrockLinux","downloadUrl":"\K[^"]+' | head -1)
 if [ -n "$BR" ]; then ok "Bedrock download URL parsed"; else bad "Bedrock: link API did not yield a URL"; fi
 
+# ET:Legacy — the page HEAD check above passes even when its markup changes:
+# etlegacy.com once moved every file URL from href into data-href (their own
+# JavaScript copies it back at runtime, which curl never runs), and every
+# panel update died with a bare "Update failed (exit 1)". Run the REAL parser
+# from the game template against the live page so a layout change fails here
+# instead of on customer nodes.
+if ! command -v npx >/dev/null || ! command -v python3 >/dev/null; then
+  echo "  [SKIP] ET:Legacy parser check needs npx (tsx) and python3 on this host"
+else
+  ETL_PARSER=$(mktemp)
+  if npx --no-install tsx --eval 'import("./src/db/games/release-resolvers").then(m => process.stdout.write(m.ETLEGACY_RELEASE_PARSER))' > "$ETL_PARSER" 2>/dev/null && [ -s "$ETL_PARSER" ]; then
+    if curl -fsSL --retry 3 --max-time 30 -A "GSM-Panel/1.0 (game-server-hosting-cms; ET:Legacy updater)" "https://www.etlegacy.com/download" 2>/dev/null | python3 "$ETL_PARSER" > "$ETL_PARSER.out" 2> "$ETL_PARSER.err"; then
+      ok "ET:Legacy release resolver parses the live page: $(sed -n 1p "$ETL_PARSER.out")"
+    else
+      bad "ET:Legacy release resolver fails on the live page: $(cat "$ETL_PARSER.err")"
+    fi
+  else
+    echo "  [SKIP] could not extract the embedded ET:Legacy parser (run from the repo root with devDependencies installed)"
+  fi
+  rm -f "$ETL_PARSER" "$ETL_PARSER.out" "$ETL_PARSER.err"
+fi
+
 echo ""
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ] || exit 1

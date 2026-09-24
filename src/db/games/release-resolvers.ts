@@ -15,7 +15,12 @@ class Links(HTMLParser):
         self.links = {}
     def handle_starttag(self, tag, attrs):
         if tag == "a":
-            self.href = dict(attrs).get("href")
+            # etlegacy.com serves its file links as href="#" with the real
+            # URL in data-href; the page's own JavaScript copies data-href
+            # into href when it loads. curl never runs that script, so
+            # data-href is authoritative when present, plain href otherwise.
+            attributes = dict(attrs)
+            self.href = attributes.get("data-href") or attributes.get("href")
             self.text = []
     def handle_data(self, data):
         if self.href is not None:
@@ -34,11 +39,12 @@ version = re.search(r"stable release\s+([0-9]+\.[0-9]+\.[0-9]+)", page, re.I)
 parser = Links()
 parser.feed(page)
 labels = ["x86_64 archive", "i386 archive", "All supported archive"]
-if not version or any(label not in parser.links for label in labels):
-    # Print to stdout as well as stderr: the panel's update log shows
-    # stdout, and a bare "Exit 1" with no reason is undiagnosable.
-    print("ERROR: could not resolve the latest stable ET:Legacy engine and mod archives")
-    sys.exit(1)
+missing = ([] if version else ["the stable release version"]) + [label for label in labels if label not in parser.links]
+if missing:
+    # stderr, not stdout: the installer captures this parser's stdout in a
+    # command substitution, so only stderr reaches the panel's error log.
+    # A bare "Update failed (exit 1)" is undiagnosable.
+    sys.exit("ERROR: could not resolve the latest stable ET:Legacy engine and mod archives from https://www.etlegacy.com/download (missing: " + ", ".join(missing) + ") - the page layout may have changed")
 print(version.group(1))
 for label in labels:
     print(parser.links[label])

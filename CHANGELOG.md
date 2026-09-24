@@ -6,6 +6,41 @@ All notable changes to GameServer Manager are documented here.
 
 ## [Unreleased]
 
+### 🐺 ET:Legacy Updates Broke Silently When Upstream Hid Its Links
+
+Every Wolfenstein: ET / ET:Legacy server update failed with a bare
+**"Update failed (exit 1)"** immediately after the architecture banner —
+no download, no reason. Two stacked defects, both fixed:
+
+- **etlegacy.com moved the file URLs out of `href`.** The download page now
+  serves every file link as `href="#"` with the real URL in a `data-href`
+  attribute; the page's own JavaScript copies `data-href` back into `href`
+  at runtime — which a browser runs but curl never does. The release
+  resolver read only `href`, found zero file links, and (correctly) failed
+  closed instead of guessing, so no node could resolve the 2.86.0 engine or
+  mod archives. The resolver now reads `data-href` first and falls back to
+  plain `href`, verified against the live page markup (release 2.86.0,
+  file IDs 757/758/769). The same trust rules apply: only
+  `https://www.etlegacy.com/download/file/<id>` targets are accepted.
+- **The failure reason was swallowed.** The parser reported its error with
+  `print()` — to stdout — but the install script runs it inside a command
+  substitution, so the message was captured and discarded and the panel
+  showed only "Update failed (exit 1)". It now exits via stderr (matching
+  the Vintage Story resolver) and names exactly what was missing —
+  `missing: All supported archive` — so the next upstream change is
+  readable in the update log's `[stderr]` block instead of a mystery.
+- **The test fixture had drifted from reality.** The parser test used
+  plain `href` links, so the suite stayed green while production broke.
+  The fixture now mirrors the live markup (`href="#"` + `data-href`, the
+  `<sup>`-suffixed release heading), the old plain-`href` shape stays
+  covered in case upstream reverts, and a new end-to-end assertion runs
+  the real install script against an unresolvable page and requires the
+  reason on stderr — the exact silence that shipped this bug.
+- **`check-upstreams.sh` now runs the real resolver against the live
+  page** (extracted from the game template via tsx) instead of only
+  HEAD-checking the URL. A markup change like this one now fails the
+  upstream check, not customer updates.
+
 ### 🗄️ The File Manager Opens .db Files
 Game servers scatter SQLite databases around their install directories
 (player stats, claims, economies, ban lists), and until now those were
