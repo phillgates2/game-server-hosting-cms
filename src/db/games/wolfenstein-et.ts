@@ -273,8 +273,10 @@ fi
 
 # Resolve engine and mod links from the SAME current stable release page.
 # No fixed file IDs: upstream assigns new IDs for every release.
+# A real User-Agent: some CDN fronts reject the default curl/* identity.
+ETL_UA="GSM-Panel/1.0 (game-server-hosting-cms; ET:Legacy updater)"
 command -v python3 >/dev/null || { echo "ERROR: install Python 3 to resolve ET:Legacy releases" >&2; exit 1; }
-ETL_PAGE=$(curl -fsSL --retry 3 --max-time 60 "https://www.etlegacy.com/download")
+ETL_PAGE=$(curl -fsSL --retry 3 --max-time 60 -A "$ETL_UA" "https://www.etlegacy.com/download")
 ETL_RELEASE=$(printf '%s' "$ETL_PAGE" | ${pythonCommand(ETLEGACY_RELEASE_PARSER)})
 ETL_VERSION=$(printf '%s\\n' "$ETL_RELEASE" | sed -n '1p')
 if [ "$USE_ARCH" = "x86_64" ]; then
@@ -287,7 +289,7 @@ echo "Resolved ET:Legacy stable release: $ETL_VERSION ($USE_ARCH)"
 
 # ── Step 1: Download ET:Legacy archive ───────────────────────
 echo "Downloading ET:Legacy $USE_ARCH archive..."
-curl -fL -o etlegacy-archive "$ETL_URL" || {
+curl -fL --retry 3 --retry-delay 2 -A "$ETL_UA" -o etlegacy-archive "$ETL_URL" || {
   echo "ERROR: Failed to download ET:Legacy $USE_ARCH archive"
   echo "URL: $ETL_URL"
   exit 1
@@ -322,7 +324,7 @@ mkdir -p etmain
 for pak in pak0.pk3 pak1.pk3 pak2.pk3; do
   if [ ! -f "etmain/$pak" ]; then
     echo "  Downloading $pak ..."
-    curl -fL -o "etmain/$pak" "https://mirror.etlegacy.com/etmain/$pak" || {
+    curl -fL -A "$ETL_UA" -o "etmain/$pak" "https://mirror.etlegacy.com/etmain/$pak" || {
       echo "  WARNING: Could not download $pak — some maps may be missing"
     }
   fi
@@ -332,7 +334,7 @@ done
 # Extract into a clean staging directory so old modules cannot satisfy checks.
 echo "Downloading Legacy $ETL_VERSION mod pack..."
 MOD_STAGE=$(mktemp -d)
-curl -fL --retry 3 -o "$MOD_STAGE/legacy-mod.zip" "$ETL_MOD_URL" || { rm -rf "$MOD_STAGE"; exit 1; }
+curl -fL --retry 3 -A "$ETL_UA" -o "$MOD_STAGE/legacy-mod.zip" "$ETL_MOD_URL" || { rm -rf "$MOD_STAGE"; exit 1; }
 unzip -o "$MOD_STAGE/legacy-mod.zip" -d "$MOD_STAGE/files" >/dev/null || { rm -rf "$MOD_STAGE"; exit 1; }
 if ! find "$MOD_STAGE/files" -name "qagame*.$USE_ARCH.so" -print -quit | grep -q .; then
   echo "ERROR: Legacy mod archive lacks the $USE_ARCH server module" >&2

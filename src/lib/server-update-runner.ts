@@ -53,6 +53,25 @@ echo "Update complete"
 
 }
 
+/** Shape a failed update into the API response.
+ * Both streams must survive: game installers (ET:Legacy's release resolver,
+ * curl, the mod-archive check) report their real errors on stderr, and the
+ * bare "Exit 1" that reaches the user otherwise is undiagnosable.
+ */
+export function formatUpdateFailure(err: {
+  message?: string; stdout?: string; stderr?: string;
+}): { error: string; output: string; errorOutput: string } {
+  const message = err.message || "Update failed";
+  const error = /^exit \d+$/i.test(message)
+    ? `Update failed (${message.toLowerCase()})`
+    : message;
+  return {
+    error,
+    output: (err.stdout ?? "").slice(-4000),
+    errorOutput: (err.stderr ?? "").slice(-4000),
+  };
+}
+
 /** Run an update without regenerating the panel's configs or start scripts. */
 export async function runUpdateScript(options: {
   installPath: string;

@@ -26,7 +26,11 @@ describe("latest stable release resolution", () => {
   });
   test("ET refuses incomplete metadata, nonstable pages and foreign download links", () => {
     for (const input of ["", page.replace("All supported archive", "missing"), page.replace("stable release", "snapshot"), page.replace("https://www.etlegacy.com/download/file/9002", "https://untrusted.test/download/file/9002")]) {
-      assert.notEqual(parse(ETLEGACY_RELEASE_PARSER, input).status, 0);
+      const failed = parse(ETLEGACY_RELEASE_PARSER, input);
+      assert.notEqual(failed.status, 0, `input ${JSON.stringify(input.slice(0, 40))} should fail closed`);
+      // The reason must reach stdout: the panel's update log is how the
+      // user sees it, and a bare "Exit 1" is undiagnosable.
+      assert.match(failed.stdout, /could not resolve the latest stable ET:Legacy engine and mod archives/, failed.stderr);
     }
   });
   test("Vintage Story selects the marked stable Linux server, not the first key or preview", () => {
