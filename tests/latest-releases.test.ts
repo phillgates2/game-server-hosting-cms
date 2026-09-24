@@ -7,7 +7,17 @@ import { tmpdir } from "node:os";
 import { ETLEGACY_RELEASE_PARSER, VINTAGE_STORY_RELEASE_PARSER } from "../src/db/games/release-resolvers";
 import { wolfensteinET } from "../src/db/games/wolfenstein-et";
 
-const page = `<h2>ET: Legacy stable release 2.99.0 - Test</h2>
+// Mirrors the live www.etlegacy.com/download markup (verified September
+// 2026): file links carry href="#" with the real URL in data-href, and the
+// page's own JavaScript copies data-href into href at runtime. curl never
+// runs that script, so the parser must read data-href itself.
+const page = `<h2 class="luck">ET: Legacy stable release 2.99.0 - Test <sup style="font-size: small;">(published September 19th 2026)</sup></h2>
+<a style="pointer-events: auto" href="#" rel="nofollow" data-href="https://www.etlegacy.com/download/file/9001">x86_64 archive</a>
+<a style="pointer-events: auto" href="#" rel="nofollow" data-href="https://www.etlegacy.com/download/file/9002">i386 archive</a>
+<a style="pointer-events: auto" href="#" rel="nofollow" data-href="https://www.etlegacy.com/download/file/9003">All supported archive</a>`;
+// Older page shape: plain relative hrefs, link text split across a nested
+// tag. Still accepted so an upstream revert does not break updates.
+const plainHrefPage = `<h2>ET: Legacy stable release 2.99.0 - Test</h2>
 <a href="/download/file/9001"><span>x86_64</span> archive</a>
 <a href="https://www.etlegacy.com/download/file/9002">i386 archive</a>
 <a href="/download/file/9003">All supported archive</a>`;
@@ -17,20 +27,25 @@ function parse(source: string, input: string) {
 
 describe("latest stable release resolution", () => {
   test("ET engine and mod links resolve together without fixed IDs", () => {
-    const result = parse(ETLEGACY_RELEASE_PARSER, page);
-    assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(result.stdout.trim().split("\n"), [
-      "2.99.0", "https://www.etlegacy.com/download/file/9001",
-      "https://www.etlegacy.com/download/file/9002", "https://www.etlegacy.com/download/file/9003",
-    ]);
+    for (const input of [page, plainHrefPage]) {
+      const result = parse(ETLEGACY_RELEASE_PARSER, input);
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(result.stdout.trim().split("\n"), [
+        "2.99.0", "https://www.etlegacy.com/download/file/9001",
+        "https://www.etlegacy.com/download/file/9002", "https://www.etlegacy.com/download/file/9003",
+      ]);
+    }
   });
   test("ET refuses incomplete metadata, nonstable pages and foreign download links", () => {
     for (const input of ["", page.replace("All supported archive", "missing"), page.replace("stable release", "snapshot"), page.replace("https://www.etlegacy.com/download/file/9002", "https://untrusted.test/download/file/9002")]) {
       const failed = parse(ETLEGACY_RELEASE_PARSER, input);
       assert.notEqual(failed.status, 0, `input ${JSON.stringify(input.slice(0, 40))} should fail closed`);
-      // The reason must reach stdout: the panel's update log is how the
-      // user sees it, and a bare "Exit 1" is undiagnosable.
-      assert.match(failed.stdout, /could not resolve the latest stable ET:Legacy engine and mod archives/, failed.stderr);
+      // The reason must reach stderr: the installer runs this parser inside
+      // a command substitution, so its stdout is captured and discarded —
+      // only stderr reaches the panel's update log. A bare "Exit 1" is
+      // undiagnosable (this is exactly how the data-href breakage shipped).
+      assert.match(failed.stderr, /could not resolve the latest stable ET:Legacy engine and mod archives/, failed.stdout);
+      assert.match(failed.stderr, /missing:/, failed.stdout);
     }
   });
   test("Vintage Story selects the marked stable Linux server, not the first key or preview", () => {
@@ -101,6 +116,15 @@ esac
       const failed = run("bad-mod.zip");
       assert.notEqual(failed.status, 0);
       assert.match(failed.stderr, /lacks the x86_64 server module/);
+      // An unresolvable page must fail WITH the reason on stderr. The
+      // September 2026 "Update failed (exit 1)" breakage (etlegacy.com moved
+      // file URLs into data-href) was silent precisely because the parser
+      // reported to stdout, which the command substitution swallowed.
+      await writeFile(join(dir, "page.html"), page.replace("All supported archive", "Renamed archive"));
+      const opaque = run("mod.zip");
+      assert.notEqual(opaque.status, 0);
+      assert.match(opaque.stderr, /could not resolve the latest stable ET:Legacy engine and mod archives/);
+      assert.match(opaque.stderr, /missing: All supported archive/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
