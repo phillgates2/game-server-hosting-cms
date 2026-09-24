@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { buildTemplateUpdateScript } from "../src/lib/server-update-script";
-import { buildSteamUpdateScript, runUpdateScript } from "../src/lib/server-update-runner";
+import { buildSteamUpdateScript, formatUpdateFailure, runUpdateScript } from "../src/lib/server-update-runner";
 import { gameTemplates } from "../src/db/games";
 
 const server = {
@@ -63,6 +63,44 @@ describe("server update scripts", () => {
     const script = buildSteamUpdateScript({ ...server, gameName: "Test", steamAppId: "740", steamcmdDir: "/srv/steamcmd" });
     assert.match(script, /\/srv\/steamcmd\/steamcmd.sh/);
     assert.match(script, /\+app_update 740 validate \+quit/);
+  });
+
+  test("failure responses keep stderr — where installers report real errors", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gsm-update-stderr-"));
+    try {
+      let failed: unknown;
+      try {
+        await runUpdateScript({ installPath: dir, script: "echo progress on stdout\necho 'curl: (22) The requested URL returned error: 403' >&2\nexit 1" });
+        throw new Error("expected runUpdateScript to reject");
+      } catch (e) { failed = e; }
+      const err = failed as Error & { stdout?: string; stderr?: string };
+      assert.match(err.message, /Exit 1/);
+      assert.match(err.stdout ?? "", /progress on stdout/);
+      assert.match(err.stderr ?? "", /curl: \(22\)/);
+
+      const formatted = formatUpdateFailure(err);
+      assert.equal(formatted.error, "Update failed (exit 1)");
+      assert.match(formatted.output, /progress on stdout/);
+      assert.match(formatted.errorOutput, /curl: \(22\)/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("formatUpdateFailure keeps descriptive errors and trims long streams", () => {
+    assert.deepEqual(formatUpdateFailure({}), { error: "Update failed", output: "", errorOutput: "" });
+    assert.equal(formatUpdateFailure({ message: "Update timed out" }).error, "Update timed out");
+    assert.equal(formatUpdateFailure({ message: "Remote update failed (exit 127)" }).error, "Remote update failed (exit 127)");
+    const big = "x".repeat(9000);
+    const out = formatUpdateFailure({ message: "Exit 2", stdout: big, stderr: big });
+    assert.equal(out.output.length, 4000);
+    assert.equal(out.errorOutput.length, 4000);
+  });
+
+  test("ET:Legacy update retries the large engine download like the other fetches", () => {
+    const script = buildTemplateUpdateScript({ ...server, gameSlug: "wolfenstein-et" });
+    assert.ok(script, "wolfenstein-et update script");
+    assert.match(script!, /curl -fL --retry 3 --retry-delay 2 -A "\$ETL_UA" -o etlegacy-archive "\$ETL_URL"/);
   });
 
   test("runs a custom downloader in place without regenerating configs or saves", async () => {

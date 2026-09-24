@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { gameServers, gameDefinitions, nodes, settings } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
+import { formatUpdateFailure } from "@/lib/server-update-runner";
 import { and, eq } from "drizzle-orm";
 import { access, constants } from "node:fs/promises";
 
@@ -169,6 +170,9 @@ export async function POST(
   } catch (e: unknown) {
     const err = e as { message?: string; stdout?: string; stderr?: string };
     try { if (updateClaimed) await db.update(gameServers).set({ status: "stopped", updatedAt: new Date() }).where(eq(gameServers.id, Number(id))); } catch { /**/ }
-    return NextResponse.json({ error: err.message || "Update failed", output: err.stdout?.slice(-4000) || "" }, { status: 500 });
+    // Keep stderr: the game installers report their real failures there
+    // (curl errors, release-resolver errors, missing mod modules).
+    const formatted = formatUpdateFailure(err);
+    return NextResponse.json({ error: formatted.error, output: formatted.output, errorOutput: formatted.errorOutput }, { status: 500 });
   }
 }

@@ -79,7 +79,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | "running" | "stopped" | "installing" | "install_failed">("all");
-  const [installLog, setInstallLog] = useState<{ output: string; error: string; success: boolean } | null>(null);
+  const [installLog, setInstallLog] = useState<{ title: string; output: string; error: string; success: boolean } | null>(null);
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [gameVars, setGameVars] = useState<TemplateVar[]>([]);
@@ -776,8 +776,15 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
     try {
       const res = await fetch(`/api/servers/${id}/update`, { method: "POST" });
       const data = await res.json();
-      if (!res.ok) { toast.error("Update Failed", data.error); }
-      else {
+      // Show the downloader's own output — on failure the script's stderr
+      // (where curl/release-resolver errors land) is the only clue to the
+      // cause, and a bare "Exit 1" toast hides it.
+      const updateError = data.errorOutput ? `${data.error || "Update failed"}\n\n[stderr]\n${data.errorOutput}` : (data.error || "Update failed");
+      if (!res.ok) {
+        setInstallLog({ title: "Update Log", output: data.output || "", error: updateError, success: false });
+        toast.error("Update Failed", data.error || "Check the update log for details.");
+      } else {
+        setInstallLog({ title: "Update Log", output: data.output || "", error: "", success: true });
         toast.success("Updated", data.message);
         const cfg = data?.report?.configsChanged;
         if (Array.isArray(cfg) && cfg.length > 0) {
@@ -927,8 +934,8 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
     setInstallingId(id); setInstallLog(null);
     try {
       const res = await fetch(`/api/servers/${id}/install`, { method: "POST" }); const data = await res.json();
-      if (!res.ok) { setInstallLog({ output: data.output || "", error: data.error || data.errorOutput || "Install failed", success: false }); toast.error("Install Failed", data.error || "Check the install log for details."); }
-      else { setInstallLog({ output: data.output || "", error: data.errorOutput || "", success: true }); toast.success("Files Installed", "Game files are ready. You can now Start the server."); }
+      if (!res.ok) { setInstallLog({ title: "Install Log", output: data.output || "", error: data.error || data.errorOutput || "Install failed", success: false }); toast.error("Install Failed", data.error || "Check the install log for details."); }
+      else { setInstallLog({ title: "Install Log", output: data.output || "", error: data.errorOutput || "", success: true }); toast.success("Files Installed", "Game files are ready. You can now Start the server."); }
       loadData();
     } catch (e) { toast.error("Install Error", e instanceof Error ? e.message : "Failed"); } finally { setInstallingId(null); }
   }
@@ -1409,7 +1416,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
       {/* ═══ INSTALL LOG ═══ */}
       {installLog && (
         <div className="gaming-surface rounded-xl overflow-hidden">
-          <div className="bg-bg-secondary px-5 py-3 border-b border-border flex items-center justify-between"><h3 className="font-semibold text-sm">{installLog.success ? "✅" : "⚠️"} Install Log</h3><button onClick={() => setInstallLog(null)} className="text-text-muted text-xs">✕</button></div>
+          <div className="bg-bg-secondary px-5 py-3 border-b border-border flex items-center justify-between"><h3 className="font-semibold text-sm">{installLog.success ? "✅" : "⚠️"} {installLog.title}</h3><button onClick={() => setInstallLog(null)} className="text-text-muted text-xs">✕</button></div>
           <div className="p-4 max-h-72 overflow-y-auto bg-[#0d1117] font-mono text-xs whitespace-pre-wrap leading-relaxed">{installLog.output && <div className="text-text-secondary">{installLog.output}</div>}{installLog.error && <div className="text-danger mt-2">{installLog.error}</div>}</div>
         </div>
       )}

@@ -35,7 +35,10 @@ parser = Links()
 parser.feed(page)
 labels = ["x86_64 archive", "i386 archive", "All supported archive"]
 if not version or any(label not in parser.links for label in labels):
-    sys.exit("ERROR: could not resolve the latest stable ET:Legacy engine and mod archives")
+    # Print to stdout as well as stderr: the panel's update log shows
+    # stdout, and a bare "Exit 1" with no reason is undiagnosable.
+    print("ERROR: could not resolve the latest stable ET:Legacy engine and mod archives")
+    sys.exit(1)
 print(version.group(1))
 for label in labels:
     print(parser.links[label])
