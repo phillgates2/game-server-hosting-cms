@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { apiError } from "@/lib/api-error";
 import { hasCrashed, shouldAutoRestart, isCrashLooping, windowedCrashes, CRASH_LOOP_MAX, CRASH_LOOP_WINDOW_MS } from "@/lib/server-lifecycle";
 import { createLogger } from "@/lib/logger";
+import { oncePerProcess } from "@/lib/once-per-process";
 
 const log = createLogger("metrics");
 
@@ -83,9 +84,11 @@ const limitStrikes = new Map<number, number>();
 const lastRoster = new Map<number, string[]>();
 
 /** Upgrades predate the players toggle; add the column lazily on use. */
-async function ensureNotifyPlayersColumn() {
+// Runs once per process: this sits on the 15-second status poll, and an ALTER
+// takes an exclusive lock on game_servers even when the column already exists.
+const ensureNotifyPlayersColumn = oncePerProcess(async () => {
   await db.execute(sql`ALTER TABLE game_servers ADD COLUMN IF NOT EXISTS discord_notify_players BOOLEAN DEFAULT TRUE`);
-}
+});
 
 export async function POST(
   req: NextRequest,

@@ -13,16 +13,23 @@ import { createHash } from "node:crypto";
 import { db } from "@/db";
 import { authSessions } from "@/db/schema";
 import { and, desc, eq, isNull } from "drizzle-orm";
+import { WriteThrottle } from "./write-throttle";
+import { oncePerProcess } from "./once-per-process";
 
 export const SESSION_LAST_SEEN_WRITE_INTERVAL_MS = 5 * 60_000;
 
-const lastSeenWrites = new Map<string, number>();
+/** Bounded: entries expire with the interval instead of accumulating per token. */
+const lastSeenWrites = new WriteThrottle(SESSION_LAST_SEEN_WRITE_INTERVAL_MS);
 
 export function hashSessionToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export async function ensureSessionsTable(): Promise<void> {
+/**
+ * Create the sessions table if needed. Runs once per process: it is called on
+ * every authenticated request, and the DDL is only needed the first time.
+ */
+export const ensureSessionsTable = oncePerProcess(async () => {
   const { sql } = await import("drizzle-orm");
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -36,7 +43,7 @@ export async function ensureSessionsTable(): Promise<void> {
       revoked_at TIMESTAMP
     )
   `);
-}
+});
 
 /** Record a fresh login. Duplicate tokens are ignored silently. */
 export async function registerSession(
@@ -85,10 +92,7 @@ export async function checkSession(token: string): Promise<SessionCheck> {
     }
     if (row.revokedAt !== null) return { ok: false };
 
-    const now = Date.now();
-    const last = lastSeenWrites.get(hash) ?? 0;
-    if (now - last >= SESSION_LAST_SEEN_WRITE_INTERVAL_MS) {
-      lastSeenWrites.set(hash, now);
+    if (lastSeenWrites.shouldWrite(hash)) {
       await db
         .update(authSessions)
         .set({ lastSeenAt: new Date() })

@@ -17,8 +17,9 @@ export const pool =
     connectionString: databaseUrl,
   });
 
-if (process.env.NODE_ENV !== "production") {
-  globalForDb.__arenaNextJsPostgresqlPool = pool;
-}
+// Always cached on globalThis, not just in development: if this module is
+// ever instantiated twice (bundler chunk duplication, hot reload), every copy
+// must share one pool instead of each opening its own set of connections.
+globalForDb.__arenaNextJsPostgresqlPool = pool;
 
 export const db = drizzle(pool);
