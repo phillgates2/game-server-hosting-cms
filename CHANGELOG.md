@@ -6,6 +6,35 @@ All notable changes to GameServer Manager are documented here.
 
 ## [Unreleased]
 
+### 🧠 Panel memory and CPU growth
+
+Several in-process structures and hot-path statements grew or ran without
+bound, which made a long-running panel use more memory and CPU over time:
+
+- **Unbounded rate-limit state.** The anonymous status throttle kept an entry
+  for every client key forever. It now sweeps expired keys once per window.
+- **Unbounded session tracking.** The "last seen" write throttle kept one
+  entry per session token forever. It is now a bounded `WriteThrottle` that
+  drops entries once their interval passes.
+- **DDL on hot paths.** The 15-second status poll, every authenticated
+  request and `GET /api/servers` ran `CREATE`/`ALTER ... IF NOT EXISTS`
+  each time. `ALTER TABLE` takes an exclusive lock even when nothing changes,
+  so these queued behind ordinary reads and writes. They now run once per
+  process, and a failure retries on the next call.
+- **Local node metrics never pruned.** Retention was only driven by remote
+  heartbeats, so a local-only panel grew `node_metrics` by about 5,760 rows a
+  day indefinitely. The local heartbeat now drives retention too.
+- **Stale per-process maps.** The status-board cache evicts on write, and CPU
+  baselines for process IDs that disappeared are swept.
+- **Process churn.** The monitor poll spawned `cat` and `df` every few seconds;
+  it now reads `/proc/loadavg` and uses `statfs` directly.
+- **Duplicate database pools.** The pool was cached on `globalThis` only
+  outside production. It is now always shared.
+- **Concurrent directory walks.** Simultaneous metrics requests for one server
+  each walked the full install tree; they now share a single walk.
+
+---
+
 ### 🐺 ET:Legacy Updates Broke Silently When Upstream Hid Its Links
 
 Every Wolfenstein: ET / ET:Legacy server update failed with a bare

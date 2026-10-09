@@ -11,8 +11,19 @@ import { mkdir } from "node:fs/promises";
 import { apiError } from "@/lib/api-error";
 import { validatePorts, parsePort, withinServerQuota } from "@/lib/server-lifecycle";
 import { createLogger } from "@/lib/logger";
+import { oncePerProcess } from "@/lib/once-per-process";
 
 const log = createLogger("servers");
+
+/**
+ * Pre-notes/tags installs lack these columns. Added once per process: this
+ * GET is polled by every open dashboard, and an ALTER takes an exclusive lock
+ * on game_servers even when the column is already there.
+ */
+const ensureServerColumns = oncePerProcess(async () => {
+  await db.execute(sql`ALTER TABLE game_servers ADD COLUMN IF NOT EXISTS notes TEXT`);
+  await db.execute(sql`ALTER TABLE game_servers ADD COLUMN IF NOT EXISTS tags JSONB`);
+});
 
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
@@ -24,8 +35,7 @@ export async function GET(req: NextRequest) {
   try {
     // Pre-notes installs lack the column; add it lazily so the select works.
     try {
-      await db.execute(sql`ALTER TABLE game_servers ADD COLUMN IF NOT EXISTS notes TEXT`);
-      await db.execute(sql`ALTER TABLE game_servers ADD COLUMN IF NOT EXISTS tags JSONB`);
+      await ensureServerColumns();
     } catch { /* best-effort */ }
 
     const query = db

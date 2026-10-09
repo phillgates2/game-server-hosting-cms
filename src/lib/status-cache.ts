@@ -15,8 +15,16 @@ import type { BoardView } from "./status-board-embed";
 export const STATUS_CACHE_MS = 3 * 60_000;
 
 const cache = new Map<number, { view: BoardView; at: number }>();
+let lastSweep = 0;
 
 export function setCachedView(key: number, view: BoardView, now: number = Date.now()): void {
+  // Entries are otherwise only evicted when read, so sweep stale ones here.
+  if (now - lastSweep >= STATUS_CACHE_MS) {
+    for (const [k, entry] of cache) {
+      if (now - entry.at > STATUS_CACHE_MS) cache.delete(k);
+    }
+    lastSweep = now;
+  }
   cache.set(key, { view, at: now });
 }
 
@@ -37,6 +45,7 @@ export function isCacheFresh(key: number, now: number = Date.now()): boolean {
 
 export function clearStatusCache(): void {
   cache.clear();
+  lastSweep = 0;
 }
 
 /** Test hook: how many entries are held. */

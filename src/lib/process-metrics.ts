@@ -13,6 +13,7 @@
  */
 
 import { readFile } from "node:fs/promises";
+import { WriteThrottle } from "./write-throttle";
 
 /** Bytes per memory page, used to convert the RSS figure in /proc/<pid>/stat. */
 const PAGE_SIZE = 4096;
@@ -85,8 +86,21 @@ export async function sampleProcess(pid: number): Promise<ProcessSample | null> 
  * averaged over the process's whole life. That is a reasonable first data
  * point and avoids showing a misleading 0%.
  */
+/** A baseline untouched for this long belongs to a process that is gone. */
+const STALE_BASELINE_MS = 10 * 60_000;
+let lastBaselineSweep = 0;
+
+function sweepStaleBaselines(now: number): void {
+  if (now - lastBaselineSweep < STALE_BASELINE_MS) return;
+  lastBaselineSweep = now;
+  for (const [pid, entry] of previous) {
+    if (now - entry.at > STALE_BASELINE_MS) previous.delete(pid);
+  }
+}
+
 export function cpuPercentFor(pid: number, sample: ProcessSample): number {
   const now = Date.now();
+  sweepStaleBaselines(now);
   const prev = previous.get(pid);
   previous.set(pid, { cpuSeconds: sample.cpuSeconds, at: now });
 
@@ -125,19 +139,16 @@ function round(n: number): number {
  */
 const SAMPLE_INTERVAL_MS = 60_000;
 
-const lastStored = new Map<number, number>();
+const lastStored = new WriteThrottle(SAMPLE_INTERVAL_MS);
 
 /** Whether enough time has passed to store another sample for this server. */
 export function shouldStoreSample(serverId: number, now = Date.now()): boolean {
-  const prev = lastStored.get(serverId);
-  if (prev !== undefined && now - prev < SAMPLE_INTERVAL_MS) return false;
-  lastStored.set(serverId, now);
-  return true;
+  return lastStored.shouldWrite(String(serverId), now);
 }
 
 /** Clear the throttle for a server, used when it stops. */
 export function forgetSampleThrottle(serverId: number): void {
-  lastStored.delete(serverId);
+  lastStored.forget(String(serverId));
 }
 
 // ── Resource-limit watchdog ──────────────────────────────────────────────────

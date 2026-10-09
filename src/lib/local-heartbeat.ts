@@ -76,6 +76,11 @@ async function tick(): Promise<void> {
     if (!sample) return;
 
     await db.insert(nodeMetrics).values({ nodeId: local.id, ...sample });
+    // Retention is otherwise only driven by remote-node heartbeats, so a
+    // local-only panel would never prune its own history. Probabilistic and
+    // rate-limited inside, so this is cheap on every tick.
+    const { maybePruneInBackground } = await import("@/lib/retention");
+    maybePruneInBackground();
     await db
       .update(nodes)
       .set({ status: "online", lastHeartbeat: new Date(), updatedAt: new Date() })

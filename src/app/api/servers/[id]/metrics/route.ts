@@ -14,6 +14,8 @@ const statfsAsync = promisify(statfs);
 /** Directory sizes are expensive to walk; cache them briefly per server. */
 const dirSizeCache = new Map<number, { mb: number; at: number }>();
 const DIR_SIZE_CACHE_MS = 5 * 60_000;
+/** One walk per server at a time: concurrent requests share it. */
+const dirSizeInFlight = new Map<number, Promise<number>>();
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -88,7 +90,14 @@ export async function GET(
       if (cached && Date.now() - cached.at < DIR_SIZE_CACHE_MS) {
         dirMb = cached.mb;
       } else {
-        const bytes = await estimateDirBytes(server.installPath, Number.MAX_SAFE_INTEGER);
+        let walk = dirSizeInFlight.get(serverId);
+        if (!walk) {
+          walk = estimateDirBytes(server.installPath, Number.MAX_SAFE_INTEGER).finally(() => {
+            dirSizeInFlight.delete(serverId);
+          });
+          dirSizeInFlight.set(serverId, walk);
+        }
+        const bytes = await walk;
         dirMb = Math.round((bytes / (1024 * 1024)) * 10) / 10;
         dirSizeCache.set(serverId, { mb: dirMb, at: Date.now() });
       }

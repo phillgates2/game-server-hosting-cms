@@ -2,10 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { readFile } from "node:fs/promises";
-import { exec } from "node:child_process";
-import { promisify } from "util";
-
-const execAsync = promisify(exec);
+import { statfs } from "node:fs/promises";
 
 interface MemInfo {
   totalMb: number;
@@ -59,8 +56,10 @@ async function getMemoryInfo(): Promise<MemInfo> {
 
 async function getCpuInfo() {
   try {
-    const { stdout } = await execAsync("cat /proc/loadavg");
-    const parts = stdout.trim().split(" ");
+    // Read procfs directly: the dashboard polls this every few seconds, and a
+    // shell per poll is needless process churn.
+    const stdout = await readFile("/proc/loadavg", "utf-8");
+    const parts = stdout.trim().split(/\s+/);
     return {
       load1: parseFloat(parts[0]),
       load5: parseFloat(parts[1]),
@@ -73,13 +72,19 @@ async function getCpuInfo() {
 
 async function getDiskInfo() {
   try {
-    const { stdout } = await execAsync("df -m / | tail -1");
-    const parts = stdout.trim().split(/\s+/);
+    // statfs instead of spawning `df` on every poll. Same figures as `df -m /`:
+    // "Use%" is used / (used + available), rounded up like coreutils does.
+    const st = await statfs("/");
+    const blockMb = st.bsize / (1024 * 1024);
+    const totalMb = Math.round(st.blocks * blockMb);
+    const availableMb = Math.round(st.bavail * blockMb);
+    const usedMb = Math.round((st.blocks - st.bfree) * blockMb);
+    const denom = usedMb + availableMb;
     return {
-      totalMb: parseInt(parts[1]),
-      usedMb: parseInt(parts[2]),
-      availableMb: parseInt(parts[3]),
-      usedPercent: parseInt(parts[4]),
+      totalMb,
+      usedMb,
+      availableMb,
+      usedPercent: denom > 0 ? Math.ceil((usedMb * 100) / denom) : 0,
     };
   } catch {
     return { totalMb: 0, usedMb: 0, availableMb: 0, usedPercent: 0 };
