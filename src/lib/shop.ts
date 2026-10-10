@@ -171,6 +171,10 @@ export type ProductType = typeof PRODUCT_TYPES[number];
 export async function ensureShopTables(): Promise<void> {
   const { db } = await import("@/db");
   const { sql } = await import("drizzle-orm");
+  // shop_orders.license_key_id references license_keys, so that table must exist
+  // first. Callers used to create it afterwards, which failed on a fresh database.
+  const { ensureLicenseTables } = await import("@/lib/licensing");
+  await ensureLicenseTables();
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS shop_products (
       id SERIAL PRIMARY KEY,
@@ -222,7 +226,6 @@ export async function ensureShopTables(): Promise<void> {
   await db.execute(sql`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS provider_sub TEXT`);
   await db.execute(sql`ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS kind VARCHAR(12) NOT NULL DEFAULT 'onetime'`);
   await db.execute(sql`ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS billing_interval VARCHAR(5)`);
-  await db.execute(sql`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS reseller_id INTEGER REFERENCES shop_resellers(id)`);
   await db.execute(sql`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS commission_cents INTEGER`);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS shop_resellers (
@@ -237,6 +240,8 @@ export async function ensureShopTables(): Promise<void> {
       last_used_at TIMESTAMP
     )
   `);
+  // Must run after shop_resellers exists: the FK target is created above.
+  await db.execute(sql`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS reseller_id INTEGER REFERENCES shop_resellers(id)`);
   await db.execute(sql`ALTER TABLE license_keys ADD COLUMN IF NOT EXISTS expiry_notified_at TIMESTAMP`);
   await db.execute(sql`ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS image_url TEXT`);
   await db.execute(sql`ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS category VARCHAR(64) NOT NULL DEFAULT 'general'`);

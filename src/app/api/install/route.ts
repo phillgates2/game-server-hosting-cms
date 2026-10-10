@@ -10,6 +10,7 @@ import { eq, sql } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
 import { changeInstallDatabasePassword, databasePasswordChange } from "@/lib/install-database";
 import { installErrorMessage } from "@/lib/install-error";
+import { checkPassword } from "@/lib/user-fields";
 
 export async function GET() {
   try {
@@ -47,7 +48,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const body = await req.json();
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: "Request body must be valid JSON" }, { status: 400 });
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return NextResponse.json({ error: "Request body must be a JSON object" }, { status: 400 });
+    }
 
     // CD-key gate for the installer itself: when the operator configured a
     // master key, a fresh install requires it. Without one there is nothing
@@ -157,10 +166,23 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const { adminUsername, adminEmail, adminPassword, panelName, databasePassword } = body;
+    const { adminUsername, adminEmail, adminPassword, panelName, databasePassword } = body as {
+      adminUsername?: string;
+      adminEmail?: string;
+      adminPassword?: string;
+      panelName?: string;
+      databasePassword?: string;
+    };
 
     if (!adminUsername || !adminEmail || !adminPassword) {
       return NextResponse.json({ error: "Admin credentials required" }, { status: 400 });
+    }
+
+    // Same policy as every other account (user-fields.ts). The web wizard only
+    // checked for non-empty input, so a one-character admin password installed.
+    const passwordCheck = checkPassword(adminPassword);
+    if (!passwordCheck.ok) {
+      return NextResponse.json({ error: `Admin ${passwordCheck.error.charAt(0).toLowerCase()}${passwordCheck.error.slice(1)}` }, { status: 400 });
     }
 
     if (databasePassword) {
@@ -786,7 +808,12 @@ export async function POST(req: NextRequest) {
     {
       const { isLicenseMasterMode } = await import("@/lib/license-client");
       if (isLicenseMasterMode()) {
-        try {
+        // Failures are not swallowed: a master panel without its key/signing
+        // key/store is broken, and the install must stay retryable (installed
+        // is written last). Nothing is persisted before the final step below,
+        // so a retry can still show a freshly generated key.
+        stage = "master panel bootstrap";
+        {
           const { ensureShopTables } = await import("@/lib/shop");
           const { ensureLicenseTables } = await import("@/lib/licensing");
           await ensureShopTables();
@@ -794,11 +821,12 @@ export async function POST(req: NextRequest) {
 
           // 1) Unified master key — generated only when nothing exists yet.
           let masterKeyPlaintext: string | null = null;
+          let masterKeyHashToStore: { key: string; value: string } | null = null;
           const { masterKeyConfigured, generateMasterKey, hashMasterKey, MASTER_KEY_SETTING } = await import("@/lib/master-key");
           const mkState = await masterKeyConfigured();
           if (!mkState.env && !mkState.stored) {
             masterKeyPlaintext = await generateMasterKey();
-            await db.insert(settings).values({ key: MASTER_KEY_SETTING, value: await hashMasterKey(masterKeyPlaintext) });
+            masterKeyHashToStore = { key: MASTER_KEY_SETTING, value: await hashMasterKey(masterKeyPlaintext) };
           }
 
           // 2) Signing key for offline tokens (private PEM stays in settings).
@@ -830,10 +858,14 @@ export async function POST(req: NextRequest) {
             starterProduct = "Solo License";
           }
 
+          // Persist the key hash last, so every earlier failure leaves nothing
+          // behind that would hide the one-time plaintext from a retry.
+          if (masterKeyHashToStore) {
+            await db.insert(settings).values(masterKeyHashToStore);
+          }
+
           bootstrap = { masterKey: masterKeyPlaintext, signingKey: signingKeyCreated, starterProduct };
           await logStep("master-bootstrap", "done", "Master panel bootstrapped: master key, signing key and starter product ready.");
-        } catch {
-          /* bootstrap must never fail the install itself */
         }
       }
     }
