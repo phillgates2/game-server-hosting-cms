@@ -351,7 +351,7 @@ export async function POST(req: NextRequest) {
       errors.push(
         `Cannot clear caches — the panel process runs as '${processUser}'. ${dropResult.error || ""}. ` +
           `Run this as root to fix:\n` +
-          `echo '${processUser} ALL=(ALL) NOPASSWD: /usr/bin/tee /proc/sys/vm/drop_caches, /usr/sbin/sysctl vm.drop_caches=*, /usr/sbin/swapoff, /usr/sbin/swapon' | sudo tee /etc/sudoers.d/gsm-panel && sudo chmod 440 /etc/sudoers.d/gsm-panel`
+          `echo '${processUser} ALL=(ALL) NOPASSWD: /usr/bin/tee /proc/sys/vm/drop_caches, /usr/sbin/sysctl -w vm.drop_caches=1, /usr/sbin/sysctl -w vm.drop_caches=2, /usr/sbin/sysctl -w vm.drop_caches=3, /usr/sbin/swapoff -a, /usr/sbin/swapon -a' | sudo tee /etc/sudoers.d/gsm-panel && sudo chmod 440 /etc/sudoers.d/gsm-panel`
       );
     }
   }

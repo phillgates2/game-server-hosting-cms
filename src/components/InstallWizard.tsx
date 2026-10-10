@@ -25,6 +25,33 @@ export default function InstallWizard({ onComplete }: Props) {
   const [done, setDone] = useState(false);
   const [bootstrap, setBootstrap] = useState<{ masterKey: string | null; signingKey: boolean; starterProduct: string | null } | null>(null);
 
+  // navigator.clipboard only exists in secure contexts (HTTPS or localhost).
+  // Panels are often reached over plain HTTP on a LAN, where the old call threw.
+  async function copyToClipboard(text: string): Promise<boolean> {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        // fall through to the selection-based copy below
+      }
+    }
+    try {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(area);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+
   async function runInstall() {
     setInstalling(true);
     setError("");
@@ -36,11 +63,12 @@ export default function InstallWizard({ onComplete }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({} as { error?: string }));
 
       if (!res.ok) {
-        setError(data.error || "Installation failed");
-        setLogs((l) => [...l, `❌ Error: ${data.error}`]);
+        const message = data.error || `Installation failed (HTTP ${res.status})`;
+        setError(message);
+        setLogs((l) => [...l, `❌ Error: ${message}`]);
       } else {
         setLogs((l) => [
           ...l,
@@ -246,6 +274,10 @@ export default function InstallWizard({ onComplete }: Props) {
                       setError("Password is required");
                       return;
                     }
+                    if (form.adminPassword.length < 8) {
+                      setError("Admin password must be at least 8 characters");
+                      return;
+                    }
                     setError("");
                     setStep(2);
                   }}
@@ -269,7 +301,7 @@ export default function InstallWizard({ onComplete }: Props) {
                     <p><strong>Panel:</strong> {form.panelName}</p>
                     <p><strong>Admin:</strong> {form.adminUsername} ({form.adminEmail})</p>
                     <p><strong>Database:</strong> {form.databasePassword ? "A new database password will be applied" : "Current database password will be kept"}</p>
-                    <p><strong>Games:</strong> ET:Legacy, OpenRA, Palworld, Satisfactory, Terraria</p>
+                    <p><strong>Games:</strong> Game templates are added afterwards from the Games panel</p>
                   </div>
                   <div className="flex gap-3">
                     <button
@@ -305,9 +337,9 @@ export default function InstallWizard({ onComplete }: Props) {
                 <div className="rounded-xl border border-success/40 bg-success/10 p-4 space-y-2 text-left">
                   <p className="text-sm font-bold text-success">🔑 Your master key — shown exactly once. Copy it now:</p>
                   <div className="flex items-center gap-2">
-                    <code className="flex-1 truncate rounded-lg bg-bg-card border border-border px-3 py-2 text-xs font-mono text-text-primary">{bootstrap.masterKey}</code>
+                    <code className="flex-1 break-all select-all rounded-lg bg-bg-card border border-border px-3 py-2 text-xs font-mono text-text-primary">{bootstrap.masterKey}</code>
                     <button
-                      onClick={() => { void navigator.clipboard.writeText(bootstrap.masterKey ?? "").then(() => setLogs((l) => [...l, "✅ Master key copied to clipboard"])); }}
+                      onClick={() => { void copyToClipboard(bootstrap.masterKey ?? "").then((ok) => setLogs((l) => [...l, ok ? "✅ Master key copied to clipboard" : "⚠️ Copy failed — select the key above and copy it manually"])); }}
                       className="px-3 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white text-xs font-medium"
                     >Copy</button>
                   </div>

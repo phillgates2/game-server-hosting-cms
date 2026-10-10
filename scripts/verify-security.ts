@@ -3279,7 +3279,8 @@ console.log("\nINSTKEY install gate rails");
     "install key check is fail-closed and exact",
     /if \(!input\.masterKeyConfigured\) return \{ ok: true \}/.test(keys) &&
       /presented\.length < INSTALL_KEY_MIN_LENGTH/.test(keys) &&
-      /input\.masterKey === null \|\| presented !== input\.masterKey/.test(keys)
+      /input\.masterKey === null \|\| !constantTimeEqual\(presented, input\.masterKey\)/.test(keys) &&
+      /timingSafeEqual/.test(keys)
   );
 }
 
@@ -3314,7 +3315,7 @@ console.log("\nINSTSH installer-script rails");
       /"src\/app\/api\/access-keys"/.test(sh) &&
       /"src\/app\/api\/auth\/access-gate"/.test(sh) &&
       /"src\/components\/panels\/AccessGateSection\.tsx"/.test(sh) &&
-      /rm -rf -- "\$INSTALL_DIR\/\$stale"/.test(sh)
+      /rm -rf -- "\$\{INSTALL_DIR:\?\}\/\$stale"/.test(sh)
   );
 }
 
@@ -3788,7 +3789,8 @@ console.log("\nMBOOT first-run master rails");
     /if \(isLicenseMasterMode\(\)\) \{/.test(install) &&
       /if \(!mkState\.env && !mkState\.stored\) \{/.test(install) &&
       /MASTER_KEY_SETTING, value: await hashMasterKey\(masterKeyPlaintext\)/.test(install) &&
-      /bootstrap must never fail the install itself/.test(install)
+      /Failures are not swallowed/.test(install) &&
+      /masterKeyHashToStore/.test(install)
   );
   check(
     "bootstrap seeds signing key and starter product only when missing",
@@ -3800,7 +3802,8 @@ console.log("\nMBOOT first-run master rails");
     "wizard shows the master key exactly once with copy",
     /bootstrap\?\.masterKey && \(/.test(wizard) &&
       /shown exactly once/.test(wizard) &&
-      /navigator\.clipboard\.writeText\(bootstrap\.masterKey/.test(wizard)
+      /copyToClipboard\(bootstrap\.masterKey/.test(wizard) &&
+      /navigator\.clipboard\?\.writeText/.test(wizard)
   );
   check(
     "pure bootstrap plan: no key when one exists, re-runs idempotent",

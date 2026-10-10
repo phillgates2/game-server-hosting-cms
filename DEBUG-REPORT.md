@@ -1111,3 +1111,59 @@ Nothing from the original list. Two smaller things noted along the way:
 - **Two `console` calls in `MonitorPanel`/`RconPanel`** looked like silent
   failures to a pattern scan but genuinely handle their errors — recorded here
   so a later sweep does not re-investigate them.
+
+---
+
+# Installer and web installer audit (2026-10-10)
+
+Scope: `public/install.sh` (update and uninstall were not re-audited in this pass), the
+web installer (`/api/install`, `InstallWizard.tsx`, `install-database.ts`), and the master
+bootstrap in `src/lib/shop.ts`.
+
+Every fix below was reproduced first. The web-installer cases were run against a live panel
+and PostgreSQL, and the shell cases by running the real code extracted from `install.sh`.
+Regression tests are in `tests/install-regressions.test.ts`.
+
+## Fixed
+
+| ID | Area | Problem | Fix |
+| --- | --- | --- | --- |
+| H1 | install.sh step 8 | The API call sent no install key and no license, and `curl -sf` hid the error body. Every standard install printed `API install returned: ` and nothing else. The JSON was built by hand, so a `"` or `\` in the admin password broke it. | Sends `accessKey` and `licenseKey`. Values are JSON-escaped. Prints the HTTP status and the API's reason. |
+| H2 | install.sh re-run | `DB_PASS` was regenerated and written to `.env`, but `CREATE ROLE` was skipped for an existing role. The panel then failed with `28P01` and showed the wizard again. | Re-runs run `ALTER ROLE ... PASSWORD` so the role matches `.env`. |
+| H3 | master bootstrap | `ensureShopTables` referenced `shop_resellers` and `license_keys` before creating them. Its failure was swallowed (`catch {}`), so a master install reported success with no master key, signing key or starter product. The plaintext key was stored before the failure point and lost. | `ensureShopTables` creates license tables first, and the reseller FK is added after its table. Bootstrap errors now fail the install, which stays retryable. The key hash is stored last. |
+| H4 | sudoers | `NOPASSWD: /usr/sbin/sysctl vm.drop_caches=*` accepted `sysctl vm.drop_caches=3 kernel.domainname=x`. Sysctl can set `kernel.core_pattern`, which is a root code-execution path for anything running as the panel user. The `sh -c echo ? > ...` rule also allowed `echo ; > ...`. | Exact command lines only, for values 1–3. Swap rules are limited to `-a`. The unused `compact_memory` rule is gone. Verified with a dedicated test account: the old rules allowed the wildcard abuse, the new rules deny it. |
+| M1 | wizard | Copy button threw `Cannot read properties of undefined (reading 'writeText')` over plain HTTP (not a secure context). | Falls back to a selection-based copy and reports failure. Verified in headless Chromium at a LAN address. |
+| M2 | web installer | No server-side admin password policy. A 1-character password installed. | Uses `checkPassword` (8–256). The wizard checks length too. |
+| M3 | web installer | Malformed JSON returned 500 "pre-install checks". | Returns 400, and rejects non-object bodies. |
+| M4 | install.sh | Root wrote logs and downloaded the NodeSource script to predictable `/tmp` paths. | Uses `/var/log/gsm-install` (0711). Files the panel user writes to are pre-created with that user as owner. |
+| M5 | install.sh | The tracked `drizzle.config.json` was rewritten with the DB password. On re-run, `git pull` failed silently and stale code was built. | Credentials go to an untracked config that is deleted after `drizzle-kit push`. A legacy edit is restored before the pull. A failed pull stops the installer. |
+| M6 | install.sh | A failed PGDG key import ended the script under `pipefail` before the distro fallback. `python3` was not installed, but the DB URL step needs it. | Falls back to the distro package with a warning. `python3` added to the core packages. |
+| M7 | install.sh | `fuser -k` on the panel port could kill any unrelated process. | Only leftover `next` processes are stopped. Anything else is reported and left alone. |
+| M8 | install.sh | The license-validation body was printf-built and unescaped. `REVERSE_PROXY=caddy` was written even without Caddy. `drizzle-kit push` could block on a prompt (no `</dev/null`). | Escaped, `caddy|none`, and `</dev/null` added. |
+| M9 | wizard | The summary listed games that are not installed. A non-JSON error response crashed the handler. | Summary text corrected. Errors fall back safely. |
+| L1 | access gate | Install key compared with `!==`. | Constant-time comparison (`timingSafeEqual`). |
+| L2 | install.sh | `rm -rf "$INSTALL_DIR/$stale"` had an unguarded variable (SC2115). | `${INSTALL_DIR:?}` guard. |
+
+**Behaviour change:** a master install whose bootstrap fails now returns HTTP 500 and stays
+retryable. It no longer reports success with no key. Re-run the installer after fixing the
+cause.
+
+## Not changed (reported)
+
+- Non-interactive installs take over port 80 for an Apache or nginx site without asking
+  (`setup-webroot.sh`). This is a policy decision.
+- Air-gapped builds fail at `next/font/google`. Fixing this needs self-hosted font files.
+- `gsm update` runs `update.sh` as root from `.install-info`. The `sudo` re-exec fetches
+  `main` from GitHub, not the checked-out revision.
+- Caddy serves plain HTTP on `:8080` on all interfaces.
+- `GET /api/install` returns `install_log` to unauthenticated callers.
+- The license heartbeat returns "ok" when activation settings are missing. The wizard is the
+  only path that records activation.
+- The shell validates the license but does not persist activation.
+- `.install-info` stores `ACCESS_KEY` in plaintext (mode 600).
+- Moving an existing non-git directory to `.bak.<ts>` keeps `.env` secrets in the backup.
+- Lint: 2 errors and 10 warnings in the shop and profile components (present before this pass).
+  `npm run verify` therefore fails at the lint stage.
+- `verify:security`: 6 checks fail on `main` as well (shop orders, fulfilment, coupons,
+  subscriptions, reseller attribution, update route snapshots). They are not installer
+  related, but the shop-order checks may point at real issues and should be reviewed.

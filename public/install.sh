@@ -47,8 +47,29 @@ NC='\033[0m'
 log()   { echo -e "${CYAN}[GSM]${NC} $*"; }
 ok()    { echo -e "${GREEN}[✓]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
+
+# Escape a value for use inside a JSON string literal (backslash, quote, control chars).
+json_escape() {
+  local v=$1
+  v=${v//\\/\\\\}
+  v=${v//\"/\\\"}
+  v=${v//$'\n'/\\n}
+  v=${v//$'\r'/\\r}
+  v=${v//$'\t'/\\t}
+  printf '%s' "$v"
+}
 err()   { echo -e "${RED}[✗]${NC} $*" >&2; }
 die()   { err "$*"; exit 1; }
+
+# Root-owned, not writable by other users: install logs and the NodeSource script
+# live here instead of predictable names in world-writable /tmp (symlink or swap risk).
+GSM_LOG_DIR="/var/log/gsm-install"
+
+# Create a log file owned by the panel user before a su-run command writes to it.
+prepare_gsm_log() {
+  rm -f -- "$1"
+  install -o "$GSM_USER" -g "$GSM_USER" -m 600 /dev/null "$1"
+}
 
 banner() {
   echo ""
@@ -548,7 +569,7 @@ elif [[ "$MASTER_PANEL" != "true" ]]; then
   fi
   log "Validating license key against $LICENSE_SERVER ..."
   VALIDATE_BODY=$(printf '{"key":"%s","hostname":"%s","panelUrl":"%s"}' \
-    "$LICENSE_KEY" "$(hostname 2>/dev/null || echo unknown)" "http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo localhost):$PANEL_PORT")
+    "$(json_escape "$LICENSE_KEY")" "$(json_escape "$(hostname 2>/dev/null || echo unknown)")" "$(json_escape "http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo localhost):$PANEL_PORT")")
   VALIDATE_RESP=$(curl -fsS -m 15 -X POST "$LICENSE_SERVER/api/license/validate" \
     -H 'content-type: application/json' -d "$VALIDATE_BODY" 2>/dev/null || true)
   if ! printf '%s' "$VALIDATE_RESP" | grep -q '"ok":true'; then
@@ -572,6 +593,9 @@ step() {
 # ═══════════════════════════════════════════════════════════════════════════════
 step "Installing system dependencies"
 
+mkdir -p "$GSM_LOG_DIR"
+chmod 0711 "$GSM_LOG_DIR"
+
 export DEBIAN_FRONTEND=noninteractive
 
 log "Updating package lists..."
@@ -583,7 +607,7 @@ apt-get update -qq || {
 
 log "Installing base packages..."
 # Core packages (required)
-CORE_PKGS="curl wget ca-certificates gnupg lsb-release git tar gzip unzip psmisc"
+CORE_PKGS="curl wget ca-certificates gnupg lsb-release git tar gzip unzip psmisc python3"
 # Build tools (required for native npm modules)
 BUILD_PKGS="build-essential"
 # Security (optional but recommended)
@@ -597,22 +621,22 @@ fi
 
 # Install core packages first (fail if these are missing)
 log "  → Core packages..."
-if ! apt-get install -y $CORE_PKGS > /tmp/gsm-apt-core.log 2>&1; then
+if ! apt-get install -y $CORE_PKGS > $GSM_LOG_DIR/gsm-apt-core.log 2>&1; then
   err "Failed to install core packages!"
-  cat /tmp/gsm-apt-core.log
+  cat $GSM_LOG_DIR/gsm-apt-core.log
   die "Cannot continue without core packages: $CORE_PKGS"
 fi
 
 # Build tools
 log "  → Build tools..."
-if ! apt-get install -y $BUILD_PKGS > /tmp/gsm-apt-build.log 2>&1; then
+if ! apt-get install -y $BUILD_PKGS > $GSM_LOG_DIR/gsm-apt-build.log 2>&1; then
   warn "Failed to install build-essential — native npm modules may fail"
-  cat /tmp/gsm-apt-build.log
+  cat $GSM_LOG_DIR/gsm-apt-build.log
 fi
 
 # Security packages (non-fatal if missing)
 log "  → Security packages (ufw, fail2ban)..."
-apt-get install -y $SECURITY_PKGS > /tmp/gsm-apt-security.log 2>&1 || {
+apt-get install -y $SECURITY_PKGS > $GSM_LOG_DIR/gsm-apt-security.log 2>&1 || {
   warn "Some security packages could not be installed (non-fatal)"
 }
 
@@ -630,21 +654,21 @@ step "Installing Node.js $NODE_MAJOR"
 
 install_nodejs() {
   log "Adding NodeSource repository..."
-  if ! curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" -o /tmp/nodesource_setup.sh; then
+  if ! curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" -o $GSM_LOG_DIR/nodesource_setup.sh; then
     err "Failed to download NodeSource setup script"
     return 1
   fi
   
-  if ! bash /tmp/nodesource_setup.sh > /tmp/gsm-nodesource.log 2>&1; then
+  if ! bash $GSM_LOG_DIR/nodesource_setup.sh > $GSM_LOG_DIR/gsm-nodesource.log 2>&1; then
     err "NodeSource setup failed!"
-    cat /tmp/gsm-nodesource.log
+    cat $GSM_LOG_DIR/gsm-nodesource.log
     return 1
   fi
   
   log "Installing Node.js..."
-  if ! apt-get install -y nodejs > /tmp/gsm-nodejs-install.log 2>&1; then
+  if ! apt-get install -y nodejs > $GSM_LOG_DIR/gsm-nodejs-install.log 2>&1; then
     err "Failed to install Node.js!"
-    cat /tmp/gsm-nodejs-install.log
+    cat $GSM_LOG_DIR/gsm-nodejs-install.log
     return 1
   fi
   return 0
@@ -676,9 +700,9 @@ fi
 # Install PM2 globally
 if ! command -v pm2 &>/dev/null; then
   log "Installing PM2..."
-  if ! npm install -g pm2 > /tmp/gsm-pm2-install.log 2>&1; then
+  if ! npm install -g pm2 > $GSM_LOG_DIR/gsm-pm2-install.log 2>&1; then
     warn "PM2 installation failed — you can install it manually later"
-    cat /tmp/gsm-pm2-install.log
+    cat $GSM_LOG_DIR/gsm-pm2-install.log
   else
     ok "PM2 installed"
   fi
@@ -707,26 +731,33 @@ if ! command -v psql &>/dev/null; then
     CODENAME="bookworm"
   fi
   
-  # Add PostgreSQL APT repo
-  curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-    | gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg 2>/dev/null
-  echo "deb [signed-by=/usr/share/keyrings/postgresql-archive-keyring.gpg] https://apt.postgresql.org/pub/repos/apt ${CODENAME}-pgdg main" \
-    > /etc/apt/sources.list.d/pgdg.list
+  # Add PostgreSQL APT repo. Under pipefail a failed key import used to end the
+  # script here with no message, so the distro fallback below never ran.
+  PGDG_KEY_OK="true"
+  if ! curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      | gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg 2>/dev/null; then
+    warn "Could not import the PostgreSQL repository key; using the distro's PostgreSQL package"
+    PGDG_KEY_OK="false"
+  fi
+  if [[ "$PGDG_KEY_OK" == "true" ]]; then
+    echo "deb [signed-by=/usr/share/keyrings/postgresql-archive-keyring.gpg] https://apt.postgresql.org/pub/repos/apt ${CODENAME}-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list
+  fi
   
   log "Updating package lists..."
   apt-get update -qq
   
   log "Installing PostgreSQL..."
-  if ! apt-get install -y postgresql postgresql-contrib > /tmp/gsm-postgresql-install.log 2>&1; then
+  if ! apt-get install -y postgresql postgresql-contrib > $GSM_LOG_DIR/gsm-postgresql-install.log 2>&1; then
     err "PostgreSQL installation failed!"
-    cat /tmp/gsm-postgresql-install.log
+    cat $GSM_LOG_DIR/gsm-postgresql-install.log
     
     # Try without the official repo (use distro's version)
     warn "Trying distro's PostgreSQL package..."
     rm -f /etc/apt/sources.list.d/pgdg.list
     apt-get update -qq
-    if ! apt-get install -y postgresql postgresql-contrib > /tmp/gsm-postgresql-install.log 2>&1; then
-      cat /tmp/gsm-postgresql-install.log
+    if ! apt-get install -y postgresql postgresql-contrib > $GSM_LOG_DIR/gsm-postgresql-install.log 2>&1; then
+      cat $GSM_LOG_DIR/gsm-postgresql-install.log
       die "Cannot install PostgreSQL"
     fi
   fi
@@ -753,8 +784,15 @@ ok "PostgreSQL $PG_VERSION running"
 
 # Create database user & database
 log "Creating database role '$DB_USER' and database '$DB_NAME'..."
-su - postgres -c "psql -tc \"SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'\" | grep -q 1" 2>/dev/null \
-  || su - postgres -c "psql -c \"CREATE ROLE $DB_USER WITH LOGIN PASSWORD '$DB_PASS';\""
+if su - postgres -c "psql -tc \"SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'\" | grep -q 1" 2>/dev/null; then
+  # Re-run: the role already exists, so give it the password we are about to
+  # write to .env. Skipping this left the panel unable to log in to its database.
+  su - postgres -c "psql -c \"ALTER ROLE $DB_USER WITH LOGIN PASSWORD '$DB_PASS';\"" > /dev/null \
+    || die "Could not set the password for database role '$DB_USER'"
+else
+  su - postgres -c "psql -c \"CREATE ROLE $DB_USER WITH LOGIN PASSWORD '$DB_PASS';\"" > /dev/null \
+    || die "Could not create database role '$DB_USER'"
+fi
 su - postgres -c "psql -tc \"SELECT 1 FROM pg_database WHERE datname='$DB_NAME'\" | grep -q 1" 2>/dev/null \
   || su - postgres -c "psql -c \"CREATE DATABASE $DB_NAME OWNER $DB_USER;\""
 su - postgres -c "psql -c \"GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER;\""
@@ -807,21 +845,21 @@ else
   STEAM_LIBS_INSTALLED="false"
   
   # Modern naming (Debian 11+, Ubuntu 20.04+)
-  if apt-get install -y lib32gcc-s1 lib32stdc++6 > /tmp/gsm-steamlibs.log 2>&1; then
+  if apt-get install -y lib32gcc-s1 lib32stdc++6 > $GSM_LOG_DIR/gsm-steamlibs.log 2>&1; then
     STEAM_LIBS_INSTALLED="true"
   # Older naming (Debian 10, Ubuntu 18.04)
-  elif apt-get install -y lib32gcc1 lib32stdc++6 > /tmp/gsm-steamlibs.log 2>&1; then
+  elif apt-get install -y lib32gcc1 lib32stdc++6 > $GSM_LOG_DIR/gsm-steamlibs.log 2>&1; then
     STEAM_LIBS_INSTALLED="true"
   # Minimal fallback — just libc6:i386
-  elif apt-get install -y libc6:i386 > /tmp/gsm-steamlibs.log 2>&1; then
+  elif apt-get install -y libc6:i386 > $GSM_LOG_DIR/gsm-steamlibs.log 2>&1; then
     warn "Only installed libc6:i386 — some games may have issues"
     STEAM_LIBS_INSTALLED="true"
   fi
 
   if [[ "$STEAM_LIBS_INSTALLED" != "true" ]]; then
     warn "Could not install 32-bit libraries — SteamCMD may not work"
-    warn "Log: /tmp/gsm-steamlibs.log"
-    cat /tmp/gsm-steamlibs.log
+    warn "Log: $GSM_LOG_DIR/gsm-steamlibs.log"
+    cat $GSM_LOG_DIR/gsm-steamlibs.log
   else
     ok "32-bit libraries installed"
   fi
@@ -923,7 +961,14 @@ step "Cloning GameServer Manager"
 if [[ -d "$INSTALL_DIR/.git" ]]; then
   log "Existing installation found, pulling latest..."
   cd "$INSTALL_DIR"
-  git pull --ff-only 2>/dev/null || true
+  # Older installers rewrote the tracked drizzle.config.json with the database
+  # password, which makes the pull below refuse to run. Restore the tracked copy.
+  git -c safe.directory="$INSTALL_DIR" checkout -- drizzle.config.json 2>/dev/null || true
+  # A failed pull used to be swallowed, so the old code was rebuilt as if it were
+  # current. Stop here and say why.
+  if ! git -c safe.directory="$INSTALL_DIR" pull --ff-only; then
+    die "git pull failed in $INSTALL_DIR (see the error above). Resolve it, e.g. 'git -C $INSTALL_DIR status', then re-run the installer."
+  fi
 else
   if [[ -d "$INSTALL_DIR" ]]; then
     warn "Directory $INSTALL_DIR exists but is not a git repo — backing up"
@@ -949,8 +994,8 @@ STALE_PATHS=(
   "tests/access-keys.test.ts"
 )
 for stale in "${STALE_PATHS[@]}"; do
-  if [[ -e "$INSTALL_DIR/$stale" ]]; then
-    rm -rf -- "$INSTALL_DIR/$stale"
+  if [[ -n "$stale" && "$stale" != /* && "$stale" != *..* && -e "$INSTALL_DIR/$stale" ]]; then
+    rm -rf -- "${INSTALL_DIR:?}/$stale"
     log "Removed stale path from an older release: $stale"
   fi
 done
@@ -1002,8 +1047,10 @@ ENVEOF
 chown "$GSM_USER:$GSM_USER" .env
 chmod 600 .env
 
-# Update drizzle.config.json to use the real database URL
-cat > drizzle.config.json <<DRIZZLE
+# drizzle-kit needs the database URL. Write it to a separate, untracked config
+# (removed after the push) so the tracked drizzle.config.json is never edited.
+DRIZZLE_INSTALL_CONFIG="$INSTALL_DIR/drizzle.install.json"
+(umask 077 && cat > "$DRIZZLE_INSTALL_CONFIG" <<DRIZZLE
 {
   "dialect": "postgresql",
   "schema": "./src/db/schema.ts",
@@ -1012,7 +1059,9 @@ cat > drizzle.config.json <<DRIZZLE
   }
 }
 DRIZZLE
-chown "$GSM_USER:$GSM_USER" drizzle.config.json
+)
+chown "$GSM_USER:$GSM_USER" "$DRIZZLE_INSTALL_CONFIG"
+chmod 600 "$DRIZZLE_INSTALL_CONFIG"
 
 log "Installing npm packages (this may take a minute)..."
 # Full install INCLUDING devDependencies — typescript, tailwindcss, postcss,
@@ -1021,21 +1070,23 @@ log "Installing npm packages (this may take a minute)..."
 #
 # NOTE: "|| true" prevents set -e from killing the script so our error
 # handling below actually runs.
-su - "$GSM_USER" -c "cd $INSTALL_DIR && npm ci" > /tmp/gsm-npm-install.log 2>&1 || true
+prepare_gsm_log "$GSM_LOG_DIR/gsm-npm-install.log"
+su - "$GSM_USER" -c "cd $INSTALL_DIR && npm ci" > $GSM_LOG_DIR/gsm-npm-install.log 2>&1 || true
 
 # Check if it actually worked by looking for node_modules
 if ! su - "$GSM_USER" -c "test -d $INSTALL_DIR/node_modules/next" 2>/dev/null; then
   warn "npm ci did not produce node_modules — falling back to npm install..."
   echo "─── npm ci log (last 20 lines) ───"
-  tail -20 /tmp/gsm-npm-install.log
+  tail -20 $GSM_LOG_DIR/gsm-npm-install.log
   echo "───────────────────────────────────"
 
-  su - "$GSM_USER" -c "cd $INSTALL_DIR && npm install" > /tmp/gsm-npm-install.log 2>&1 || true
+  prepare_gsm_log "$GSM_LOG_DIR/gsm-npm-install.log"
+  su - "$GSM_USER" -c "cd $INSTALL_DIR && npm install" > $GSM_LOG_DIR/gsm-npm-install.log 2>&1 || true
 
   if ! su - "$GSM_USER" -c "test -d $INSTALL_DIR/node_modules/next" 2>/dev/null; then
     err "npm install also failed!"
     echo "─── npm install log (last 30 lines) ───"
-    tail -30 /tmp/gsm-npm-install.log
+    tail -30 $GSM_LOG_DIR/gsm-npm-install.log
     echo "────────────────────────────────────────"
     die "Cannot continue without dependencies."
   fi
@@ -1045,30 +1096,34 @@ fi
 if ! su - "$GSM_USER" -c "test -f $INSTALL_DIR/node_modules/.bin/tsc" 2>/dev/null; then
   err "TypeScript compiler is missing — devDependencies were likely skipped."
   err "Retrying with explicit install..."
-  su - "$GSM_USER" -c "cd $INSTALL_DIR && npm install" > /tmp/gsm-npm-install.log 2>&1 || true
+  prepare_gsm_log "$GSM_LOG_DIR/gsm-npm-install.log"
+  su - "$GSM_USER" -c "cd $INSTALL_DIR && npm install" > $GSM_LOG_DIR/gsm-npm-install.log 2>&1 || true
   if ! su - "$GSM_USER" -c "test -f $INSTALL_DIR/node_modules/.bin/tsc" 2>/dev/null; then
-    tail -20 /tmp/gsm-npm-install.log
-    die "Cannot install TypeScript. Check /tmp/gsm-npm-install.log"
+    tail -20 $GSM_LOG_DIR/gsm-npm-install.log
+    die "Cannot install TypeScript. Check $GSM_LOG_DIR/gsm-npm-install.log"
   fi
 fi
 
 ok "Dependencies installed"
-log "  (full log: /tmp/gsm-npm-install.log)"
+log "  (full log: $GSM_LOG_DIR/gsm-npm-install.log)"
 
 # Push database schema BEFORE building — drizzle-kit is a devDependency
 log "Pushing database schema..."
-su - "$GSM_USER" -c "cd $INSTALL_DIR && npx drizzle-kit push" > /tmp/gsm-drizzle-push.log 2>&1 || true
-tail -3 /tmp/gsm-drizzle-push.log
-if grep -qi "error\|fail" /tmp/gsm-drizzle-push.log 2>/dev/null && ! grep -qi "Changes applied" /tmp/gsm-drizzle-push.log 2>/dev/null; then
+prepare_gsm_log "$GSM_LOG_DIR/gsm-drizzle-push.log"
+su - "$GSM_USER" -c "cd $INSTALL_DIR && npx drizzle-kit push --config $DRIZZLE_INSTALL_CONFIG" </dev/null > $GSM_LOG_DIR/gsm-drizzle-push.log 2>&1 || true
+tail -3 $GSM_LOG_DIR/gsm-drizzle-push.log
+if grep -qi "error\|fail" $GSM_LOG_DIR/gsm-drizzle-push.log 2>/dev/null && ! grep -qi "Changes applied" $GSM_LOG_DIR/gsm-drizzle-push.log 2>/dev/null; then
   warn "drizzle-kit push may have had issues"
-  warn "You can retry later: cd $INSTALL_DIR && npx drizzle-kit push"
-  tail -10 /tmp/gsm-drizzle-push.log
+  warn "Re-run the installer to apply the schema again"
+  tail -10 $GSM_LOG_DIR/gsm-drizzle-push.log
 else
   ok "Database schema applied"
 fi
+rm -f -- "$DRIZZLE_INSTALL_CONFIG"
 
 log "Building production bundle (this may take a minute)..."
-su - "$GSM_USER" -c "cd $INSTALL_DIR && npx next build" > /tmp/gsm-next-build.log 2>&1 || true
+prepare_gsm_log "$GSM_LOG_DIR/gsm-next-build.log"
+su - "$GSM_USER" -c "cd $INSTALL_DIR && npx next build" > $GSM_LOG_DIR/gsm-next-build.log 2>&1 || true
 
 # Check for .next/BUILD_ID (proof the build succeeded). A failed build still
 # leaves a partial .next directory behind, so testing the directory alone
@@ -1076,11 +1131,11 @@ su - "$GSM_USER" -c "cd $INSTALL_DIR && npx next build" > /tmp/gsm-next-build.lo
 if ! su - "$GSM_USER" -c "test -f $INSTALL_DIR/.next/BUILD_ID" 2>/dev/null; then
   err "Build failed! .next/BUILD_ID was not created."
   echo "─── Build log (last 40 lines) ───"
-  tail -40 /tmp/gsm-next-build.log
+  tail -40 $GSM_LOG_DIR/gsm-next-build.log
   echo "──────────────────────────────────"
-  die "Cannot continue without a successful build. Full log: /tmp/gsm-next-build.log"
+  die "Cannot continue without a successful build. Full log: $GSM_LOG_DIR/gsm-next-build.log"
 fi
-tail -8 /tmp/gsm-next-build.log
+tail -8 $GSM_LOG_DIR/gsm-next-build.log
 ok "Production build complete"
 
 # Remove devDependencies to save disk space (typescript, eslint, tailwind, etc.
@@ -1096,9 +1151,11 @@ step "Initializing database"
 
 # Start the app temporarily to run the install API
 log "Starting temporary server for panel setup..."
-su - "$GSM_USER" -c "cd $INSTALL_DIR && PORT=$PANEL_PORT npx next start > /tmp/gsm-temp-server.log 2>&1 &
-echo \$!" > /tmp/gsm-temp-pid
-TEMP_PID=$(cat /tmp/gsm-temp-pid 2>/dev/null || echo "")
+INSTALL_BODY_FILE=$(mktemp)
+prepare_gsm_log "$GSM_LOG_DIR/gsm-temp-server.log"
+su - "$GSM_USER" -c "cd $INSTALL_DIR && PORT=$PANEL_PORT npx next start > $GSM_LOG_DIR/gsm-temp-server.log 2>&1 &
+echo \$!" > $GSM_LOG_DIR/gsm-temp-pid
+TEMP_PID=$(cat $GSM_LOG_DIR/gsm-temp-pid 2>/dev/null || echo "")
 
 # Wait for server to be ready (up to 60 seconds)
 SERVER_READY="false"
@@ -1119,25 +1176,50 @@ done
 if [[ "$SERVER_READY" != "true" ]]; then
   warn "Server did not respond within 60 seconds"
   warn "Temp server log:"
-  tail -15 /tmp/gsm-temp-server.log 2>/dev/null || true
+  tail -15 $GSM_LOG_DIR/gsm-temp-server.log 2>/dev/null || true
   warn "You can complete setup via the web install wizard on first visit"
 else
   log "Server is up — calling install API..."
 
-  # Call the install API (try both 127.0.0.1 and localhost)
-  INSTALL_PAYLOAD="{\"adminUsername\":\"$ADMIN_USER\",\"adminEmail\":\"$ADMIN_EMAIL\",\"adminPassword\":\"$ADMIN_PASS\",\"panelName\":\"$PANEL_NAME\"}"
-  INSTALL_RESPONSE=$(curl -sf --max-time 30 -X POST "http://localhost:$PANEL_PORT/api/install" \
-    -H "Content-Type: application/json" \
-    -d "$INSTALL_PAYLOAD" 2>&1) || \
-  INSTALL_RESPONSE=$(curl -sf --max-time 30 -X POST "http://127.0.0.1:$PANEL_PORT/api/install" \
-    -H "Content-Type: application/json" \
-    -d "$INSTALL_PAYLOAD" 2>&1) || true
+  # Build the JSON body with escaped values. The old printf-style build broke
+  # on any admin password, panel name or email containing " or \\.
+  INSTALL_PAYLOAD="{\"adminUsername\":\"$(json_escape "$ADMIN_USER")\",\"adminEmail\":\"$(json_escape "$ADMIN_EMAIL")\",\"adminPassword\":\"$(json_escape "$ADMIN_PASS")\",\"panelName\":\"$(json_escape "$PANEL_NAME")\",\"accessKey\":\"$(json_escape "$ACCESS_KEY")\""
+  # Online licenses are checked again by the API, so send the key. Offline
+  # tokens reach the API through .env (GSM_LICENSE_OFFLINE_*), and master
+  # panels need no license.
+  if [[ "$MASTER_PANEL" != "true" && -z "$LICENSE_TOKEN" && -n "$LICENSE_KEY" ]]; then
+    INSTALL_PAYLOAD+=",\"licenseKey\":\"$(json_escape "$LICENSE_KEY")\""
+  fi
+  INSTALL_PAYLOAD+="}"
 
-  if echo "$INSTALL_RESPONSE" | grep -q '"ok":true'; then
+  # Keep the body and the status code separate so a rejected install shows
+  # the API's reason instead of an empty string (the old curl -sf hid it).
+  INSTALL_HTTP="000"
+  INSTALL_RESPONSE=""
+  for INSTALL_HOST in 127.0.0.1 localhost; do
+    INSTALL_HTTP=$(curl -sS --max-time 60 -o "$INSTALL_BODY_FILE" -w '%{http_code}' -X POST \
+      "http://$INSTALL_HOST:$PANEL_PORT/api/install" \
+      -H "Content-Type: application/json" \
+      -d "$INSTALL_PAYLOAD" 2>/dev/null) || INSTALL_HTTP="000"
+    if [[ "$INSTALL_HTTP" != "000" ]]; then
+      break
+    fi
+  done
+  INSTALL_RESPONSE=$(cat "$INSTALL_BODY_FILE" 2>/dev/null || true)
+  rm -f "$INSTALL_BODY_FILE"
+
+  if [[ "$INSTALL_HTTP" == "200" ]] && printf '%s' "$INSTALL_RESPONSE" | grep -q '"ok"[[:space:]]*:[[:space:]]*true'; then
     ok "Panel installed successfully"
   else
-    warn "API install returned: $INSTALL_RESPONSE"
-    warn "You can complete setup via the web install wizard on first visit"
+    INSTALL_ERROR=$(printf '%s' "$INSTALL_RESPONSE" | sed -n 's/.*"error"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    warn "Panel setup was not completed (HTTP ${INSTALL_HTTP}): ${INSTALL_ERROR:-no response from the panel}"
+    warn "Finish setup in the web install wizard on first visit, using:"
+    warn "  Install key: $ACCESS_KEY (if the wizard asks for one)"
+    warn "  Admin username: $ADMIN_USER   Admin email: $ADMIN_EMAIL"
+    warn "  Admin password: the one shown in this summary (or the one you typed)"
+    if [[ "$MASTER_PANEL" != "true" && -z "$LICENSE_TOKEN" ]]; then
+      warn "  License key: the one you passed with --license-key"
+    fi
   fi
 fi
 
@@ -1147,9 +1229,20 @@ if [[ -n "$TEMP_PID" ]]; then
   su - "$GSM_USER" -c "kill $TEMP_PID 2>/dev/null" || true
   sleep 1
 fi
-# Also kill any leftover next processes on the panel port
-fuser -k "$PANEL_PORT/tcp" 2>/dev/null || true
-sleep 1
+# Stop leftovers from the temporary server, but never kill an unrelated process
+# that happens to hold the panel port (fuser -k used to do that).
+rm -f -- "$INSTALL_BODY_FILE"
+if fuser "$PANEL_PORT/tcp" > /dev/null 2>&1; then
+  for LEFTOVER_PID in $(fuser "$PANEL_PORT/tcp" 2>/dev/null); do
+    LEFTOVER_CMD=$(ps -o args= -p "$LEFTOVER_PID" 2>/dev/null || true)
+    if [[ "$LEFTOVER_CMD" == *next* ]]; then
+      kill "$LEFTOVER_PID" 2>/dev/null || true
+    else
+      warn "Port $PANEL_PORT is held by another process (pid $LEFTOVER_PID: $LEFTOVER_CMD); leaving it alone"
+    fi
+  done
+  sleep 1
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  STEP 9: Set up PM2 & systemd
@@ -1203,17 +1296,15 @@ cat > /etc/sudoers.d/gsm-panel <<SUDOEOF
 # GameServer Manager — passwordless sudo for system management
 # Installed by the GSM installer. Remove with: sudo rm /etc/sudoers.d/gsm-panel
 
-# Clear RAM buffers and cached memory
+# Clear RAM buffers and cached memory. Every rule is an exact command line:
+# sudo matches wildcards across spaces, so "vm.drop_caches=*" also allowed extra
+# kernel settings such as kernel.core_pattern (a root-code-execution path).
 $GSM_USER ALL=(ALL) NOPASSWD: /usr/bin/tee /proc/sys/vm/drop_caches
-$GSM_USER ALL=(ALL) NOPASSWD: /usr/sbin/sysctl vm.drop_caches=*
-$GSM_USER ALL=(ALL) NOPASSWD: /bin/sh -c echo ? > /proc/sys/vm/drop_caches
+$GSM_USER ALL=(ALL) NOPASSWD: /usr/sbin/sysctl -w vm.drop_caches=1, /usr/sbin/sysctl -w vm.drop_caches=2, /usr/sbin/sysctl -w vm.drop_caches=3
+$GSM_USER ALL=(ALL) NOPASSWD: /bin/sh -c echo 1 > /proc/sys/vm/drop_caches, /bin/sh -c echo 2 > /proc/sys/vm/drop_caches, /bin/sh -c echo 3 > /proc/sys/vm/drop_caches
 
-# Swap management
-$GSM_USER ALL=(ALL) NOPASSWD: /usr/sbin/swapoff
-$GSM_USER ALL=(ALL) NOPASSWD: /usr/sbin/swapon
-
-# Memory compaction
-$GSM_USER ALL=(ALL) NOPASSWD: /bin/sh -c echo ? > /proc/sys/vm/compact_memory
+# Swap management (the panel only ever runs -a)
+$GSM_USER ALL=(ALL) NOPASSWD: /usr/sbin/swapoff -a, /usr/sbin/swapon -a
 
 # Sync filesystem
 $GSM_USER ALL=(ALL) NOPASSWD: /usr/bin/sync, /bin/sync
@@ -1298,7 +1389,7 @@ if [[ "$SETUP_CADDY" == "true" && -n "$DOMAIN" ]]; then
   log "Installing Caddy..."
 
   # Install prerequisites
-  apt-get install -y debian-keyring debian-archive-keyring apt-transport-https > /tmp/gsm-caddy-prereq.log 2>&1 || {
+  apt-get install -y debian-keyring debian-archive-keyring apt-transport-https > $GSM_LOG_DIR/gsm-caddy-prereq.log 2>&1 || {
     warn "Some Caddy prerequisites could not be installed (may be fine)"
   }
 
@@ -1314,7 +1405,7 @@ if [[ "$SETUP_CADDY" == "true" && -n "$DOMAIN" ]]; then
        | gpg --dearmor -o "$CADDY_KEYRING" 2>/dev/null \
      && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' -o "$CADDY_REPO_LIST" 2>/dev/null \
      && apt-get update -qq > /dev/null 2>&1 \
-     && apt-get install -y caddy > /tmp/gsm-caddy-install.log 2>&1; then
+     && apt-get install -y caddy > $GSM_LOG_DIR/gsm-caddy-install.log 2>&1; then
     CADDY_INSTALLED="true"
   else
     warn "Official Caddy APT repository unavailable — falling back to Debian's packaged Caddy"
@@ -1324,14 +1415,14 @@ if [[ "$SETUP_CADDY" == "true" && -n "$DOMAIN" ]]; then
 
     # Attempt 2: Caddy from the Debian archive
     log "Installing Caddy from Debian repositories..."
-    if apt-get install -y caddy >> /tmp/gsm-caddy-install.log 2>&1; then
+    if apt-get install -y caddy >> $GSM_LOG_DIR/gsm-caddy-install.log 2>&1; then
       CADDY_INSTALLED="true"
     fi
   fi
 
   if [[ "$CADDY_INSTALLED" != "true" ]]; then
     err "Caddy installation failed!"
-    cat /tmp/gsm-caddy-install.log 2>/dev/null || true
+    cat $GSM_LOG_DIR/gsm-caddy-install.log 2>/dev/null || true
     warn "You can set up Caddy manually later (https://caddyserver.com/docs/install)"
     SETUP_CADDY="false"
   else
@@ -1718,7 +1809,7 @@ DB_USER=$DB_USER
 PANEL_PORT=$PANEL_PORT
 DOMAIN=$DOMAIN
 SERVER_LAN_IP=$SERVER_LAN_IP_FINAL
-REVERSE_PROXY=caddy
+REVERSE_PROXY=$([[ "${CADDY_INSTALLED:-false}" == "true" ]] && echo caddy || echo none)
 STEAMCMD_DIR=$STEAMCMD_DIR
 GAMESERVERS_DIR=$GAMESERVERS_DIR
 ACCESS_KEY=$ACCESS_KEY

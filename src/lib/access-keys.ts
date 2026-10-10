@@ -8,8 +8,18 @@
  * Re-installs are already protected by login + panel.install permission.
  */
 
+import { timingSafeEqual } from "node:crypto";
+
 /** Master/install keys shorter than this are never accepted. */
 export const INSTALL_KEY_MIN_LENGTH = 16;
+
+/** Compare secrets without leaking the match length through timing. */
+function constantTimeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a, "utf8");
+  const right = Buffer.from(b, "utf8");
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
+}
 
 /**
  * First-run install access check (pure — the route passes env values in).
@@ -24,7 +34,7 @@ export function checkInstallAccessKey(input: {
   if (presented.length < INSTALL_KEY_MIN_LENGTH) {
     return { ok: false, reason: "The operator master key is required to install this panel." };
   }
-  if (input.masterKey === null || presented !== input.masterKey) {
+  if (input.masterKey === null || !constantTimeEqual(presented, input.masterKey)) {
     return { ok: false, reason: "That key does not open this panel. Check the operator master key and try again." };
   }
   return { ok: true };
