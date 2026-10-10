@@ -785,6 +785,18 @@ If the installer stops partway, the failing step wrote one of these:
 
 The updater writes `/tmp/gsm-update-*.log` and `/tmp/gsm-rollback-build.log` in the same way.
 
+**Browser setup wizard reports “Unknown error” (older versions):**
+
+- If you filled in **Database Password**, retry with that optional field blank to keep the credentials already configured by `install.sh`. Older versions used an invalid PostgreSQL `ALTER ROLE ... PASSWORD $1` statement. This is separate from your admin password and master/install key.
+- For other failures, inspect the panel's server log using the account that runs PM2:
+  ```bash
+  pm2 logs gsm-panel --lines 100 --nostream
+  ```
+  If the shell installer is still running its temporary wizard server, check `/tmp/gsm-temp-server.log` instead.
+- Share the failing step and relevant error lines, not your `.env`, database URL, passwords, license keys, or master key. Do not delete the database to retry setup.
+
+The current wizard reports safe database-specific errors or the failing setup stage. Database-password changes use the user configured in `DATABASE_URL`, save `.env` atomically, and refresh the running connection pool without restarting the panel mid-request.
+
 </details>
 
 ---

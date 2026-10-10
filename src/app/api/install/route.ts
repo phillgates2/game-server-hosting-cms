@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { promises as fs } from "node:fs";
 import path from "node:path";
-import { execFile } from "node:child_process";
 import { db, pool } from "@/db";
 import { installLog, settings, users, forumCategories, roles } from "@/db/schema";
 import { hashPassword } from "@/lib/auth";
@@ -10,44 +8,8 @@ import { gameTemplates } from "@/db/seeds";
 import { DEFAULT_ROLES, hasPermission } from "@/lib/permissions";
 import { eq, sql } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
-
-function buildDatabaseUrlWithPassword(databaseUrl: string, password: string) {
-  try {
-    const parsed = new URL(databaseUrl);
-    parsed.password = password;
-    return parsed.toString();
-  } catch {
-    return `postgresql://gsmadmin:${encodeURIComponent(password)}@127.0.0.1:5432/gameserver_db`;
-  }
-}
-
-async function writeDatabaseUrlToEnv(databaseUrl: string) {
-  const envPath = path.join(process.cwd(), ".env");
-  let contents = "";
-  try {
-    contents = await fs.readFile(envPath, "utf8");
-  } catch {
-    // .env may not exist yet; create it from scratch.
-  }
-
-  const lines = contents
-    .split(/\r?\n/)
-    .filter((line) => line.trim() && !line.startsWith("DATABASE_URL="));
-  lines.push(`DATABASE_URL=${databaseUrl}`);
-  await fs.writeFile(envPath, `${lines.join("\n")}\n`, "utf8");
-}
-
-async function restartPanelProcess() {
-  await new Promise<void>((resolve) => {
-    execFile(/*turbopackIgnore: true*/ "pm2", ["restart", "gsm-panel"], (error: Error | null) => {
-      if (error) {
-        resolve();
-        return;
-      }
-      resolve();
-    });
-  });
-}
+import { changeInstallDatabasePassword, databasePasswordChange } from "@/lib/install-database";
+import { installErrorMessage } from "@/lib/install-error";
 
 export async function GET() {
   try {
@@ -68,6 +30,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  let stage = "pre-install checks";
   try {
     let alreadyInstalled = false;
     try {
@@ -195,19 +158,20 @@ export async function POST(req: NextRequest) {
     }
 
     const { adminUsername, adminEmail, adminPassword, panelName, databasePassword } = body;
-    let pendingDatabaseUrlUpdate: string | null = null;
 
     if (!adminUsername || !adminEmail || !adminPassword) {
       return NextResponse.json({ error: "Admin credentials required" }, { status: 400 });
     }
 
     if (databasePassword) {
-      const currentDatabaseUrl = process.env.DATABASE_URL || "";
-      await pool.query("ALTER ROLE gsmadmin WITH PASSWORD $1", [databasePassword]);
-      pendingDatabaseUrlUpdate = buildDatabaseUrlWithPassword(currentDatabaseUrl, databasePassword);
-      await logStep("database", "running", "Updated database role password. Will refresh panel connection settings at the end...");
+      if (typeof databasePassword !== "string" || /[\0\r\n]/.test(databasePassword)) {
+        return NextResponse.json({ error: "Database password cannot contain NUL or line breaks" }, { status: 400 });
+      }
+      // Validate before making any changes, but rotate only after database setup.
+      databasePasswordChange(process.env.DATABASE_URL || "", databasePassword);
     }
 
+    stage = "database schema creation";
     // Step 1: Create database schema with multi-node support
     await logStep("schema", "running", "Creating database tables with multi-node support...");
 
@@ -695,6 +659,7 @@ export async function POST(req: NextRequest) {
 
     await logStep("schema", "done", "Database tables created with role-based permissions");
 
+    stage = "role creation";
     // Step 2: Seed default roles
     await logStep("roles", "running", "Creating roles...");
     let adminRoleId: number | null = null;
@@ -734,6 +699,7 @@ export async function POST(req: NextRequest) {
     }
     await logStep("roles", "done", `${DEFAULT_ROLES.length} roles created (admin, moderator, user)`);
 
+    stage = "admin account creation";
     // Step 3: Create admin user
     await logStep("admin_user", "running", "Creating admin user...");
     const passwordHash = await hashPassword(adminPassword);
@@ -753,6 +719,7 @@ export async function POST(req: NextRequest) {
     // Step 4: Note about game templates (NOT auto-seeded)
     await logStep("game_templates", "done", `${gameTemplates.length} game templates available. Install from Games panel.`);
 
+    stage = "forum setup";
     // Step 4: Create forum categories
     await logStep("forum", "running", "Creating forum categories...");
     const forumCats = [
@@ -770,11 +737,11 @@ export async function POST(req: NextRequest) {
     }
     await logStep("forum", "done", `${forumCats.length} forum categories created`);
 
+    stage = "saving settings";
     // Step 5: Save settings
     await logStep("settings", "running", "Saving panel settings...");
     const settingsData = [
       { key: "panel_name", value: panelName || "GameServer Manager" },
-      { key: "installed", value: "true" },
       { key: "install_date", value: new Date().toISOString() },
       ...(((licenseServerUsed && licenseOutcomeOk) || licenseModeUsed === "offline")
         ? [
@@ -803,6 +770,12 @@ export async function POST(req: NextRequest) {
       }
     }
     await logStep("settings", "done", "Panel settings saved");
+
+    if (databasePassword) {
+      stage = "database password update";
+      await changeInstallDatabasePassword(pool, databasePassword, path.join(process.cwd(), ".env"));
+      await logStep("database", "done", "Database password and panel connection settings updated.");
+    }
 
     // ── Master first-run bootstrap ──────────────────────────────────────
     // A fresh key-desk install must stand on its own: a unified master key
@@ -865,12 +838,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (pendingDatabaseUrlUpdate) {
-      process.env.DATABASE_URL = pendingDatabaseUrlUpdate;
-      await writeDatabaseUrlToEnv(pendingDatabaseUrlUpdate);
-      await restartPanelProcess();
-      await logStep("database", "done", "Database connection settings refreshed and panel restart requested.");
-    }
+    // A failed first install must remain retryable, including password updates.
+    stage = "finalizing installation";
+    await db.insert(settings).values({ key: "installed", value: "true" })
+      .onConflictDoUpdate({ target: settings.key, set: { value: "true", updatedAt: new Date() } });
 
     return NextResponse.json({ 
       ok: true, 
@@ -883,7 +854,7 @@ export async function POST(req: NextRequest) {
       bootstrap,
     });
   } catch (e: unknown) {
-    return apiError(e, "Unknown error", 500);
+    return apiError(e, installErrorMessage(e, stage), 500);
   }
 }
 
