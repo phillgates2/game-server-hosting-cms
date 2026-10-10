@@ -1302,20 +1302,37 @@ if [[ "$SETUP_CADDY" == "true" && -n "$DOMAIN" ]]; then
     warn "Some Caddy prerequisites could not be installed (may be fine)"
   }
 
-  # Add Caddy APT repository
+  CADDY_REPO_LIST="/etc/apt/sources.list.d/caddy-stable.list"
+  CADDY_KEYRING="/usr/share/keyrings/caddy-stable-archive-keyring.gpg"
+  CADDY_INSTALLED="false"
+
+  # Attempt 1: official Caddy APT repository (Cloudsmith). This can be
+  # unavailable (e.g. HTTP 402 Payment Required from the mirror), so every
+  # step is allowed to fail without aborting the installer.
   log "Adding Caddy APT repository..."
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-    | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-    > /etc/apt/sources.list.d/caddy-stable.list
-  
-  apt-get update -qq
-  
-  log "Installing Caddy..."
-  if ! apt-get install -y caddy > /tmp/gsm-caddy-install.log 2>&1; then
+  if curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' 2>/dev/null \
+       | gpg --dearmor -o "$CADDY_KEYRING" 2>/dev/null \
+     && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' -o "$CADDY_REPO_LIST" 2>/dev/null \
+     && apt-get update -qq > /dev/null 2>&1 \
+     && apt-get install -y caddy > /tmp/gsm-caddy-install.log 2>&1; then
+    CADDY_INSTALLED="true"
+  else
+    warn "Official Caddy APT repository unavailable — falling back to Debian's packaged Caddy"
+    # Remove the broken Cloudsmith entry so it cannot break later apt-get update runs
+    rm -f "$CADDY_REPO_LIST" "$CADDY_KEYRING"
+    apt-get update -qq > /dev/null 2>&1 || warn "apt-get update reported errors (continuing)"
+
+    # Attempt 2: Caddy from the Debian archive
+    log "Installing Caddy from Debian repositories..."
+    if apt-get install -y caddy >> /tmp/gsm-caddy-install.log 2>&1; then
+      CADDY_INSTALLED="true"
+    fi
+  fi
+
+  if [[ "$CADDY_INSTALLED" != "true" ]]; then
     err "Caddy installation failed!"
-    cat /tmp/gsm-caddy-install.log
-    warn "You can set up Caddy manually later"
+    cat /tmp/gsm-caddy-install.log 2>/dev/null || true
+    warn "You can set up Caddy manually later (https://caddyserver.com/docs/install)"
     SETUP_CADDY="false"
   else
     ok "Caddy $(caddy version 2>/dev/null | head -1 || echo '?') installed"
