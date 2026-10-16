@@ -1321,12 +1321,15 @@ else
 fi
 
 # Create a wrapper script so root (and other users) can manage the gsm PM2 instance
-# without needing to `su - gsm` first
-cat > /usr/local/bin/gsm <<'GSMWRAPPER'
-#!/bin/bash
-# GameServer Manager — PM2 helper
-# Runs pm2 commands against the gsm user's PM2 daemon
-GSM_USER="gsm"
+# without needing to `su - gsm` first. Embed the selected path so custom
+# --install-dir deployments do not depend on /opt/gsm-panel/.install-info.
+{
+  printf '%s\n' '#!/bin/bash' \
+    '# GameServer Manager — PM2 helper' \
+    '# Runs pm2 commands against the gsm user’s PM2 daemon'
+  printf 'GSM_USER=%q\n' "gsm"
+  printf 'GSM_INSTALL_DIR=%q\n' "$INSTALL_DIR"
+  cat <<'GSMWRAPPER'
 
 case "${1:-}" in
   status|list|ls)
@@ -1336,13 +1339,11 @@ case "${1:-}" in
   restart)
     su - "$GSM_USER" -c "pm2 restart gsm-panel" ;;
   update)
-    # The panel may live in a custom directory (install --install-dir);
-    # prefer the location recorded at install time, then the default.
-    GSM_UPDATE_SRC="$(grep -E '^INSTALL_DIR=' /opt/gsm-panel/.install-info 2>/dev/null | tail -1 | cut -d= -f2-)"
-    if [ -n "${GSM_UPDATE_SRC:-}" ] && [ -f "$GSM_UPDATE_SRC/public/update.sh" ]; then
-      bash "$GSM_UPDATE_SRC/public/update.sh" ${@:2}
+    if [ -f "$GSM_INSTALL_DIR/public/update.sh" ]; then
+      bash "$GSM_INSTALL_DIR/public/update.sh" "${@:2}"
     else
-      bash /opt/gsm-panel/public/update.sh ${@:2}
+      echo "GameServer Manager updater not found for $GSM_INSTALL_DIR" >&2
+      exit 1
     fi ;;
   stop)
     su - "$GSM_USER" -c "pm2 stop gsm-panel" ;;
@@ -1354,7 +1355,7 @@ case "${1:-}" in
     su - "$GSM_USER" -c "pm2 monit" ;;
   webroot)
     # Point port 80 (the default /var/www/html site) at the panel.
-    bash /opt/gsm-panel/public/setup-webroot.sh "${@:2}" ;;
+    bash "$GSM_INSTALL_DIR/public/setup-webroot.sh" "${@:2}" ;;
   *)
     echo "GameServer Manager — Panel Management"
     echo ""
@@ -1375,6 +1376,7 @@ case "${1:-}" in
     ;;
 esac
 GSMWRAPPER
+} > /usr/local/bin/gsm
 chmod +x /usr/local/bin/gsm
 
 ok "PM2 configured — panel running as 'gsm-panel'"

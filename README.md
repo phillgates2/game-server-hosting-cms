@@ -709,7 +709,7 @@ gsm update
 sudo bash /opt/gsm-panel/public/update.sh
 ```
 
-The updater runs seven steps: **backup** *(`.env`, configs, database dump, current commit)* → **pull** → **`npm ci`** → **`drizzle-kit push`** → **build** → **prune dev deps** → **restart + health check**. It also backfills a `JWT_SECRET` into `.env` if your install predates that requirement.
+The updater runs seven steps: **backup** *(`.env`, configs, database dump, current commit)* → **pull** → **`npm ci`** → **`drizzle-kit push`** → **build** → **prune dev deps** → **restart + health check**. It also backfills a `JWT_SECRET` into `.env` if your install predates that requirement. Migration, restart, and health-check failures now return a non-zero exit instead of being reported as success. To avoid overwriting custom code, the updater refuses to proceed when tracked source changes or commits exist only on the local target branch; commit or back them up first.
 
 > [!IMPORTANT]
 > **One-off migration: duplicate ports.** Older releases allowed two servers on
@@ -783,7 +783,7 @@ If the installer stops partway, the failing step wrote one of these:
 | `/tmp/gsm-caddy-install.log` | Caddy |
 | `/tmp/gsm-temp-server.log` | Temporary install-wizard server |
 
-The updater writes `/tmp/gsm-update-*.log` and `/tmp/gsm-rollback-build.log` in the same way.
+The updater writes root-only logs under `/var/log/gsm-update/` (npm, migration, build, and rollback-build logs). If the update refuses to proceed, check for local tracked code changes or commits ahead of the selected upstream; commit or back them up before retrying.
 
 **Browser setup wizard reports “Unknown error” (older versions):**
 
