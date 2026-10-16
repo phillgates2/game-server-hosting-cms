@@ -115,6 +115,8 @@ describe("settings key and value validation", () => {
   test("json keys must be valid JSON documents", () => {
     assert.equal(validateSettingValue("features_json", '[{"a":1}]').ok, true);
     assert.equal(validateSettingValue("nav_links_json", '{"Home":"/"}').ok, true);
+    assert.equal(validateSettingValue("nav_links_json", '[{"label":"Bad","href":"javascript:alert(1)"}]').ok, false);
+    assert.equal(validateSettingValue("nav_links_json", '[{"href":"#home"}]').ok, false);
     assert.equal(validateSettingValue("features_json", "").ok, true, "empty clears the setting");
     assert.equal(validateSettingValue("features_json", "not json").ok, false);
     assert.equal(validateSettingValue("features_json", "42").ok, false, "a bare number is not a feature list");
