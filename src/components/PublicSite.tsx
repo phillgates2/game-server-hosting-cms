@@ -1,8 +1,17 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import PublicChatWidget from "@/components/PublicChatWidget";
 import PublicShop from "@/components/PublicShop";
+import {
+  MAX_PUBLIC_NAV_LABEL_LENGTH,
+  MAX_PUBLIC_NAV_LINKS,
+  PUBLIC_NAV_DESTINATIONS,
+  parsePublicNavLinks,
+  publicNavTabForHref,
+  type PublicNavLink,
+  type PublicNavTab,
+} from "@/lib/public-navigation";
 
 /* ── Types ──────────────────────────────────────────────────────────────────── */
 interface CmsPost {
@@ -35,6 +44,7 @@ interface SiteSettings {
   panel_name?: string; hero_title?: string; hero_subtitle?: string;
   hero_cta_text?: string; footer_text?: string;
   announcement?: string; announcement_type?: string;
+  nav_links_json?: string;
   /** Admin-provided CSS injected into the public site. */
   custom_css?: string;
 }
@@ -78,6 +88,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
 
   // Site editor
   const [editorSettings, setEditorSettings] = useState<SiteSettings>({});
+  const [editorNavLinks, setEditorNavLinks] = useState<PublicNavLink[]>(() => parsePublicNavLinks(undefined));
   const [editorSaving, setEditorSaving] = useState(false);
   const [editorMsg, setEditorMsg] = useState("");
 
@@ -104,6 +115,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
         const s = (await c.value.json()).settings || {};
         setSs(s);
         setEditorSettings(s);
+        setEditorNavLinks(parsePublicNavLinks(s.nav_links_json));
       }
     } catch { /* */ } finally { setLoaded(true); }
   }, []);
@@ -183,10 +195,32 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
   // ── Site editor ───────────────────────────────────────────────────────────
   async function saveSettings(e: React.FormEvent) {
     e.preventDefault(); setEditorSaving(true); setEditorMsg("");
+    const nextSettings = {
+      ...editorSettings,
+      nav_links_json: JSON.stringify(editorNavLinks),
+    };
     try {
-      const r = await fetch("/api/site-settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings: editorSettings }) });
-      if (r.ok) { setSs({ ...editorSettings }); setEditorMsg("✅ Saved!"); } else { const d = await r.json(); setEditorMsg(`❌ ${d.error}`); }
+      const r = await fetch("/api/site-settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings: nextSettings }) });
+      if (r.ok) {
+        setEditorSettings(nextSettings);
+        setSs(nextSettings);
+        setEditorMsg("✅ Saved!");
+      } else { const d = await r.json(); setEditorMsg(`❌ ${d.error}`); }
     } catch { setEditorMsg("❌ Failed to save"); } finally { setEditorSaving(false); }
+  }
+
+  function updateEditorNavLink(index: number, patch: Partial<PublicNavLink>) {
+    setEditorNavLinks((links) => links.map((link, linkIndex) => linkIndex === index ? { ...link, ...patch } : link));
+  }
+
+  function moveEditorNavLink(index: number, direction: -1 | 1) {
+    setEditorNavLinks((links) => {
+      const destination = index + direction;
+      if (destination < 0 || destination >= links.length) return links;
+      const reordered = [...links];
+      [reordered[index], reordered[destination]] = [reordered[destination], reordered[index]];
+      return reordered;
+    });
   }
 
   const fmt = (d: string) => new Date(d).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
@@ -203,7 +237,37 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
     return c ? <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${c}`}>{r}</span> : null;
   };
 
-  const navTabs: [Tab, string][] = [["home","Home"],["shop","🛒 Shop"],["forums","Forums"],["ladder","Ladder"],["blog","Blog"],["changelog","Changelog"]];
+  const navLinks = useMemo(() => parsePublicNavLinks(ss.nav_links_json), [ss.nav_links_json]);
+
+  function isNavTargetActive(target: PublicNavTab): boolean {
+    if (target === "forums") return tab === "forums" || tab === "forum-cat" || tab === "forum-thread";
+    if (target === "blog" && tab === "post") return selectedPost?.type !== "changelog";
+    if (target === "changelog" && tab === "post") return selectedPost?.type === "changelog";
+    return tab === target;
+  }
+
+  function menuLink(link: PublicNavLink, index: number, mobile = false) {
+    const target = publicNavTabForHref(link.href);
+    const active = target ? isNavTargetActive(target) : false;
+    const className = mobile
+      ? `w-full text-left px-4 py-2.5 text-sm font-medium rounded-lg transition-colors ${active ? "text-accent bg-accent/10" : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"}`
+      : `px-3 py-2 text-sm font-medium rounded-lg transition-colors ${active ? "text-accent bg-accent/10" : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"}`;
+    const key = `${link.label}-${link.href}-${index}`;
+
+    if (target) {
+      return (
+        <button key={key} type="button" onClick={() => goTab(target)} className={className} aria-current={active ? "page" : undefined}>
+          {link.label}
+        </button>
+      );
+    }
+
+    return (
+      <a key={key} href={link.href} onClick={() => setMobileMenuOpen(false)} className={className}>
+        {link.label}
+      </a>
+    );
+  }
 
   /* ═══════════════════════════════════════════════════════════════════════════ */
   return (
@@ -229,12 +293,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
 
           {/* Desktop nav */}
           <nav className="hidden md:flex items-center gap-1">
-            {navTabs.map(([k,l]) => (
-              <button key={k} onClick={() => goTab(k)}
-                className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                  tab === k || (k === "forums" && (tab === "forum-cat" || tab === "forum-thread"))
-                    ? "text-accent bg-accent/10" : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"}`}>{l}</button>
-            ))}
+            {navLinks.map((link, index) => menuLink(link, index))}
             {user ? (
               <>
                 <button onClick={onDashboardClick} className="ml-2 px-3 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition-colors">⚙️ Panel</button>
@@ -275,13 +334,8 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
         {mobileMenuOpen && (
           <div className="md:hidden border-t border-border bg-bg-secondary/95 backdrop-blur-sm animate-fade-in">
             <div className="px-4 py-3 space-y-1">
-              {navTabs.map(([k,l]) => (
-                <button key={k} onClick={() => goTab(k)}
-                  className={`w-full text-left px-4 py-2.5 text-sm font-medium rounded-lg transition-colors ${
-                    tab === k || (k === "forums" && (tab === "forum-cat" || tab === "forum-thread"))
-                      ? "text-accent bg-accent/10" : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"}`}>{l}</button>
-              ))}
-              <div className="border-t border-border/50 my-2" />
+              {navLinks.map((link, index) => menuLink(link, index, true))}
+              {navLinks.length > 0 && <div className="border-t border-border/50 my-2" />}
               {user ? (
                 <>
                   <div className="px-4 py-2 flex items-center gap-2">
@@ -310,16 +364,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
           <div className="animate-fade-in space-y-8 sm:space-y-12">
             <section className="text-center py-8 sm:py-16">
               <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold mb-3 sm:mb-4"><span className="bg-gradient-to-r from-accent to-purple bg-clip-text text-transparent">{heroTitle}</span></h1>
-              <p className="text-text-secondary text-base sm:text-lg max-w-2xl mx-auto mb-6 sm:mb-8 px-2">{heroSub}</p>
-              <div className="flex gap-3 sm:gap-4 justify-center flex-wrap px-2">
-                {user
-                  ? <button onClick={onDashboardClick} className="px-5 sm:px-6 py-2.5 sm:py-3 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors text-sm sm:text-base">⚙️ Control Panel</button>
-                  : <button onClick={onLoginClick} className="px-5 sm:px-6 py-2.5 sm:py-3 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors text-sm sm:text-base">Get Started →</button>}
-                <button onClick={() => goTab("shop")} className="px-4 sm:px-6 py-2.5 sm:py-3 bg-gradient-to-r from-accent to-purple text-white rounded-lg font-medium transition-colors text-sm sm:text-base shadow-lg hover:shadow-accent/20">🛒 Shop</button>
-                <button onClick={() => goTab("forums")} className="px-4 sm:px-6 py-2.5 sm:py-3 bg-bg-card border border-border hover:border-accent/30 rounded-lg font-medium transition-colors text-sm sm:text-base">💬 Forums</button>
-                <button onClick={() => goTab("ladder")} className="px-4 sm:px-6 py-2.5 sm:py-3 bg-bg-card border border-border hover:border-accent/30 rounded-lg font-medium transition-colors text-sm sm:text-base">🏆 Ladder</button>
-                <button onClick={() => goTab("blog")} className="px-4 sm:px-6 py-2.5 sm:py-3 bg-bg-card border border-border hover:border-accent/30 rounded-lg font-medium transition-colors text-sm sm:text-base">📝 Blog</button>
-              </div>
+              <p className="text-text-secondary text-base sm:text-lg max-w-2xl mx-auto px-2">{heroSub}</p>
             </section>
 
             {blogs.length > 0 && (
@@ -376,6 +421,89 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                     placeholder="High-performance game servers..." rows={3}
                     className="w-full px-3 sm:px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent" />
                 </div>
+              </div>
+              <div className="bg-bg-card border border-border rounded-xl p-4 sm:p-6 space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="font-semibold text-lg">Navigation Menu</h3>
+                    <p className="text-xs text-text-muted mt-1">Add, remove, and reorder links shown in the header and footer.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditorNavLinks((links) => [...links, { label: "", href: "#home" }])}
+                    disabled={editorNavLinks.length >= MAX_PUBLIC_NAV_LINKS}
+                    className="px-3 py-2 bg-accent/15 text-accent hover:bg-accent/25 rounded-lg text-xs font-medium disabled:opacity-50 flex-shrink-0"
+                  >
+                    + Add Link
+                  </button>
+                </div>
+
+                {editorNavLinks.length === 0 ? (
+                  <div className="border border-dashed border-border rounded-lg p-5 text-center text-sm text-text-muted">
+                    No menu links. Use “Add Link” to create one.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {editorNavLinks.map((link, index) => {
+                      const builtInTab = publicNavTabForHref(link.href);
+                      const destinationValue = builtInTab ? `#${builtInTab}` : "custom";
+                      return (
+                        <div key={index} className="bg-bg-secondary border border-border/70 rounded-lg p-3 space-y-3">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs text-text-muted mb-1">Label</label>
+                              <input
+                                value={link.label}
+                                onChange={(e) => updateEditorNavLink(index, { label: e.target.value })}
+                                placeholder="Community"
+                                maxLength={MAX_PUBLIC_NAV_LABEL_LENGTH}
+                                required
+                                className="w-full px-3 py-2 bg-bg-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-text-muted mb-1">Destination</label>
+                              <select
+                                value={destinationValue}
+                                onChange={(e) => updateEditorNavLink(index, { href: e.target.value === "custom" ? "" : e.target.value })}
+                                className="w-full px-3 py-2 bg-bg-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                              >
+                                {PUBLIC_NAV_DESTINATIONS.map((destination) => (
+                                  <option key={destination.tab} value={destination.href}>{destination.label}</option>
+                                ))}
+                                <option value="custom">Custom URL</option>
+                              </select>
+                            </div>
+                          </div>
+                          {!builtInTab && (
+                            <div>
+                              <label className="block text-xs text-text-muted mb-1">Custom URL</label>
+                              <input
+                                type="text"
+                                value={link.href}
+                                onChange={(e) => updateEditorNavLink(index, { href: e.target.value })}
+                                placeholder="https://example.com or /api-docs"
+                                required
+                                className="w-full px-3 py-2 bg-bg-primary border border-border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent"
+                              />
+                            </div>
+                          )}
+                          <div className="flex items-center justify-end gap-2">
+                            <button type="button" onClick={() => moveEditorNavLink(index, -1)} disabled={index === 0}
+                              aria-label={`Move ${link.label || "link"} up`} title="Move up"
+                              className="w-8 h-8 rounded-lg bg-bg-hover text-text-secondary hover:text-text-primary disabled:opacity-30">↑</button>
+                            <button type="button" onClick={() => moveEditorNavLink(index, 1)} disabled={index === editorNavLinks.length - 1}
+                              aria-label={`Move ${link.label || "link"} down`} title="Move down"
+                              className="w-8 h-8 rounded-lg bg-bg-hover text-text-secondary hover:text-text-primary disabled:opacity-30">↓</button>
+                            <button type="button" onClick={() => setEditorNavLinks((links) => links.filter((_, linkIndex) => linkIndex !== index))}
+                              aria-label={`Remove ${link.label || "link"}`}
+                              className="px-3 h-8 rounded-lg bg-danger/15 text-danger hover:bg-danger/25 text-xs font-medium">Remove</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
               <div className="bg-bg-card border border-border rounded-xl p-4 sm:p-6 space-y-4">
                 <h3 className="font-semibold text-lg">Announcement Banner</h3>
@@ -691,10 +819,13 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
           <div className="flex gap-3 sm:gap-4 flex-wrap justify-center">
             {user ? (<><button onClick={onDashboardClick} className="hover:text-text-primary transition-colors">Control Panel</button><button onClick={onLogout} className="hover:text-text-primary transition-colors">Logout</button></>)
               : (<button onClick={onLoginClick} className="hover:text-text-primary transition-colors">Login</button>)}
-            <button onClick={() => goTab("shop")} className="hover:text-text-primary transition-colors">Shop</button>
-            <button onClick={() => goTab("forums")} className="hover:text-text-primary transition-colors">Forums</button>
-            <button onClick={() => goTab("ladder")} className="hover:text-text-primary transition-colors">Ladder</button>
-            <button onClick={() => goTab("blog")} className="hover:text-text-primary transition-colors">Blog</button>
+            {navLinks.map((link, index) => {
+              const target = publicNavTabForHref(link.href);
+              const key = `footer-${link.label}-${link.href}-${index}`;
+              return target
+                ? <button key={key} type="button" onClick={() => goTab(target)} className="hover:text-text-primary transition-colors">{link.label}</button>
+                : <a key={key} href={link.href} className="hover:text-text-primary transition-colors">{link.label}</a>;
+            })}
           </div>
         </div>
       </footer>

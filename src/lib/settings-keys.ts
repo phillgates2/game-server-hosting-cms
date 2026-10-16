@@ -1,3 +1,5 @@
+import { validatePublicNavLinksJson } from "./public-navigation";
+
 /**
  * Validation for panel settings stored in the `settings` table.
  *
@@ -48,7 +50,13 @@ export function validateSettingValue(key: string, raw: string): SettingCheck {
     return { ok: false, error: `custom_css is limited to ${MAX_CSS_LENGTH} characters` };
   }
 
-  const isJson = /_json$/.test(key) || key === "features_json" || key === "nav_links_json";
+  if (key === "nav_links_json") {
+    const result = validatePublicNavLinksJson(value);
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value };
+  }
+
+  const isJson = /_json$/.test(key) || key === "features_json";
   if (isJson) {
     if (value.trim() === "") return { ok: true, value: "" };
     try {
