@@ -771,17 +771,17 @@ If the installer stops partway, the failing step wrote one of these:
 
 | Log file | Step |
 |:--|:--|
-| `/tmp/gsm-apt-core.log` | System packages |
-| `/tmp/gsm-nodesource.log` | Node.js repository setup |
-| `/tmp/gsm-nodejs-install.log` | Node.js installation |
-| `/tmp/gsm-pm2-install.log` | PM2 |
-| `/tmp/gsm-postgresql-install.log` | PostgreSQL |
-| `/tmp/gsm-steamlibs.log` | SteamCMD 32-bit libraries |
-| `/tmp/gsm-npm-install.log` | npm dependencies |
-| `/tmp/gsm-drizzle-push.log` | Database schema push |
-| `/tmp/gsm-next-build.log` | Next.js production build |
-| `/tmp/gsm-caddy-install.log` | Caddy |
-| `/tmp/gsm-temp-server.log` | Temporary install-wizard server |
+| `/var/log/gsm-install/gsm-apt-core.log` | System packages |
+| `/var/log/gsm-install/gsm-nodesource.log` | Node.js repository setup |
+| `/var/log/gsm-install/gsm-nodejs-install.log` | Node.js installation |
+| `/var/log/gsm-install/gsm-pm2-install.log` | PM2 |
+| `/var/log/gsm-install/gsm-postgresql-install.log` | PostgreSQL |
+| `/var/log/gsm-install/gsm-steamlibs.log` | SteamCMD 32-bit libraries |
+| `/var/log/gsm-install/gsm-npm-install.log` | npm dependencies |
+| `/var/log/gsm-install/gsm-drizzle-push.log` | Database schema push |
+| `/var/log/gsm-install/gsm-next-build.log` | Next.js production build |
+| `/var/log/gsm-install/gsm-caddy-install.log` | Caddy |
+| `/var/log/gsm-install/gsm-temp-server.log` | Temporary install-wizard server |
 
 The updater writes root-only logs under `/var/log/gsm-update/` (npm, migration, build, and rollback-build logs). If the update refuses to proceed, check for local tracked code changes or commits ahead of the selected upstream; commit or back them up before retrying.
 
@@ -792,7 +792,7 @@ The updater writes root-only logs under `/var/log/gsm-update/` (npm, migration, 
   ```bash
   pm2 logs gsm-panel --lines 100 --nostream
   ```
-  If the shell installer is still running its temporary wizard server, check `/tmp/gsm-temp-server.log` instead.
+  If the shell installer is still running its temporary wizard server, check `/var/log/gsm-install/gsm-temp-server.log` instead.
 - Share the failing step and relevant error lines, not your `.env`, database URL, passwords, license keys, or master key. Do not delete the database to retry setup.
 
 The current wizard reports safe database-specific errors or the failing setup stage. Database-password changes use the user configured in `DATABASE_URL`, save `.env` atomically, and refresh the running connection pool without restarting the panel mid-request.

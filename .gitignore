@@ -16,6 +16,8 @@ next-env.d.ts
 # env / secrets
 .env
 .env*.local
+drizzle.install.json
+drizzle.update.json
 
 # logs
 npm-debug.log*
