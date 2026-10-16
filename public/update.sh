@@ -56,6 +56,19 @@ warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
 err()   { echo -e "${RED}[✗]${NC} $*" >&2; }
 die()   { err "$*"; exit 1; }
 
+# Escape a value for embedding inside a JSON string body (same rules as the
+# installer's helper). Used to write the throwaway drizzle config without
+# letting a quote or backslash in DATABASE_URL corrupt the JSON.
+json_escape() {
+  local v=$1
+  v=${v//\\/\\\\}
+  v=${v//\"/\\\"}
+  v=${v//$'\n'/\\n}
+  v=${v//$'\r'/\\r}
+  v=${v//$'\t'/\\t}
+  printf '%s' "$v"
+}
+
 # ask_yes_no "prompt" <default: y|n>
 # Asks on a TTY; when stdin is not a terminal (e.g. the one-liner run over
 # ssh or piped) it falls back to the default answer, so a `read` hitting EOF
@@ -230,7 +243,10 @@ cd "$INSTALL_DIR"
 # be planted as a symlink by another local user before a root updater writes it.
 WORK_DIR=$(mktemp -d /tmp/gsm-update.XXXXXX) || die "Could not create updater scratch space"
 chmod 700 "$WORK_DIR"
-trap 'rm -rf -- "$WORK_DIR"' EXIT
+# The throwaway drizzle config holds the database URL — remove it on every
+# exit path, not just the happy one.
+DRIZZLE_UPDATE_CONFIG="$INSTALL_DIR/drizzle.update.json"
+trap 'rm -rf -- "$WORK_DIR"; rm -f -- "$DRIZZLE_UPDATE_CONFIG"' EXIT
 
 LOG_DIR="/var/log/gsm-update"
 install -d -o root -g root -m 700 "$LOG_DIR" \
@@ -718,14 +734,41 @@ ok "Dependencies installed"
 # ═══════════════════════════════════════════════════════════════════════════════
 step "Applying database migrations"
 
-if su - "$GSM_USER" -c "cd $INSTALL_DIR_Q && npx drizzle-kit push" \
+# drizzle-kit must talk to the database the PANEL uses. The tracked
+# drizzle.config.json only carries development placeholder credentials (the
+# installer restores the tracked copy on every run and keeps the real URL in
+# .env), so a bare `drizzle-kit push` pulls the schema from — or pushes it
+# into — the wrong database and the update aborts here. Build the same
+# throwaway config from .env the installer uses and pass it explicitly.
+DB_URL=$(grep -E "^DATABASE_URL=" "$INSTALL_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
+if [[ -z "$DB_URL" ]]; then
+  err "No DATABASE_URL in $INSTALL_DIR/.env"
+  die "Cannot migrate the schema without the database URL. Add DATABASE_URL to $INSTALL_DIR/.env and run the updater again."
+fi
+
+DRIZZLE_UPDATE_CONFIG_Q=$(printf '%q' "$DRIZZLE_UPDATE_CONFIG")
+cat > "$DRIZZLE_UPDATE_CONFIG" <<DRIZZLE
+{
+  "dialect": "postgresql",
+  "schema": "./src/db/schema.ts",
+  "dbCredentials": {
+    "url": "$(json_escape "$DB_URL")"
+  }
+}
+DRIZZLE
+chown "$GSM_USER:$GSM_USER" "$DRIZZLE_UPDATE_CONFIG"
+chmod 600 "$DRIZZLE_UPDATE_CONFIG"
+
+if su - "$GSM_USER" -c "cd $INSTALL_DIR_Q && npx drizzle-kit push --config $DRIZZLE_UPDATE_CONFIG_Q" \
     > "$DRIZZLE_LOG" 2>&1 </dev/null; then
-  tail -3 "$DRIZZLE_LOG" 2>/dev/null || true
+  rm -f -- "$DRIZZLE_UPDATE_CONFIG"
+  tr '\r' '\n' < "$DRIZZLE_LOG" | tail -3 2>/dev/null || true
   ok "Database schema up to date"
 else
+  rm -f -- "$DRIZZLE_UPDATE_CONFIG"
   err "Database migration failed!"
-  tail -30 "$DRIZZLE_LOG" 2>/dev/null || true
-  die "Cannot continue with an unapplied database schema. The panel is stopped; inspect the migration log and run the updater again."
+  tr '\r' '\n' < "$DRIZZLE_LOG" | tail -30 2>/dev/null || true
+  die "Cannot continue with an unapplied database schema. The panel is stopped; inspect the migration log ($DRIZZLE_LOG) and run the updater again."
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════

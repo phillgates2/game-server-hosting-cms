@@ -30,6 +30,16 @@ healthy update when PM2 did not restart the panel:
 - **Failures fail** — dependency install, Drizzle schema push, PM2 startup, and
   the health check are checked by exit status. An unsuccessful migration or
   restart no longer appears as a successful update.
+- **Migrations talk to the real database** — `drizzle-kit push` ran without a
+  config, so drizzle-kit fell back to the tracked `drizzle.config.json`, which
+  carries only development placeholder credentials (the installer restores the
+  tracked copy on every run and keeps the real URL in `.env`). Every update
+  aborted at "Applying database migrations" during "Pulling schema from
+  database…" — or worse, would have pushed the schema into the wrong database.
+  The updater now writes the same throwaway config from `.env`'s
+  `DATABASE_URL` the installer uses, passes it with `--config`, and removes it
+  on every exit path. The failure message names the migration log, and its
+  tail is printed with spinner frames stripped so the real error is visible.
 - **Rollback is verified too** — restores config after the code checkout, repairs
   panel-user ownership, and checks dependency install, build, PM2 start, and health.
 - **Root-only logs** — update and rollback logs live under
