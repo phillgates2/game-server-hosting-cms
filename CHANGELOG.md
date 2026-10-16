@@ -6,6 +6,35 @@ All notable changes to GameServer Manager are documented here.
 
 ## [Unreleased]
 
+### ⬆️ Panel updater reliability
+
+The panel updater now refuses ambiguous or partially successful upgrades instead
+of silently merging code, continuing after a failed schema push, or reporting a
+healthy update when PM2 did not restart the panel:
+
+- **Sudo re-exec preserves options** — `--branch`, `--install-dir`, `--rollback`,
+  and the other flags survive privilege escalation. The one-line `/dev/fd`
+  invocation downloads the updater for the selected branch to a private temp
+  file before re-execing, since Bash has already consumed the process-substitution
+  pipe. The installed updater also restarts with the fetched branch's version
+  before doing any destructive work. Custom installs are inferred from
+  `public/update.sh`, and `gsm update` embeds the install path and forwards
+  arguments without word splitting.
+- **Install metadata is data, not shell code** — the updater reads only the
+  validated panel port from `.install-info`; it no longer sources that file as
+  root.
+- **Git updates are deterministic** — fetches the selected remote branch into
+  an explicit ref, then checks out that exact commit. Local tracked source edits
+  and local-only commits are rejected with guidance rather than merged or
+  discarded silently; install-specific config files remain preserved.
+- **Failures fail** — dependency install, Drizzle schema push, PM2 startup, and
+  the health check are checked by exit status. An unsuccessful migration or
+  restart no longer appears as a successful update.
+- **Rollback is verified too** — restores config after the code checkout, repairs
+  panel-user ownership, and checks dependency install, build, PM2 start, and health.
+- **Root-only logs** — update and rollback logs live under
+  `/var/log/gsm-update/`, and temporary config copies use a private directory.
+
 ### 🧠 Panel memory and CPU growth
 
 Several in-process structures and hot-path statements grew or ran without

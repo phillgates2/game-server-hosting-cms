@@ -1148,6 +1148,19 @@ Regression tests are in `tests/install-regressions.test.ts`.
 retryable. It no longer reports success with no key. Re-run the installer after fixing the
 cause.
 
+## Fixed in the updater reliability pass
+
+- `gsm update` now embeds the actual install directory, quotes and forwards all
+  arguments, and works for custom `--install-dir` deployments. The updater no
+  longer sources `.install-info` as root; it reads only the validated panel port.
+- Non-root re-exec preserves the selected branch and flags. Process-substitution
+  invocations fetch that branch's updater into a private temporary file instead
+  of trying to reopen an exhausted `/dev/fd` pipe. An installed older updater
+  also restarts with the fetched branch version before touching the panel.
+- Updates fetch and check out an explicit upstream ref, refuse local tracked
+  source edits/local-only commits, and fail on migration, restart, or health-check
+  errors rather than reporting a partial upgrade as successful.
+
 ## Not changed (reported)
 
 - Non-interactive installs take over port 80 for an Apache or nginx site without asking
