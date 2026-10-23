@@ -131,6 +131,22 @@ describe("node agent end-to-end", () => {
     assert.equal(esc.status, 400);
   });
 
+  test("stop refuses a pid the agent did not start", async () => {
+    // Signalling an arbitrary pid would let anyone holding the key kill any
+    // process on the box — including the panel's own process group. The agent
+    // now records what it started and checks the number against it.
+    const neverStarted = await rpc("/rpc/process", {
+      action: "stop",
+      installPath: join(root, "srv1"),
+      pid: process.pid,
+    });
+    assert.equal(neverStarted.status, 400);
+    assert.match(String(neverStarted.data.error), /not a server this agent started/);
+
+    const bogus = await rpc("/rpc/process", { action: "stop", installPath: join(root, "srv1"), pid: -1 });
+    assert.equal(bogus.status, 400);
+  });
+
   test("relative traversal that lands inside the root is allowed", async () => {
     const res = await rpc("/rpc/log", { installPath: join(root, "srv1", "..", "srv1"), tail: 5 });
     assert.equal(res.status, 200);

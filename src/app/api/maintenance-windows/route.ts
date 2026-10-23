@@ -7,6 +7,7 @@ import { asc } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
 import { validateMaintenanceWindowInput, ensureMaintenanceWindowsTable } from "@/lib/maintenance-windows";
 
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -89,10 +90,7 @@ export async function POST(req: NextRequest) {
       .returning({ id: maintenanceWindows.id });
 
     try {
-      const ip =
-        req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-        req.headers.get("x-real-ip") ||
-        "unknown";
+      const ip = clientIpForRecord(req.headers);
       await db.insert(auditLog).values({
         userId: auth.userId as number,
         action: "maintenance-window.schedule",

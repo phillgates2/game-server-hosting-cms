@@ -23,8 +23,9 @@
  *     length, so only the client knows whether it meant to send more.
  *   - **The client never names a real path.** It navigates a virtual root built
  *     from the servers it may file-manage; every real path then goes through
- *     `safePath()` (src/lib/server-file-ops.ts) as a second, independent
- *     containment check.
+ *     `resolveSafePathSync()` (src/lib/server-file-ops.ts) as a second,
+ *     independent containment check — the same symlink-aware rule the web
+ *     file manager applies.
  *   - **No dependencies.** Node's `net`/`tls`/`fs` only, so it ships inside the
  *     panel process (see instrumentation.ts) without a new supply chain.
  *
@@ -39,7 +40,7 @@ import { createReadStream, createWriteStream, type WriteStream } from "node:fs";
 import { mkdir, readdir, rename, rm, stat, unlink } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { randomBytes } from "node:crypto";
-import { safePath } from "./server-file-ops";
+import { resolveSafePath, resolveSafePathSync } from "./server-file-ops";
 import { createLogger } from "./logger";
 import {
   FTP_FEATURES,
@@ -1014,10 +1015,11 @@ export class FtpConnection {
   }
 
   private containedPath(folder: FtpVirtualFolder, relative: string): string | null {
-    // safePath is the same containment check the web file manager uses; the
+    // The same symlink-aware containment check the web file manager uses; the
     // virtual-path normaliser already refused upward traversal, so this is the
     // independent second opinion (and the one that catches a bad base path).
-    return safePath(folder.absPath, relative || ".");
+    const resolved = resolveSafePathSync(folder.absPath, relative || ".");
+    return resolved ? resolved.fullPath : null;
   }
 
   private virtualFor(folder: FtpVirtualFolder, abs: string): string {
@@ -1633,14 +1635,17 @@ export class FtpConnection {
       return;
     }
 
-    const finalPath = safePath(
+    // Symlink-aware: the resolved path is checked against the real server
+    // root, so a symlink inside the directory cannot carry the write out of it.
+    const resolved = await resolveSafePath(
       parent.folder.absPath,
       join(/* turbopackIgnore: true */ this.relativeInFolder(parent.folder, parent.abs), name)
     );
-    if (!finalPath) {
+    if (!resolved) {
       this.reply("550 Destination outside this server's directory.");
       return;
     }
+    const finalPath = resolved.fullPath;
 
     const offset = this.restOffset;
     this.restOffset = 0;
@@ -1769,14 +1774,17 @@ export class FtpConnection {
       this.reply("550 Parent directory is not writable.");
       return;
     }
-    const fullPath = safePath(
+    // Symlink-aware: the resolved path is checked against the real server
+    // root, so a symlink inside the directory cannot carry the write out of it.
+    const resolved = await resolveSafePath(
       parent.folder.absPath,
       join(/* turbopackIgnore: true */ this.relativeInFolder(parent.folder, parent.abs), name)
     );
-    if (!fullPath) {
+    if (!resolved) {
       this.reply("550 Destination outside this server's directory.");
       return;
     }
+    const fullPath = resolved.fullPath;
     try {
       await mkdir(fullPath, { recursive: true });
       this.announce("mkdir", parent.folder, fullPath);

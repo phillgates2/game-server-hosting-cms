@@ -187,6 +187,31 @@ describe("subscriptions", () => {
     // boundary: expiry exactly now counts as lapsed
     assert.equal(nextRenewalExpiryMs({ currentExpiryMs: now, intervalMs: month, nowMs: now }), now + month);
   });
+
+  test("cartRequiresCardProvider: the WHOLE cart decides, not its size", () => {
+    const { cartRequiresCardProvider } = require("../src/lib/shop") as typeof import("../src/lib/shop");
+    const sub = { kind: "subscription" };
+    const one = { kind: "onetime" };
+
+    // A subscription on its own, paid manually — the documented refusal.
+    assert.equal(cartRequiresCardProvider([sub], "manual"), true);
+
+    // THE regression: this rule used to be scoped to a single-item cart, so a
+    // subscription bought alongside anything else skipped it entirely.
+    assert.equal(cartRequiresCardProvider([sub, one], "manual"), true);
+    assert.equal(cartRequiresCardProvider([one, sub, one], "manual"), true);
+
+    // Card payment: the gate is about the method, not the product.
+    assert.equal(cartRequiresCardProvider([sub], "stripe"), false);
+    assert.equal(cartRequiresCardProvider([sub, one], "stripe"), false);
+
+    // No subscription anywhere: nothing to gate.
+    assert.equal(cartRequiresCardProvider([one, one], "manual"), false);
+    assert.equal(cartRequiresCardProvider([], "manual"), false);
+
+    // A product with no kind (legacy rows) never triggers the gate.
+    assert.equal(cartRequiresCardProvider([{ kind: null }], "manual"), false);
+  });
 });
 
 // ── Resellers ───────────────────────────────────────────────────────────────

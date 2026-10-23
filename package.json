@@ -17,7 +17,6 @@
   "dependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/nodemailer": "^8.0.1",
     "@types/qrcode": "^1.5.6",
     "bcryptjs": "^3.0.3",
     "discord.js": "^14.27.0",
@@ -25,8 +24,8 @@
     "drizzle-orm": "0.45.2",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.33.0",
-    "next": "16.3.2",
-    "nodemailer": "^9.0.5",
+    "next": "^16.4.2",
+    "nodemailer": "^10.2.1",
     "otpauth": "^9.5.1",
     "pg": "8.20.0",
     "qrcode": "^1.5.4",
@@ -45,7 +44,7 @@
     "drizzle-kit": "0.31.10",
     "eslint": "9.39.4",
     "eslint-config-next": "16.3.2",
-    "postcss": "8.5.8",
+    "postcss": "^8.5.31",
     "tailwindcss": "4.1.17",
     "tsx": "^4.19.2",
     "typescript": "5.9.3"

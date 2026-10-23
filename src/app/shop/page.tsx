@@ -37,6 +37,23 @@ interface CartItem {
   quantity: number;
 }
 
+/**
+ * Read the persisted cart. Called from the `useState` initializer so the
+ * restore happens during render instead of in an effect (which would trigger
+ * a cascading render). Anything unparseable is treated as "empty cart" — a
+ * corrupted localStorage value must never throw a page.
+ */
+function readStoredCart(): CartItem[] {
+  try {
+    const saved = localStorage.getItem("shop_cart");
+    if (!saved) return [];
+    const parsed = JSON.parse(saved) as unknown;
+    return Array.isArray(parsed) ? parsed as CartItem[] : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function ShopPage() {
   const [products, setProducts] = useState<ShopProduct[]>([]);
   const [categories, setCategories] = useState<ShopCategory[]>([]);
@@ -44,9 +61,13 @@ export default function ShopPage() {
   const [stripeEnabled, setStripeEnabled] = useState(false);
   const [activeCat, setActiveCat] = useState("all");
   const [search, setSearch] = useState("");
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const [cart, setCart] = useState<CartItem[]>(() => readStoredCart());
   const [showCart, setShowCart] = useState(false);
-  const [email, setEmail] = useState("");
+  // Restored once, in the initializer: reading localStorage inside an effect
+  // and calling setState synchronously triggers a cascading render.
+  const [email, setEmail] = useState<string>(() => {
+    try { return localStorage.getItem("shop_email") ?? ""; } catch { return ""; }
+  });
   const [customerName, setCustomerName] = useState("");
   const [coupon, setCoupon] = useState("");
   const [couponInfo, setCouponInfo] = useState<{ ok: boolean; text: string; savings?: number } | null>(null);
@@ -72,18 +93,8 @@ export default function ShopPage() {
     return () => clearTimeout(t);
   }, [loadShop]);
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("shop_cart");
-      if (saved) {
-        const parsed = JSON.parse(saved) as CartItem[];
-        if (Array.isArray(parsed)) setCart(parsed);
-      }
-      const savedEmail = localStorage.getItem("shop_email");
-      if (savedEmail) setEmail(savedEmail);
-    } catch {}
-  }, []);
-
+  // The cart/email restore happens in the useState initializers above; only
+  // the write-back effect remains.
   useEffect(() => {
     try { localStorage.setItem("shop_cart", JSON.stringify(cart)); } catch {}
   }, [cart]);

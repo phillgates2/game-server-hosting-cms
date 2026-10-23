@@ -4,6 +4,7 @@ import { shopCoupons } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { ensureShopTables, normalizeCouponCode, couponUsable, applyCoupon, type CouponKind } from "@/lib/shop";
 import { checkRateLimit, type RateLimitEntry } from "@/lib/licensing";
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,7 +13,7 @@ const hits = new Map<string, RateLimitEntry>();
 
 // GET /api/shop/coupons/check?code=X&priceCents=N — live discount preview
 export async function GET(req: NextRequest) {
-  const ip = (req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown").slice(0, 45);
+  const ip = clientIpForRecord(req.headers);
   if (checkRateLimit(hits, ip, Date.now(), 60_000, 20)) {
     return NextResponse.json({ ok: false, error: "Too many checks — slow down." }, { status: 429 });
   }

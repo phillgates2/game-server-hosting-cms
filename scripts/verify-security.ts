@@ -561,6 +561,22 @@ console.log("\nH2/H3 auth enforcement wiring");
     /\$\{THIS_BACKUP:-\}/.test(updater)
   );
 
+  // .install-info holds ACCESS_KEY and other secrets. `source`ing it from a
+  // root installer executes arbitrary shell, so a writable file is root code
+  // execution. The installers must parse it as data, line by line.
+  const installers = [
+    "../public/install.sh",
+    "../public/update.sh",
+    "../public/uninstall.sh",
+    "../public/setup-webroot.sh",
+  ].map(read);
+  check(
+    "no root installer sources .install-info; it is parsed as data only",
+    installers.every((t) => !/source[^\n]*\.install-info/.test(t)) &&
+      installers.some((t) => /while IFS='=' read -r info_key info_value/.test(t)) &&
+      /ACCESS_KEY=/.test(installers[0])
+  );
+
   // Reading a binary file as utf8 replaces undecodable bytes with U+FFFD, and
   // saving writes those back over the original. The editor's guard has to be
   // server-side: a browser-only allowlist is bypassed by any direct API call.
@@ -1589,11 +1605,15 @@ console.log("\nAnonymous endpoint throttle");
 
   const page = read("../src/app/status/page.tsx");
   const pageToken = read("../src/app/status/[token]/page.tsx");
+  // Both pages key the anonymous throttle on the trust-aware extractor, not
+  // on a raw header the caller can rotate.
+  const pageThrottle = /publicThrottleAllowed\(`public-status:\$\{clientIpForRecord\(hdrs\)\}`\)/;
   check(
     "the public pages throttle BEFORE probing the fleet",
     /const servers = throttled \? \[\] : await lookupPublicList\(\)/.test(page) &&
       /const status = throttled \? null : await lookupPublicStatus\(token\)/.test(pageToken) &&
-      /publicThrottleAllowed\(`public-status:\$\{ip\}`\)/.test(page)
+      pageThrottle.test(page) &&
+      pageThrottle.test(pageToken)
   );
 }
 
@@ -1751,7 +1771,11 @@ console.log("\nEmbed snippets & event history");
   const share = read("../src/lib/status-share.ts");
   check(
     "embed snippets trim the origin and the widget escapes names",
-    /origin\.replace\(\/\\\/\+\$\/, ""\)/.test(share) &&
+    /export function normalizeEmbedOrigin/.test(share) &&
+      /const trimmed = origin\.trim\(\)/.test(share) &&
+      /return parsed\.origin;/.test(share) &&
+      /if \(parsed\.username \|\| parsed\.password\) return null;/.test(share) &&
+      /if \(!base\) return null;/.test(share) &&
       /replace\(\/\[<>&\]\/g, ""\)/.test(share) &&
       /export function buildEmbedIframe/.test(share) &&
       /export function buildEmbedWidget/.test(share)
@@ -2947,7 +2971,9 @@ console.log("\nUPDDIFF update snapshot rails");
   check(
     "update route snapshots before AND after the Steam run",
     /snapshotInstallPath\(server\.installPath\)/.test(route) &&
-      /const pre = await snapshotInstallPath/.test(route) &&
+      // Remote updates skip the snapshot (the agent has no diff RPC); the
+      // pre-snapshot is conditional on a local node.
+      /const pre = remote \? null : await snapshotInstallPath/.test(route) &&
       /const post = await snapshotInstallPath/.test(route) &&
       /diffSnapshots\(pre\.entries, post\.entries, pre\.truncated, post\.truncated\)/.test(route)
   );
@@ -3537,8 +3563,18 @@ console.log("\nLICPORTAL public-check rails");
   );
   check(
     "failure classes answer identically-shaped responses (no existence oracle)",
-    /licenseCheckMessage\("invalid"\)/.test(route) &&
-      /status: "invalid", message: licenseCheckMessage\("invalid"\)\s*\}, \{ status: 402 \}\)/.test(route) &&
+    // Every answer is built by ONE function that emits the same field set on
+    // every branch. Spelling the fields out at each return is exactly how the
+    // oracle got in: the not-found branch omitted `expiresAt`, so its presence
+    // told a caller whether a key existed at all.
+    /function answer\([\s\S]{0,600}?activationsUsed: extra\.activationsUsed \?\? 0,/.test(route) &&
+      /maxActivations: extra\.maxActivations \?\? null,/.test(route) &&
+      /expiresAt: extra\.expiresAt \?\? null,/.test(route) &&
+      // The not-found branch must go through the same builder as the rest, and
+      // the verdict branch must carry the real values.
+      /if \(!row\) \{\s*return answer\("invalid", licenseCheckMessage\("invalid"\), false\);\s*\}/.test(route) &&
+      /return answer\(\s*verdict,/.test(route) &&
+      /expiresAt: row\.expiresAt,/.test(route) &&
       /status: "rate-limited"/.test(route)
   );
 }
@@ -3595,8 +3631,8 @@ console.log("\nSHOP ecommerce rails");
     "orders are rate-limited, email-validated, and priced from the PRODUCT (never the client)",
     /checkRateLimit\(hits, ip, Date\.now\(\), RATE_WINDOW_MS, RATE_MAX\)/.test(orders) &&
       /isValidOrderEmail\(email\)/.test(orders) &&
-      /let amountCents = product\.priceCents/.test(orders) &&
-      /status: "pending",\n        amountCents,\n        currency: product\.currency/.test(orders) &&
+      /let amountCents = product\.priceCents \* qty/.test(orders) &&
+      /status: "pending",\s+amountCents,\s+currency: product\.currency/.test(orders) &&
       /currency: product\.currency/.test(orders)
   );
   check(
@@ -3607,7 +3643,9 @@ console.log("\nSHOP ecommerce rails");
   );
   check(
     "fulfilment is idempotent and keys inherit product activations/expiry",
-    /if \(order\.status === "fulfilled" && order\.issuedKeyPlaintext\)/.test(fulfil) &&
+    // Re-fulfilling returns the key already stored on the order rather than
+    // minting a second one.
+    /if \(order\.status === "fulfilled"\)\s*\{\s*return \{ ok: true, key: order\.issuedKeyPlaintext \?\? undefined \};/.test(fulfil) &&
       /maxActivations: product\.maxActivations/.test(fulfil) &&
       /product\.durationDays/.test(fulfil) &&
       /orderCanFulfil\(order\.status as ShopOrderStatus\)/.test(fulfil)
@@ -3633,12 +3671,23 @@ console.log("\nCOUPON rails");
   const orders = read("../src/app/api/shop/orders/route.ts");
   const checkRoute = read("../src/app/api/shop/coupons/check/route.ts");
   const admin = read("../src/app/api/shop/admin/coupons/route.ts");
+  const shopLib = read("../src/lib/shop.ts");
   check(
     "coupons apply server-side to the PRODUCT price, scope-checked, and increment once",
-    /amountCents = applyCoupon\(\{ kind: coupon\.kind as CouponKind, value: coupon\.value \}, product\.priceCents\)/.test(orders) &&
-      /coupon\.productId !== null && coupon\.productId !== product\.id/.test(orders) &&
-      /usedCount: coupon\.usedCount \+ 1/.test(orders) &&
-      /couponUsable\(\{/.test(orders)
+    /applyCoupon\(\{ kind: couponObj!\.kind, value: couponObj!\.value \}, product\.priceCents\)/.test(orders) &&
+      /couponObj\.productId === null \|\| couponObj\.productId === product\.id/.test(orders) &&
+      // A scoped coupon is only attached to the orders it actually discounted,
+      // not to every order in the cart.
+      /couponId: couponApplies \? couponId : null/.test(orders) &&
+      /couponUsable\(\{/.test(orders) &&
+      // Charged at fulfilment, not at order creation: an abandoned checkout
+      // (or a failed Stripe session) must not burn a coupon use nobody paid
+      // for. The increment is also guarded on max_uses so a burst of
+      // concurrent fulfilments cannot push the counter past the cap.
+      !/usedCount: coupon\.usedCount \+ 1/.test(orders) &&
+      /export async function consumeCouponUse\(orderId: number\)/.test(shopLib) &&
+      /await consumeCouponUse\(order\.id\);/.test(shopLib) &&
+      /or\(\s*isNull\(shopCoupons\.maxUses\),/.test(shopLib)
   );
   check(
     "coupon endpoints rate-limited, oracle-safe, admin-gated",
@@ -3669,8 +3718,13 @@ console.log("\nSUBSCR subscription rails");
   );
   check(
     "subscriptions require stripe; sessions use recurring prices",
-    /product\.kind === "subscription" && provider !== "stripe"/.test(orders) &&
-      /mode: product\.kind === "subscription" \? "subscription" : "onetime"/.test(orders) &&
+    // The whole cart is checked, so a subscription cannot ride along with
+    // anything else and skip the "card payments only" rule.
+    /cartRequiresCardProvider\(cartItems\.map\(\(i\) =>/.test(orders) &&
+      /kind: productMap\.get\(i\.productId\)\?\.kind \?\? null/.test(orders) &&
+      /export function cartRequiresCardProvider\(/.test(shopLib) &&
+      /provider !== "stripe" && items\.some\(\(item\) => item\.kind === "subscription"\);/.test(shopLib) &&
+      /mode: singleProduct\.kind === "subscription" \? "subscription" : "onetime"/.test(orders) &&
       /recurring\]\[interval\]"\] = input\.interval === "year" \? "year" : "month"/.test(stripe)
   );
   check(
@@ -3693,7 +3747,7 @@ console.log("\nRESELL reseller rails");
   const shopLib = read("../src/lib/shop.ts");
   check(
     "reseller attribution is hash-looked-up, active-only, commission from the SERVER rate",
-    /const resellerHash = await hashResellerToken\(resellerToken\)/.test(orders) &&
+    /const resellerHash = await hashResellerToken\(effectiveToken\)/.test(orders) &&
       /if \(reseller && reseller\.active\)/.test(orders) &&
       /commissionCents = commissionFor\(amountCents, reseller\.commissionPct\)/.test(orders)
   );
@@ -3751,7 +3805,13 @@ console.log("\nMKEY unified master-key rails");
   check(
     "master key storage is hash-only with timing-safe compare",
     /createHash\("sha256"\)\.update\(key\.trim\(\)\)/.test(mk) &&
-      /timingSafeEqual\(a, b\)/.test(mk) &&
+      // Both the env branch and the stored-hash branch compare through the SAME
+      // helper. A plain `===` on the env key would let the two branches time
+      // differently — the inconsistency a later edit inherits.
+      /function constantTimeEqual\(a: string, b: string\)/.test(mk) &&
+      /return timingSafeEqual\(left, right\);/.test(mk) &&
+      /constantTimeEqual\(key, env\.trim\(\)\)/.test(mk) &&
+      /constantTimeEqual\(await hashMasterKey\(key\), row\.value\)/.test(mk) &&
       /MASTER_KEY_SETTING = "panel_master_key_hash"/.test(mk)
   );
   check(
@@ -3998,6 +4058,89 @@ console.log("\nDBG46 second-debug-pass rails");
     "login throttle: displayed default equals enforced default",
     /loginThrottleAttempts: 5,/.test(policy) &&
       /num\("login_throttle_attempts", 5\)/.test(panelSettings)
+  );
+}
+
+// ── IPXF rails: client-IP extraction is centralised ─────────────────────────
+console.log("\nIPXF client-IP rails");
+{
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const walk = (dir: string, out: string[] = []) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full, out);
+      else if (e.name.endsWith(".ts") || e.name.endsWith(".tsx")) out.push(full);
+    }
+    return out;
+  };
+
+  // Forwarded headers are attacker-controllable. Every place that needs a
+  // client IP must go through src/lib/ip-allowlist.ts, which honours them only
+  // behind GSM_TRUST_PROXY and only the LAST hop. A route that reads the header
+  // itself keys its rate limit on a value the caller can rotate — which made
+  // the anonymous brute-force limits (license check, shop orders, coupon
+  // probes, public status) advisory rather than enforced.
+  // The test looks for an actual READ (`.get("x-forwarded-for")`), not the
+  // term: comments explaining why the extractor exists mention it too.
+  const offenders: string[] = [];
+  for (const f of walk(new URL("../src", import.meta.url).pathname)) {
+    if (path.basename(f) === "ip-allowlist.ts") continue; // the extractor itself
+    const text = fs.readFileSync(f, "utf8");
+    if (/headers\.get\("x-forwarded-for"\)/i.test(text)) {
+      offenders.push(`${path.basename(path.dirname(f))}/${path.basename(f)}`);
+    }
+  }
+  check(
+    `every client-IP read goes through the shared extractor (${offenders.length} offender(s): ${offenders[0] ?? "none"})`,
+    offenders.length === 0
+  );
+}
+
+// ── SYMLINK rails: path containment is real, not lexical ────────────────────
+console.log("\nSYMLINK containment rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const fops = read("../src/lib/server-file-ops.ts");
+  const stream = read("../src/app/api/servers/[id]/files/stream/route.ts");
+  const ftp = read("../src/lib/ftp-server.ts");
+
+  check(
+    "resolveSafePath resolves the real base and rejects a real path outside it",
+    /export async function resolveSafePath\(/.test(fops) &&
+      /realBase = await realpath\(base\)/.test(fops) &&
+      /real = await realpath\(probe\)/.test(fops) &&
+      /real !== realBase && !real\.startsWith\(realBase \+ sep\)/.test(fops)
+  );
+  check(
+    "every disk-touching op resolves through the symlink-aware check",
+    ["getPathStat", "listDirectory", "writeTextFile", "createDirectory", "deletePath", "renamePath", "moveMany", "saveUploadedFile"].every(
+      (op) => new RegExp(`export async function ${op}\\([\\s\\S]{0,400}?resolveSafePath`).test(fops)
+    )
+  );
+  check(
+    "the web upload route and the FTP write paths use the real-path check",
+    /await fileOps\.resolveSafePath\(/.test(stream) &&
+      /await resolveSafePath\(/.test(ftp)
+  );
+}
+
+// ── AGENTPIDR rails: the agent only signals its own processes ───────────────
+console.log("\nAGENTPIDR agent stop rails");
+{
+  const read = (p: string) =>
+    require("node:fs").readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const agent = read("../agent/gsm-agent.mjs");
+  check(
+    "agent records the pid it started and stop only signals a matching one",
+    /writeFileSync\(pidFileFor\(installPath\), `\$\{pid\}\\n`\)/.test(agent) &&
+      /const requested = Number\(pid\);/.test(agent) &&
+      /const started = await readStartedPid\(dir\);/.test(agent) &&
+      /if \(started === null \|\| started !== requested\)/.test(agent) &&
+      /!Number\.isInteger\(requested\) \|\| requested <= 0/.test(agent)
   );
 }
 

@@ -23,7 +23,7 @@ export async function PATCH(
 
   try {
     const [existing] = await db
-      .select({ serverId: scheduledTasks.serverId })
+      .select({ serverId: scheduledTasks.serverId, taskType: scheduledTasks.taskType })
       .from(scheduledTasks)
       .where(eq(scheduledTasks.id, Number(id)))
       .limit(1);
@@ -66,6 +66,19 @@ export async function PATCH(
         return NextResponse.json({ error: `command is limited to ${MAX_COMMAND_LENGTH} characters` }, { status: 400 });
       }
       update.command = cmd || null;
+    }
+
+    // A `command` task is ARBITRARY SHELL EXECUTION scheduled on the panel
+    // host. Editing one — and turning an existing restart task into one — is
+    // a scheduler capability. The servers.edit fallback above is right for
+    // restart/backup tasks a server owner schedules, but it must not hand a
+    // shell to a role that was only given servers.edit.
+    const resultingType = (update.taskType as string | undefined) ?? existing.taskType;
+    if (resultingType === "command" && !(await hasPermission(auth.userId, "scheduler.create", auth.keyScope))) {
+      return NextResponse.json(
+        { error: "Editing a command task requires the scheduler.create permission" },
+        { status: 403 }
+      );
     }
 
     const [updated] = await db.update(scheduledTasks).set(update).where(eq(scheduledTasks.id, Number(id))).returning();

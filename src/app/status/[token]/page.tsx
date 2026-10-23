@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { lookupPublicStatus } from "@/lib/status-lookup";
 import { publicThrottleAllowed } from "@/lib/public-throttle";
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,8 +31,10 @@ export default async function PublicStatusPage({ params }: Props) {
   const { token } = await params;
 
   const hdrs = await headers();
-  const ip = hdrs.get("x-forwarded-for")?.split(",")[0]?.trim() || hdrs.get("x-real-ip") || "anon";
-  const throttled = !publicThrottleAllowed(`public-status:${ip}`);
+  // Trust-aware: without GSM_TRUST_PROXY a forwarded header is an unverifiable
+  // claim and collapses to one shared bucket rather than letting a caller
+  // rotate X-Forwarded-For to reset its own throttle.
+  const throttled = !publicThrottleAllowed(`public-status:${clientIpForRecord(hdrs)}`);
 
   // Only probe the game server when the request itself is allowed.
   const status = throttled ? null : await lookupPublicStatus(token).catch(() => null);

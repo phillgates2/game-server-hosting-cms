@@ -21,6 +21,7 @@ import {
 // ownership, crash-loop breaker, remote-node dispatch, Discord pings — intact.
 import { POST as processServerAction } from "../[id]/process/route";
 
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 900;
@@ -111,10 +112,7 @@ export async function POST(req: NextRequest) {
 
     // One audit line per batch, best-effort — auditing must never break the op.
     try {
-      const ip =
-        req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-        req.headers.get("x-real-ip") ||
-        "unknown";
+      const ip = clientIpForRecord(req.headers);
       await db.insert(auditLog).values({
         userId: auth.userId,
         action: "server.batch",
@@ -222,10 +220,7 @@ async function runRollingRestart(opts: {
   });
 
   try {
-    const ip =
-      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      req.headers.get("x-real-ip") ||
-      "unknown";
+    const ip = clientIpForRecord(req.headers);
     await db.insert(auditLog).values({
       userId: auth.userId as number,
       action: "server.batch",

@@ -13,6 +13,7 @@ import {
 } from "@/lib/blueprints";
 import { POST as createServerAction } from "../../../servers/route";
 
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 600;
@@ -187,10 +188,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const created = results.filter((r) => r.ok).length;
     try {
-      const ip =
-        req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-        req.headers.get("x-real-ip") ||
-        "unknown";
+      const ip = clientIpForRecord(req.headers);
       await db.insert(auditLog).values({
         userId: auth.userId as number,
         action: "blueprint.deploy",

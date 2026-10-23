@@ -160,6 +160,22 @@ export function applyCoupon(input: { kind: CouponKind; value: number }, priceCen
   return Math.max(0, priceCents - Math.max(0, Math.floor(input.value)));
 }
 
+/**
+ * Does this cart contain anything that may only be paid for with a card?
+ *
+ * A subscription is a recurring commitment, so it may only be sold through a
+ * card provider. The gate has to look at the WHOLE cart: scoping it to a
+ * single-item cart let a subscription ride along with anything else and skip
+ * the rule entirely — the single-item restriction belongs to the Stripe
+ * session built by the route, not to this decision.
+ */
+export function cartRequiresCardProvider(
+  items: ReadonlyArray<{ kind?: string | null }>,
+  provider: string
+): boolean {
+  return provider !== "stripe" && items.some((item) => item.kind === "subscription");
+}
+
 // ── DB plumbing ─────────────────────────────────────────────────────────────
 
 export const SHOP_CATEGORIES = ["general", "licenses", "servers", "digital", "physical", "services", "merch"] as const;
@@ -398,6 +414,9 @@ export async function fulfilOrder(orderId: number): Promise<{ ok: boolean; key?:
       /* best-effort */
     }
 
+    // Money moved: the coupon attached to this order is now actually spent.
+    await consumeCouponUse(order.id);
+
     return { ok: true };
   }
 
@@ -450,5 +469,85 @@ export async function fulfilOrder(orderId: number): Promise<{ ok: boolean; key?:
     /* best-effort */
   }
 
+  // Money moved: the coupon attached to this order is now actually spent.
+  await consumeCouponUse(order.id);
+
   return { ok: true, key: plaintext };
+}
+
+/**
+ * Consume one use of the coupon attached to an order — called from
+ * fulfilment, never from order creation.
+ *
+ * A coupon is a promise of a discount on a sale that actually happened.
+ * Charged at creation, an abandoned checkout would burn a use without paying
+ * for anything, and with `maxUses` set a handful of abandoned orders would
+ * exhaust a coupon nobody bought from.
+ *
+ * The increment is guarded on `max_uses` so a burst of concurrent fulfilments
+ * can never push the counter past the cap; if the guard fails the use is left
+ * unconsumed rather than the cap being exceeded.
+ */
+export async function consumeCouponUse(orderId: number): Promise<void> {
+  try {
+    const { db } = await import("@/db");
+    const { shopOrders, shopCoupons } = await import("@/db/schema");
+    const { eq, sql, and, or, isNull } = await import("drizzle-orm");
+
+    const [order] = await db
+      .select({ couponId: shopOrders.couponId })
+      .from(shopOrders)
+      .where(eq(shopOrders.id, orderId))
+      .limit(1);
+    if (!order?.couponId) return;
+
+    await db
+      .update(shopCoupons)
+      .set({ usedCount: sql`${shopCoupons.usedCount} + 1` })
+      .where(
+        and(
+          eq(shopCoupons.id, order.couponId),
+          or(
+            isNull(shopCoupons.maxUses),
+            sql`${shopCoupons.usedCount} < ${shopCoupons.maxUses}`
+          )
+        )
+      );
+  } catch {
+    /* a missed coupon use must never fail a fulfilment that already succeeded */
+  }
+}
+
+/**
+ * Return stock to a product when an order that held it is cancelled.
+ *
+ * Stock is decremented when the order is created, so two buyers cannot both
+ * take the last unit. That means a cancellation has to undo it — otherwise an
+ * abandoned pending order consumes inventory nobody bought.
+ *
+ * Refunds of fulfilled orders deliberately do NOT restore stock: the item was
+ * delivered. Cancel is the only transition that returns inventory.
+ */
+export async function restoreStockForOrder(orderId: number): Promise<void> {
+  try {
+    const { db } = await import("@/db");
+    const { shopOrders, shopProducts } = await import("@/db/schema");
+    const { eq, sql, and, isNotNull } = await import("drizzle-orm");
+
+    const [order] = await db
+      .select({ productId: shopOrders.productId, quantity: shopOrders.quantity })
+      .from(shopOrders)
+      .where(eq(shopOrders.id, orderId))
+      .limit(1);
+    if (!order) return;
+
+    const qty = order.quantity ?? 1;
+    // Only products that actually track stock get it back.
+    await db
+      .update(shopProducts)
+      .set({ stockQuantity: sql`${shopProducts.stockQuantity} + ${qty}` })
+      .where(and(eq(shopProducts.id, order.productId), isNotNull(shopProducts.stockQuantity)));
+  } catch {
+    /* best-effort: a missed restore is a reporting gap, not a failed cancel */
+  }
 }

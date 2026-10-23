@@ -80,8 +80,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!req.body) return NextResponse.json({ error: "Request body is empty" }, { status: 400 });
 
   const fileOps = await import("@/lib/server-file-ops");
-  const finalPath = fileOps.safePath(server.installPath, join(/* turbopackIgnore: true */ targetDir, fileName));
-  if (!finalPath) return NextResponse.json({ error: "Path outside server directory" }, { status: 400 });
+  // Symlink-aware containment: the resolved path is checked against the real
+  // server root, so a symlink inside the directory cannot carry the write out
+  // of the sandbox.
+  const resolved = await fileOps.resolveSafePath(server.installPath, join(/* turbopackIgnore: true */ targetDir, fileName));
+  if (!resolved) return NextResponse.json({ error: "Path outside server directory" }, { status: 400 });
+  const finalPath = resolved.fullPath;
 
   // A name is a name, not a path: the same single-entry rule the FTP server
   // applies to STOR/RNTO.
@@ -98,7 +102,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     await pipeline(source, createWriteStream(partPath, { flags: "wx" }));
     await rename(partPath, finalPath);
     const { size } = await (await import("node:fs/promises")).stat(finalPath);
-    return NextResponse.json({ ok: true, name: safeName, size, path: fileOps.relativePathOf(server.installPath, finalPath) });
+    return NextResponse.json({ ok: true, name: safeName, size, path: resolved.relPath });
   } catch (e: unknown) {
     // A failed or aborted upload must not leave debris behind.
     await rm(partPath, { force: true }).catch(() => undefined);

@@ -32,7 +32,7 @@
 import http from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { timingSafeEqual, randomBytes } from "node:crypto";
-import { readFileSync, openSync } from "node:fs";
+import { readFileSync, openSync, writeFileSync } from "node:fs";
 import {
   statfs,
   stat,
@@ -103,6 +103,28 @@ function isAlive(pid) {
   }
 }
 
+/** Where the agent records the pid of the server it last started. */
+function pidFileFor(installPath) {
+  return `${installPath}/gsm-agent.pid`;
+}
+
+/**
+ * Read the pid this agent started for an install path, or null.
+ *
+ * A pid is only meaningful if it came from here: without this record, "stop"
+ * would signal whatever number the caller sent — including a process this
+ * agent has no relationship with.
+ */
+async function readStartedPid(installPath) {
+  try {
+    const raw = await readFile(pidFileFor(installPath), "utf8");
+    const n = Number(raw.trim());
+    return Number.isInteger(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 function startServer(installPath) {
   const script = `${installPath}/gsm-start.sh`;
   const logPath = `${installPath}/gsm-server.log`;
@@ -116,7 +138,17 @@ function startServer(installPath) {
     env: { ...process.env, HOME: installPath },
   });
   child.unref();
-  return { pid: child.pid ?? null, alive: child.pid ? true : false };
+  const pid = child.pid ?? null;
+  // Record the pid so a later "stop" can be checked against a server this
+  // agent actually started, rather than trusting the caller's number.
+  if (pid !== null) {
+    try {
+      writeFileSync(pidFileFor(installPath), `${pid}\n`);
+    } catch {
+      /* best-effort: a missing pidfile only means stop refuses */
+    }
+  }
+  return { pid, alive: pid ? true : false };
 }
 
 // Kill the whole process GROUP, then fall back to the single pid — exactly
@@ -598,7 +630,23 @@ export function createAgentHandler(cfg) {
           }
         }
         if (action === "stop") {
-          const r = await stopServer(pid);
+          const requested = Number(pid);
+          if (!Number.isInteger(requested) || requested <= 0) {
+            return send(res, 400, { error: "A positive pid is required to stop" });
+          }
+          // Only signal a process this agent started for THIS install path.
+          // installPath is already contained; the pid was not, and signalling
+          // an arbitrary process group is worse than refusing.
+          const started = await readStartedPid(dir);
+          if (started === null || started !== requested) {
+            return send(res, 400, { error: "That pid is not a server this agent started for this path" });
+          }
+          const r = await stopServer(requested);
+          try {
+            await rm(pidFileFor(dir), { force: true });
+          } catch {
+            /* best-effort */
+          }
           return send(res, 200, r);
         }
         return send(res, 400, { error: "Unknown action" });
