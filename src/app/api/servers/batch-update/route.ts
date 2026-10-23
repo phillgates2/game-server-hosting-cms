@@ -19,6 +19,7 @@ import {
 import { POST as updateServerAction } from "../[id]/update/route";
 import { POST as processAction } from "../[id]/process/route";
 
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 3600;
@@ -124,10 +125,7 @@ export async function POST(req: NextRequest) {
 
     const okCount = results.filter((r) => r.ok).length;
     try {
-      const ip =
-        req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-        req.headers.get("x-real-ip") ||
-        "unknown";
+      const ip = clientIpForRecord(req.headers);
       await db.insert(auditLog).values({
         userId: auth.userId,
         action: "server.batch-update",
@@ -271,10 +269,7 @@ async function runStagedRollout(opts: {
   });
 
   try {
-    const ip =
-      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      req.headers.get("x-real-ip") ||
-      "unknown";
+    const ip = clientIpForRecord(req.headers);
     const { db } = await import("@/db");
     const { auditLog } = await import("@/db/schema");
     await db.insert(auditLog).values({

@@ -53,13 +53,25 @@ done
 
 [[ $EUID -ne 0 ]] && die "Run as root: sudo bash uninstall.sh"
 
-# Read install info if available
+# Read install info if available.
+#
+# .install-info is plain KEY=value data (it also stores ACCESS_KEY). It must
+# never be `source`d by this root uninstaller: sourcing runs arbitrary shell,
+# so a writable .install-info becomes root code execution. Parse only the
+# allowlisted keys, line by line; ignore every other line. INSTALL_DIR is
+# deliberately NOT read from it — the CLI value stays authoritative.
 if [[ -f "$INSTALL_DIR/.install-info" ]]; then
-  # Remember the CLI value: .install-info also defines INSTALL_DIR and would
-  # otherwise override an explicit --install-dir.
-  _CLI_INSTALL_DIR="$INSTALL_DIR"
-  source "$INSTALL_DIR/.install-info" 2>/dev/null || true
-  INSTALL_DIR="$_CLI_INSTALL_DIR"
+  while IFS='=' read -r info_key info_value || [[ -n "$info_key" ]]; do
+    info_key="${info_key%$'\r'}"
+    info_value="${info_value%$'\r'}"
+    case "$info_key" in
+      GSM_USER)         if [[ -n "$info_value" ]]; then GSM_USER="$info_value"; fi ;;
+      DB_NAME)          if [[ -n "$info_value" ]]; then DB_NAME="$info_value"; fi ;;
+      DB_USER)          if [[ -n "$info_value" ]]; then DB_USER="$info_value"; fi ;;
+      STEAMCMD_DIR)     if [[ -n "$info_value" ]]; then STEAMCMD_DIR="$info_value"; fi ;;
+      GAMESERVERS_DIR)  if [[ -n "$info_value" ]]; then GAMESERVERS_DIR="$info_value"; fi ;;
+    esac
+  done < "$INSTALL_DIR/.install-info"
 fi
 
 echo ""

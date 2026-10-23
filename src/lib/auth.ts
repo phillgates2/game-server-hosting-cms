@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { clientIpForRecord } from "./ip-allowlist";
 
 /**
  * Resolve the JWT signing secret.
@@ -130,10 +131,9 @@ export async function trackIssuedSession(token: string, headers?: Headers): Prom
     const { registerSession } = await import("./session-store");
     const session = verifyToken(token);
     if (!session) return;
-    const ip =
-      headers?.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      headers?.get("x-real-ip") ||
-      null;
+    // Trust-aware: the recorded session IP is the identity the panel can
+    // verify, not one the caller asserts in a header.
+    const ip = headers ? clientIpForRecord(headers) : null;
     await registerSession(token, {
       userId: session.userId,
       ip,

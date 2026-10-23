@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { licenseKeys, licenseActivations } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 import {
   ensureLicenseTables,
   hashLicenseKey,
@@ -30,11 +31,11 @@ function rateLimited(ip: string): boolean {
 }
 
 function clientIp(req: NextRequest): string {
-  return (
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip") ||
-    "unknown"
-  ).slice(0, 45);
+  // The shared trust-aware extractor: forwarded headers are honoured only
+  // behind GSM_TRUST_PROXY, and then only the LAST hop. Keying the brute-force
+  // limit on the first hop let a caller reset its own bucket by rotating
+  // X-Forwarded-For, which defeats the whole point of the limit.
+  return clientIpForRecord(req.headers);
 }
 
 // POST /api/license/validate — { key, hostname, panelUrl }

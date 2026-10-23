@@ -12,6 +12,8 @@
  * plaintext exists exactly once, in the generate response.
  */
 
+import { timingSafeEqual } from "node:crypto";
+
 export const MASTER_KEY_SETTING = "panel_master_key_hash";
 export const MASTER_KEY_HEADER = "x-master-key";
 export const MASTER_KEY_PREFIX = "GSMM";
@@ -52,25 +54,30 @@ export async function masterKeyConfigured(): Promise<{ env: boolean; stored: boo
  * Verify a presented master key against BOTH sources: the env escape hatch
  * (exact match, existing semantics) and the stored hash.
  */
+/** Constant-time compare so neither branch leaks the match length through timing. */
+function constantTimeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a, "utf8");
+  const right = Buffer.from(b, "utf8");
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
+}
+
 export async function verifyMasterKey(presented: unknown): Promise<boolean> {
   if (!looksLikeMasterKey(presented)) return false;
   const key = (presented as string).trim();
 
+  // Both branches compare with the same helper: a plain `===` on the env key
+  // would let the comparison timing differ from the hash branch's.
   const env = process.env.GSM_PANEL_MASTER_KEY;
-  if (env && env.length >= 16 && key === env.trim()) return true;
+  if (env && env.length >= 16 && constantTimeEqual(key, env.trim())) return true;
 
   try {
     const { db } = await import("@/db");
     const { settings } = await import("@/db/schema");
     const { eq } = await import("drizzle-orm");
-    const { timingSafeEqual } = await import("node:crypto");
     const [row] = await db.select({ value: settings.value }).from(settings).where(eq(settings.key, MASTER_KEY_SETTING)).limit(1);
     if (!row?.value) return false;
-    const presentedHash = await hashMasterKey(key);
-    const a = Buffer.from(presentedHash, "utf8");
-    const b = Buffer.from(row.value, "utf8");
-    if (a.length !== b.length) return false;
-    return timingSafeEqual(a, b);
+    return constantTimeEqual(await hashMasterKey(key), row.value);
   } catch {
     return false;
   }

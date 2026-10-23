@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { publicThrottleAllowed } from "@/lib/public-throttle";
 import { lookupPublicStatus } from "@/lib/status-lookup";
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +15,10 @@ export const dynamic = "force-dynamic";
  * malformed tokens get a bare 404 so they cannot be probed for shape.
  */
 function clientIp(req: NextRequest): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "anon";
+  // Trust-aware: without GSM_TRUST_PROXY a forwarded header is an unverifiable
+  // claim and collapses to one shared bucket rather than letting a caller
+  // rotate X-Forwarded-For to reset its own throttle.
+  return clientIpForRecord(req.headers);
 }
 
 export async function GET(

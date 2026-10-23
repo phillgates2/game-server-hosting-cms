@@ -11,6 +11,7 @@ import { apiError } from "@/lib/api-error";
 import { resolveBackupPath, precheckRestore } from "@/lib/backup-restore";
 import { latestBackupName, assessDrill, DRILL_MAX_ENTRIES, type DrillEntry } from "@/lib/backup-drill";
 
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 1800;
@@ -174,7 +175,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     } catch { /* best-effort */ }
 
     try {
-      const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
+      const ip = clientIpForRecord(req.headers);
       await db.insert(auditLog).values({
         userId: auth.userId as number,
         action: "server.restore",

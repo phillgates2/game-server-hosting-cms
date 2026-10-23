@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq, and } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 import {
   ensureServerCollaboratorsTable,
   isCollaboratorRole,
@@ -155,7 +156,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         entityId: server.id,
         details: { targetUserId, role, canTransfer, serverName: server.name },
         ipAddress:
-          (req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown").slice(0, 45),
+          clientIpForRecord(req.headers),
       });
     } catch {
       /* best-effort */
@@ -243,7 +244,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           sessionsDropped,
         },
         ipAddress:
-          (req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown").slice(0, 45),
+          clientIpForRecord(req.headers),
       });
     } catch {
       /* best-effort */
@@ -298,7 +299,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         entityId: server.id,
         details: { targetUserId, serverName: server.name, self: selfRemoval && !manager },
         ipAddress:
-          (req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown").slice(0, 45),
+          clientIpForRecord(req.headers),
       });
     } catch {
       /* best-effort */

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { lookupPublicList } from "@/lib/status-lookup";
 import { publicThrottleAllowed } from "@/lib/public-throttle";
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,8 +27,10 @@ export const metadata: Metadata = {
 
 export default async function PublicStatusListPage() {
   const hdrs = await headers();
-  const ip = hdrs.get("x-forwarded-for")?.split(",")[0]?.trim() || hdrs.get("x-real-ip") || "anon";
-  const throttled = !publicThrottleAllowed(`public-status:${ip}`);
+  // Trust-aware: without GSM_TRUST_PROXY a forwarded header is an unverifiable
+  // claim and collapses to one shared bucket rather than letting a caller
+  // rotate X-Forwarded-For to reset its own throttle.
+  const throttled = !publicThrottleAllowed(`public-status:${clientIpForRecord(hdrs)}`);
 
   // Only probe the fleet when the request itself is allowed.
   const servers = throttled ? [] : await lookupPublicList().catch(() => []);

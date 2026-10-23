@@ -3,8 +3,9 @@ import { db } from "@/db";
 import { shopProducts, shopOrders, shopCoupons, shopResellers } from "@/db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
-import { ensureShopTables, isValidOrderEmail, normalizeCouponCode, couponUsable, applyCoupon, normalizeResellerToken, hashResellerToken, commissionFor, type ShopProvider, type CouponKind } from "@/lib/shop";
+import { ensureShopTables, isValidOrderEmail, normalizeCouponCode, couponUsable, applyCoupon, normalizeResellerToken, hashResellerToken, commissionFor, restoreStockForOrder, cartRequiresCardProvider, type ShopProvider, type CouponKind } from "@/lib/shop";
 import { checkRateLimit, type RateLimitEntry } from "@/lib/licensing";
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 import { stripeEnabled, createStripeCheckoutSession } from "@/lib/shop-stripe";
 
 export const runtime = "nodejs";
@@ -15,32 +16,15 @@ const RATE_MAX = 15;
 const hits = new Map<string, RateLimitEntry>();
 
 function clientIp(req: NextRequest): string {
-  return (
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip") ||
-    "unknown"
-  ).slice(0, 45);
+  // Trust-aware: forwarded headers are honoured only behind GSM_TRUST_PROXY
+  // and only the LAST hop. Keying the order rate limit on the first hop let a
+  // caller reset its own bucket by rotating X-Forwarded-For, which made the
+  // limit advisory — and each unthrottled order burns a coupon use (charged
+  // at fulfilment) and decrements stock.
+  return clientIpForRecord(req.headers);
 }
 
 type CartItemInput = { productId: number; quantity?: number };
-
-async function resolveReseller(req: NextRequest, amountCents: number) {
-  let resellerId: number | null = null;
-  let commissionCents: number | null = null;
-  // Support both header and body token
-  const headerToken = normalizeResellerToken(req.headers.get("x-reseller-token"));
-  // body token will be checked by caller via param
-  if (headerToken) {
-    const resellerHash = await hashResellerToken(headerToken);
-    const [reseller] = await db.select().from(shopResellers).where(eq(shopResellers.tokenHash, resellerHash)).limit(1);
-    if (reseller && reseller.active) {
-      resellerId = reseller.id;
-      commissionCents = commissionFor(amountCents, reseller.commissionPct);
-      await db.update(shopResellers).set({ lastUsedAt: new Date() }).where(eq(shopResellers.id, reseller.id));
-    }
-  }
-  return { resellerId, commissionCents };
-}
 
 // POST /api/shop/orders — { productId, email, quantity?, customerName?, provider?, couponCode?, items?: [{productId, quantity}] } — start a purchase
 export async function POST(req: NextRequest) {
@@ -96,6 +80,17 @@ export async function POST(req: NextRequest) {
     const products = await db.select().from(shopProducts).where(inArray(shopProducts.id, productIds));
     const productMap = new Map(products.map((p) => [p.id, p]));
 
+    // A subscription may only be paid for with a card, and the rule applies to
+    // the WHOLE cart — a subscription bought alongside anything else must not
+    // slip past it. Checked before the loop so the message is not tied to
+    // whichever item happens to come first.
+    if (cartRequiresCardProvider(cartItems.map((i) => ({ kind: productMap.get(i.productId)?.kind ?? null })), provider)) {
+      return NextResponse.json(
+        { error: "Subscriptions require card payments (Stripe) — the operator has not enabled it yet." },
+        { status: 400 }
+      );
+    }
+
     // Validate all
     for (const item of cartItems) {
       const p = productMap.get(item.productId);
@@ -105,12 +100,6 @@ export async function POST(req: NextRequest) {
       }
       if (p.stockQuantity !== null && p.stockQuantity !== undefined && p.stockQuantity < qty) {
         return NextResponse.json({ error: `${p.name} is out of stock (only ${p.stockQuantity} left).` }, { status: 400 });
-      }
-      if (p.kind === "subscription" && provider !== "stripe" && cartItems.length === 1) {
-        return NextResponse.json(
-          { error: "Subscriptions require card payments (Stripe) — the operator has not enabled it yet." },
-          { status: 400 }
-        );
       }
     }
 
@@ -138,7 +127,9 @@ export async function POST(req: NextRequest) {
       }
       couponId = coupon.id;
       couponObj = { kind: coupon.kind as CouponKind, value: coupon.value, productId: coupon.productId };
-      await db.update(shopCoupons).set({ usedCount: coupon.usedCount + 1 }).where(eq(shopCoupons.id, coupon.id));
+      // The use is NOT charged here. Consuming a coupon at order creation lets
+      // an abandoned checkout (or a failed Stripe session) burn a use nobody
+      // paid for; fulfilOrder charges it once money has actually moved.
     }
 
     // Reseller: try header first, then body token
@@ -156,18 +147,21 @@ export async function POST(req: NextRequest) {
     }
 
     // Calculate totals and create orders
-    const createdOrders: { id: number; productName: string; quantity: number; amountCents: number }[] = [];
+    const createdOrders: { id: number; productId: number; productName: string; quantity: number; amountCents: number }[] = [];
     let grandTotal = 0;
 
     for (const item of cartItems) {
       const product = productMap.get(item.productId)!;
       const qty = item.quantity ?? 1;
       let amountCents = product.priceCents * qty;
-      if (couponObj) {
-        if (couponObj.productId === null || couponObj.productId === product.id) {
-          const discountedUnit = applyCoupon({ kind: couponObj.kind, value: couponObj.value }, product.priceCents);
-          amountCents = discountedUnit * qty;
-        }
+      // A scoped coupon only discounts the product it is scoped to, and the
+      // `couponId` stored below follows the same rule. Attaching it to an order
+      // it did not discount would misattribute the coupon in analytics.
+      const couponApplies =
+        couponObj !== null && (couponObj.productId === null || couponObj.productId === product.id);
+      if (couponApplies) {
+        const discountedUnit = applyCoupon({ kind: couponObj!.kind, value: couponObj!.value }, product.priceCents);
+        amountCents = discountedUnit * qty;
       }
       grandTotal += amountCents;
 
@@ -188,7 +182,7 @@ export async function POST(req: NextRequest) {
           status: "pending",
           amountCents,
           currency: product.currency,
-          couponId,
+          couponId: couponApplies ? couponId : null,
           resellerId,
           commissionCents,
           quantity: qty,
@@ -196,7 +190,7 @@ export async function POST(req: NextRequest) {
         })
         .returning({ id: shopOrders.id });
 
-      createdOrders.push({ id: order.id, productName: product.name, quantity: qty, amountCents });
+      createdOrders.push({ id: order.id, productId: product.id, productName: product.name, quantity: qty, amountCents });
 
       if (product.stockQuantity !== null && product.stockQuantity !== undefined) {
         await db.update(shopProducts).set({ stockQuantity: product.stockQuantity - qty }).where(eq(shopProducts.id, product.id));
@@ -221,6 +215,9 @@ export async function POST(req: NextRequest) {
         });
         if ("error" in result) {
           await db.update(shopOrders).set({ status: "cancelled" }).where(eq(shopOrders.id, createdOrders[0].id));
+          // Stock was decremented above; a cancellation that was never paid for
+          // must return it.
+          await restoreStockForOrder(createdOrders[0].id);
           return NextResponse.json({ error: `Payment setup failed: ${result.error}` }, { status: 502 });
         }
         await db.update(shopOrders).set({ providerRef: result.sessionId }).where(eq(shopOrders.id, createdOrders[0].id));
@@ -241,9 +238,10 @@ export async function POST(req: NextRequest) {
           interval: "month",
         });
         if ("error" in result) {
-          // Cancel all
+          // Cancel all, and return the stock each one was holding.
           for (const o of createdOrders) {
             await db.update(shopOrders).set({ status: "cancelled" }).where(eq(shopOrders.id, o.id));
+            await restoreStockForOrder(o.id);
           }
           return NextResponse.json({ error: `Payment setup failed: ${result.error}` }, { status: 502 });
         }

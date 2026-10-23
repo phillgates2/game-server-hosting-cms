@@ -4,6 +4,7 @@ import { settings, auditLog } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
 import { authorizeMasterOrSession } from "@/lib/master-key";
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 import {
   generateMasterKey,
   hashMasterKey,
@@ -15,7 +16,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 async function ipOf(req: NextRequest): Promise<string> {
-  return (req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown").slice(0, 45);
+  return clientIpForRecord(req.headers);
 }
 
 // GET — status only (never the key itself)

@@ -5,7 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
-import { ensureShopTables, orderCanRefund, orderCanCancel, type ShopOrderStatus } from "@/lib/shop";
+import { ensureShopTables, orderCanRefund, orderCanCancel, restoreStockForOrder, type ShopOrderStatus } from "@/lib/shop";
 import { refundStripeSession } from "@/lib/shop-stripe";
 
 export const runtime = "nodejs";
@@ -38,6 +38,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         return NextResponse.json({ error: `Order is ${status} — only pending orders can be cancelled.` }, { status: 400 });
       }
       await db.update(shopOrders).set({ status: "cancelled" }).where(eq(shopOrders.id, order.id));
+      // Nothing was sold, so the stock this pending order was holding goes back.
+      await restoreStockForOrder(order.id);
       await audit(auth.userId as number, order.id, order.email, "cancelled");
       return NextResponse.json({ ok: true, action: "cancelled" });
     }

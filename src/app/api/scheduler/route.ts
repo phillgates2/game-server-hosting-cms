@@ -65,6 +65,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `taskType must be one of: ${TASK_TYPES.join(", ")}` }, { status: 400 });
     }
 
+    // A `command` task is ARBITRARY SHELL EXECUTION scheduled on the panel
+    // host. That is a scheduler capability, not a server-management one: the
+    // servers.edit fallback above is right for restart/backup tasks a server
+    // owner schedules, but it must not open a shell on the panel to a role
+    // that was only given servers.edit. (A role holding servers.install can
+    // run an admin-authored install script; this is caller-supplied input.)
+    if (taskType === "command" && !(await hasPermission(auth.userId, "scheduler.create", auth.keyScope))) {
+      return NextResponse.json(
+        { error: "Scheduling a command task requires the scheduler.create permission" },
+        { status: 403 }
+      );
+    }
+
     // The old "parser" returned +1h for anything it did not understand, so
     // `*/30` silently became a 1-hour-ish schedule. Invalid cron is a 400.
     const cron = String(cronExpression).trim();

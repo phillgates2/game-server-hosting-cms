@@ -7,6 +7,7 @@ import { desc, eq } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
 import { limitParam, offsetParam } from "@/lib/pagination";
 
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 // GET /api/audit-log — List audit log entries
 export async function GET(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
@@ -91,7 +92,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
+    const ip = clientIpForRecord(req.headers);
 
     await db.insert(auditLog).values({
       userId: auth.userId,

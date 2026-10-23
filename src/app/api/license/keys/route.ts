@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { eq, sql, desc } from "drizzle-orm";
 import { apiError } from "@/lib/api-error";
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 import {
   ensureLicenseTables,
   generateLicenseKey,
@@ -96,7 +97,7 @@ export async function POST(req: NextRequest) {
       .returning({ id: licenseKeys.id });
 
     try {
-      const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
+      const ip = clientIpForRecord(req.headers);
       await db.insert(auditLog).values({
         userId: auth.userId || null,
         action: "license.issue",

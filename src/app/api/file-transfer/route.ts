@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { apiError } from "@/lib/api-error";
 import { describeTransferEndpoint, transferSettingsSummary } from "@/lib/file-transfer";
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -321,7 +322,7 @@ export async function POST(req: NextRequest) {
 
 /** Best-effort client address for the audit trail. */
 function clientIp(req: NextRequest): string {
-  const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0].trim();
-  return req.headers.get("x-real-ip") ?? "panel";
+  // Trust-aware: the audit trail should record the identity the panel can
+  // actually verify, not one the caller asserts in a header.
+  return clientIpForRecord(req.headers);
 }

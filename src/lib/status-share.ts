@@ -73,20 +73,65 @@ export function publicStatusPayload(input: {
 // ── Embed snippets for community websites ─────────────────────────────────
 
 /**
+ * Validate an origin before it is pasted into third-party HTML.
+ *
+ * These snippets interpolate the origin into an attribute (`src="..."`) and
+ * into a `<script>` block (`fetch("...")`). An origin containing `"` breaks
+ * out of the string and `</script>` breaks out of the tag, so an unvalidated
+ * value is stored XSS on whoever pastes the snippet.
+ *
+ * Returns only scheme + host + port (`URL.origin`), which cannot carry a
+ * path, query, userinfo or markup. Anything else returns null so the caller
+ * refuses to emit a snippet rather than emit one pointing somewhere the
+ * operator did not choose.
+ */
+export function normalizeEmbedOrigin(origin: unknown): string | null {
+  if (typeof origin !== "string") return null;
+  const trimmed = origin.trim();
+  if (!/^https?:\/\//i.test(trimmed)) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  // Userinfo re-targets the request: https://user@evil.com has an origin of
+  // evil.com, which is not what the operator pasted.
+  if (parsed.username || parsed.password) return null;
+  return parsed.origin;
+}
+
+/** Clamp the iframe height so a crafted number cannot break the attribute. */
+function clampHeight(heightPx: number): number {
+  const n = Number(heightPx);
+  return Number.isFinite(n) ? Math.min(4000, Math.max(120, Math.round(n))) : 480;
+}
+
+/**
  * The iframe variant: paste-and-done, styled by the panel's own page.
  * Height fits a handful of servers; the page scrolls if there are more.
+ *
+ * Returns null when the origin is not a plain http(s) origin — the caller
+ * must not emit a snippet embedding somewhere the operator did not choose.
  */
-export function buildEmbedIframe(origin: string, heightPx = 480): string {
-  const base = origin.replace(/\/+$/, "");
-  return `<iframe src="${base}/status" title="Server Status" loading="lazy" style="width:100%;max-width:920px;height:${heightPx}px;border:0;border-radius:12px;background:#0b1020"></iframe>`;
+export function buildEmbedIframe(origin: string, heightPx = 480): string | null {
+  const base = normalizeEmbedOrigin(origin);
+  if (!base) return null;
+  const height = clampHeight(heightPx);
+  return `<iframe src="${base}/status" title="Server Status" loading="lazy" style="width:100%;max-width:920px;height:${height}px;border:0;border-radius:12px;background:#0b1020"></iframe>`;
 }
 
 /**
  * The script widget variant: fetches the public JSON (CORS-open) and renders
  * a compact list, fully inline-styled so it drops into any site theme.
+ *
+ * The origin is validated like the iframe variant; server names are escaped
+ * before they are written into innerHTML.
  */
-export function buildEmbedWidget(origin: string): string {
-  const base = origin.replace(/\/+$/, "");
+export function buildEmbedWidget(origin: string): string | null {
+  const base = normalizeEmbedOrigin(origin);
+  if (!base) return null;
   return `<div id="gsm-status"></div>
 <script>
 (function () {
