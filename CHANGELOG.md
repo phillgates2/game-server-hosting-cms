@@ -114,6 +114,23 @@ back, and no way to find a setting other than scrolling.
   implementation: focus moves in, Tab cycles inside, the page behind does not
   scroll, Escape closes, focus returns to the opener, and single-key shortcuts
   stay inert while either is open.
+- **The panel remembers where you were.** Panel tabs now live in the address
+  bar as `#panel/servers`, `#panel/monitor`, … — a refresh reopens the panel you
+  were watching instead of dropping back to Overview, a panel link can be
+  bookmarked, and Back/Forward walk the panels you actually visited. The two
+  address spaces are namespaced (`#panel/shop` is the panel, `#shop` is the
+  storefront), and a panel the account cannot open is never opened from a link
+  — the operator stays where they are instead of landing in a view whose every
+  request is refused.
+- **Ladders are addressable too.** `#ladder/game:3/S2` opens one ladder and one
+  season, `#ladder/standalone:Bronze%20League` opens a standalone ladder, and
+  picking a ladder or season keeps the URL in step, so the exact standing you
+  are looking at can be shared.
+- **Every shortcut, in one list.** Press `?` anywhere in the panel (or choose
+  *Keyboard shortcuts* in quick jump / the mobile drawer) for a cheat sheet of
+  the global keys, the quick-jump keys and every panel shortcut. The list is
+  built from the same navigation table the keyboard handler uses, so it cannot
+  advertise a key that does not work or miss one that does.
 - **An expired session is named.** `installSessionExpiryWatch` notices the first
   `401` from any `/api/` request (never the auth endpoints — a signed-out
   `/api/auth/me` and a wrong password are not expiries) and the shell shows a

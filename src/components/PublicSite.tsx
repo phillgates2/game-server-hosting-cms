@@ -286,6 +286,18 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
       return;
     }
 
+    if (route.kind === "ladder") {
+      pendingRouteRef.current = null;
+      setSelectedPost(null);
+      setSelectedCat(null);
+      setSelectedThread(null);
+      setTab("ladder");
+      if (route.key) setActiveLadderKey(route.key);
+      if (route.season) setLadderSeason(route.season);
+      void loadLadder(route.key ?? undefined, route.season ?? undefined);
+      return;
+    }
+
     // Thread. The object may only exist in the current list, so the fetch below
     // fills the view in; the render shows a loading state until it does.
     const known = hint?.thread ?? threads.find((t) => t.id === route.id) ?? null;
@@ -294,7 +306,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
     setSelectedThread(known);
     setTab("forum-thread");
     void loadThread(route.id);
-  }, [blogs, changelogs, forumCategories, threads, isAdmin, loadThread, loadThreads]);
+  }, [blogs, changelogs, forumCategories, threads, isAdmin, loadLadder, loadThread, loadThreads]);
 
   const navigate = useCallback((route: SiteRoute, hint?: RouteHint, replace = false) => {
     applyRoute(route, hint);
@@ -859,7 +871,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                   {ladders.map((l) => {
                     const key = l.type === "game" ? `game:${l.id}` : `standalone:${l.name}`;
                     return (
-                      <button key={key} onClick={() => { setActiveLadderKey(key); loadLadder(key, ladderSeason); }}
+                      <button key={key} onClick={() => navigate({ kind: "ladder", key, season: ladderSeason || null }, undefined, true)}
                         className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors ${activeLadderKey === key ? "bg-accent text-white" : "bg-bg-card border border-border hover:border-accent/30 text-text-secondary"}`}>
                         {l.icon} {l.name}
                       </button>
@@ -867,7 +879,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                   })}
                 </div>
                 {ladderSeasons.length > 1 && (
-                  <select value={ladderSeason} onChange={(e) => { setLadderSeason(e.target.value); loadLadder(activeLadderKey, e.target.value); }}
+                  <select value={ladderSeason} onChange={(e) => navigate({ kind: "ladder", key: activeLadderKey || null, season: e.target.value }, undefined, true)}
                     className="px-3 py-1.5 bg-bg-card border border-border rounded-lg text-sm">
                     {ladderSeasons.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>

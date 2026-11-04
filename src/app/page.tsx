@@ -150,6 +150,15 @@ function HomeContent() {
     };
   }, [state]);
 
+  // Returning to the site must not leave a #panel/… address behind: the panel
+  // and the public site share one URL.
+  const goPublic = useCallback(() => {
+    if (typeof window !== "undefined" && window.location.hash.startsWith("#panel/")) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+    setState("public");
+  }, []);
+
   async function handleLogin(u: AuthUser) {
     setSessionExpired(false);
     try {
@@ -158,7 +167,7 @@ function HomeContent() {
         const meData = await meRes.json();
         if (meData.user) {
           setUser(meData.user);
-          setState("public");
+          goPublic();
           return;
         }
       }
@@ -168,13 +177,13 @@ function HomeContent() {
     setUser(u);
     // Stay on the public site after login — the Control Panel button is the
     // way in.
-    setState("public");
+    goPublic();
   }
 
   function handleLogout() {
     fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     setUser(null);
-    setState("public");
+    goPublic();
   }
 
   if (state === "loading") {
@@ -253,7 +262,7 @@ function HomeContent() {
           <Dashboard
             user={user}
             onLogout={handleLogout}
-            onGoHome={() => setState("public")}
+            onGoHome={goPublic}
           />
         </ErrorBoundary>
         {sessionExpired && (

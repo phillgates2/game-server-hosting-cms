@@ -736,8 +736,30 @@ Discord and a page survives a refresh or the Back button:
 | `#thread/9` | a thread, loaded directly |
 | `#site-editor` | the site editor *(administrators only)* |
 
+| `#ladder/game:3/S2` | one ladder and one season |
+| `#ladder/standalone:Bronze%20League` | a standalone ladder |
+
 Anything unrecognised resolves to the homepage, so a mistyped or outdated link
 never lands on a blank page.
+
+### Shareable panel pages
+
+The control panel uses a separate namespace, so a refresh reopens the panel you
+were on rather than dropping back to Overview, and Back/Forward walk the panels
+you visited:
+
+| Link | Opens |
+|:--|:--|
+| `#panel/servers` · `#panel/monitor` · `#panel/settings` · … | any panel |
+
+`#panel/shop` is the management panel; `#shop` is the public storefront. A link
+to a panel your account cannot open is ignored rather than opened.
+
+### Keyboard shortcuts
+
+Press **?** in the panel (or pick *Keyboard shortcuts* in quick jump / the mobile
+menu) for the full list: `Ctrl/⌘ K` quick jump, `?` help, `Esc` to close, plus
+one letter per panel (`S` servers, `M` monitor, `F` files, …).
 
 ## 🛠️ Operations
 

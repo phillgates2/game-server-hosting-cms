@@ -30,6 +30,8 @@ import { LanguageSelector } from "@/lib/i18n";
 
 import { useRouter } from "next/navigation";
 import { clampPaletteIndex, stepPaletteIndex } from "@/lib/palette";
+import { buildShortcutGroups } from "@/lib/panel-shortcuts";
+import { panelHash, parsePanelHash } from "@/lib/panel-url";
 import { fetchWithTimeout } from "@/lib/api-client";
 
 const PALETTE_TYPE_TAB_MAP: Record<string, Tab> = { server: "servers", user: "users", game: "games", thread: "forum", cms: "cms", node: "nodes" };
@@ -177,14 +179,19 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
   const paletteInputRef = useRef<HTMLInputElement>(null);
   const paletteDialogRef = useRef<HTMLDivElement>(null);
   const mobileNavRef = useRef<HTMLDivElement>(null);
+  const shortcutsDialogRef = useRef<HTMLDivElement>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   const closePalette = useCallback(() => setPaletteOpen(false), []);
   const closeMobileNav = useCallback(() => setMobileNavOpen(false), []);
+  const closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
   const paletteKeyDown = useDialogFocus(paletteOpen, paletteDialogRef, closePalette);
   const mobileNavKeyDown = useDialogFocus(mobileNavOpen, mobileNavRef, closeMobileNav);
+  const shortcutsKeyDown = useDialogFocus(shortcutsOpen, shortcutsDialogRef, closeShortcuts);
 
   const [permsError, setPermsError] = useState(false);
+  const [permsLoaded, setPermsLoaded] = useState(false);
 
   // The nav is built from these permissions. If the request fails the menu
   // silently loses every gated panel, which looks like an account that lost its
@@ -200,6 +207,8 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
       }
     } catch {
       setPermsError(true);
+    } finally {
+      setPermsLoaded(true);
     }
   }, []);
   useEffect(() => {
@@ -234,6 +243,9 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
   const [licenseBanner, setLicenseBanner] = useState<string | null>(null);
   const [licenseLocked, setLicenseLocked] = useState(false);
   const filteredNav = NAV_ITEMS.filter((item) => !item.permission || perms[item.permission] === true);
+  // Built from the same list the keyboard handler maps, so the sheet cannot
+  // advertise a shortcut that does not work (or miss one that does).
+  const shortcutGroups = useMemo(() => buildShortcutGroups(filteredNav), [filteredNav]);
 
   const sections: Record<string, NavItem[]> = {};
   for (const item of filteredNav) { if (!sections[item.section]) sections[item.section] = []; sections[item.section].push(item); }
@@ -247,7 +259,11 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
 
       // Ctrl/Cmd + K = palette
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPaletteIndex(0); setPaletteOpen((v) => !v); return; }
-      if (e.key === "Escape") { setPaletteOpen(false); setOpenGroup(null); return; }
+      if (e.key === "Escape") { setPaletteOpen(false); setMobileNavOpen(false); setOpenGroup(null); return; }
+
+      // "?" is the panel's own help key. It cannot clash with the single-letter
+      // panel shortcuts because those are checked below.
+      if (e.key === "?") { e.preventDefault(); setShortcutsOpen(true); setPaletteOpen(false); return; }
 
       // A modal owns the keyboard while it is open.
       if (paletteOpen || mobileNavOpen) return;
@@ -259,7 +275,7 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
       for (const item of filteredNav) { if (item.shortcut) shortcutMap[item.shortcut.toLowerCase()] = item.key; }
 
       const target = shortcutMap[e.key.toLowerCase()];
-      if (target) { setTab(target); setOpenGroup(null); }
+      if (target) selectTab(target);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -299,11 +315,12 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
     const base = filteredNav.map((item) => ({
       id: item.key, icon: undefined as string | undefined, title: item.label, subtitle: TAB_META[item.key].subtitle,
       section: SECTION_LABELS[item.section] || item.section, shortcut: item.shortcut,
-      action: () => { setTab(item.key); setPaletteOpen(false); setPaletteQuery(""); setOpenGroup(null); },
+      action: () => { selectTab(item.key); setPaletteOpen(false); setPaletteQuery(""); },
     }));
     const extras = [
       { id: "logout", icon: "🚪", title: "Log out", subtitle: "Return to the public site.", section: "Account", shortcut: undefined, action: () => { setPaletteOpen(false); handleLogout(); } },
       { id: "go-home", icon: "🏠", title: "Homepage", subtitle: "Open the public frontpage.", section: "Navigation", shortcut: undefined, action: () => { setPaletteOpen(false); if (onGoHome) onGoHome(); else router.push("/"); } },
+      { id: "shortcuts", icon: "⌨️", title: "Keyboard shortcuts", subtitle: "Every key the panel answers to.", section: "Help", shortcut: "?", action: () => { setPaletteOpen(false); setShortcutsOpen(true); } },
     ];
     const all = [...base, ...extras];
     const q = paletteQuery.trim().toLowerCase();
@@ -314,7 +331,7 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
   // Unified keyboard-navigable list: search results first, then pages/actions.
   const runSearchResult = useCallback((r: { type: string }) => {
     const t = PALETTE_TYPE_TAB_MAP[r.type];
-    if (t) { setTab(t); setPaletteOpen(false); setPaletteQuery(""); setOpenGroup(null); }
+    if (t) { selectTab(t); setPaletteOpen(false); setPaletteQuery(""); }
   }, []);
   const selectables = [
     ...searchResults.map((r) => ({ key: `${r.type}-${r.id}`, run: () => runSearchResult(r) })),
@@ -323,7 +340,20 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
   const activeIndex = clampPaletteIndex(paletteIndex, selectables.length);
 
 
-  function navTo(t: Tab) { setTab(t); setOpenGroup(null); }
+  // ── Address bar ───────────────────────────────────────────────────────────
+  // Every panel opens at its own hash, so a refresh (or a pasted link) reopens
+  // the same panel instead of dropping back to Overview.
+  function selectTab(t: Tab, replace = false) {
+    setTab(t);
+    setOpenGroup(null);
+    if (typeof window === "undefined") return;
+    const hash = panelHash(t);
+    if (window.location.hash === hash) return;
+    if (replace) window.history.replaceState(null, "", hash);
+    else window.history.pushState(null, "", hash);
+  }
+
+  function navTo(t: Tab) { selectTab(t); }
 
   // Switching panels used to keep the previous scroll offset, so a new panel
   // opened half-way down with its heading off-screen.
@@ -331,6 +361,63 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 });
   }, [tab]);
+
+  // Refresh / deep link: reopen the panel named in the address bar, once the
+  // account's permissions are known. A panel the account cannot open is left
+  // alone rather than opened to refuse every request it makes.
+  const pendingTabRef = useRef<Tab | null>(null);
+  useEffect(() => {
+    const requested = parsePanelHash(window.location.hash);
+    if (requested && NAV_ITEMS.some((item) => item.key === requested)) {
+      pendingTabRef.current = requested as Tab;
+    }
+    if (!requested) {
+      // Give the panel its own address as a new history entry, so Back still
+      // returns to the page the operator came from.
+      window.history.pushState(null, "", panelHash(tab));
+    }
+    // Mount only: `tab` is the initial panel.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const requested = pendingTabRef.current;
+    if (!requested) return;
+    const item = NAV_ITEMS.find((entry) => entry.key === requested);
+    if (!item) {
+      pendingTabRef.current = null;
+      return;
+    }
+    if (item.permission && perms[item.permission] !== true) {
+      // Wait for the permission answer; once it is in and still says no, stay put.
+      if (permsLoaded) pendingTabRef.current = null;
+      return;
+    }
+    pendingTabRef.current = null;
+    const timer = window.setTimeout(() => selectTab(requested, true), 0);
+    return () => window.clearTimeout(timer);
+  }, [perms, permsLoaded]);
+
+  // Back / Forward walk the panels that were actually visited.
+  useEffect(() => {
+    const onPop = () => {
+      const requested = parsePanelHash(window.location.hash);
+      if (!requested) {
+        // The address is no longer a panel: the operator has walked back out to
+        // the public site.
+        onGoHome?.();
+        return;
+      }
+      if (requested === tab) return;
+      const item = NAV_ITEMS.find((entry) => entry.key === requested);
+      if (!item) return;
+      if (item.permission && perms[item.permission] !== true) return;
+      setTab(item.key);
+      setOpenGroup(null);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [tab, perms, onGoHome]);
 
   function renderPanel() {
     switch (tab) {
@@ -542,6 +629,13 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
             <div className="mt-4 space-y-1 border-t border-border pt-3">
               <button
                 type="button"
+                onClick={() => { closeMobileNav(); setShortcutsOpen(true); }}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+              >
+                <span className="flex-1 text-left">⌨️ Keyboard shortcuts</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => { closeMobileNav(); navTo("profile"); }}
                 className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
               >
@@ -554,6 +648,67 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
               >
                 <span className="flex-1 text-left">Frontpage</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {shortcutsOpen && (
+        <div
+          className="fixed inset-0 z-[85] flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm"
+          onClick={closeShortcuts}
+        >
+          <div
+            ref={shortcutsDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Keyboard shortcuts"
+            onKeyDown={shortcutsKeyDown}
+            onClick={(e) => e.stopPropagation()}
+            tabIndex={-1}
+            className="mt-16 w-full max-w-2xl gaming-surface rounded-2xl p-5 shadow-2xl outline-none"
+          >
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h2 className="heading-font text-lg font-bold uppercase tracking-[0.1em]">Keyboard shortcuts</h2>
+                <p className="text-xs text-text-muted">Press ? at any time to bring this back.</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeShortcuts}
+                aria-label="Close shortcut list"
+                className="rounded-lg p-2 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="grid gap-5 sm:grid-cols-2">
+              {shortcutGroups.map((group) => (
+                <section key={group.title}>
+                  <h3 className="mb-2 text-[10px] uppercase tracking-[0.18em] text-text-muted">{group.title}</h3>
+                  <ul className="space-y-1.5">
+                    {group.entries.map((entry) => (
+                      <li
+                        key={`${group.title}-${entry.label}`}
+                        className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-bg-hover/60"
+                      >
+                        <span className="text-sm text-text-secondary">{entry.label}</span>
+                        <span className="flex flex-shrink-0 gap-1">
+                          {entry.keys.map((key) => (
+                            <kbd
+                              key={key}
+                              className="gaming-chip rounded px-1.5 py-0.5 font-mono text-[10px] text-text-secondary"
+                            >
+                              {key}
+                            </kbd>
+                          ))}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
             </div>
           </div>
         </div>
@@ -587,7 +742,7 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
                 aria-label="Search pages and actions"
                 className="w-full px-4 py-3 bg-bg-secondary border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-accent"
               />
-              <p className="text-[10px] text-text-muted mt-2">Tip: ↑↓ to move · Enter to select · type a page name or press its shortcut key · Esc to close.</p>
+              <p className="text-[10px] text-text-muted mt-2">Tip: ↑↓ to move · Enter to select · type a page name or press its shortcut key · <kbd className="font-mono">?</kbd> for every shortcut · Esc to close.</p>
             </div>
             <div className="max-h-[60vh] overflow-y-auto p-2">
               {/* Search results */}

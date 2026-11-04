@@ -85,6 +85,62 @@ describe("site hashes parse to routes", () => {
   });
 });
 
+describe("ladder links", () => {
+  test("the plain section is still just #ladder", () => {
+    assert.deepEqual(parseSiteHash("#ladder"), { kind: "tab", tab: "ladder" });
+    assert.equal(siteRouteToHash({ kind: "ladder", key: null, season: null }), "#ladder");
+    assert.equal(isSameRoute({ kind: "ladder", key: null, season: null }, { kind: "tab", tab: "ladder" }), true);
+  });
+
+  test("a ladder and a season are addressable", () => {
+    assert.deepEqual(parseSiteHash("#ladder/game:3"), { kind: "ladder", key: "game:3", season: null });
+    assert.deepEqual(parseSiteHash("#ladder/game:3/S2"), { kind: "ladder", key: "game:3", season: "S2" });
+  });
+
+  test("standalone ladders keep their name and case", () => {
+    const hash = "#ladder/standalone:Bronze%20League/Season%202";
+    assert.deepEqual(parseSiteHash(hash), {
+      kind: "ladder",
+      key: "standalone:Bronze League",
+      season: "Season 2",
+    });
+    // …and survive a round trip through the address bar unchanged.
+    assert.deepEqual(parseSiteHash(siteRouteToHash(parseSiteHash(hash))), parseSiteHash(hash));
+  });
+
+  test("a key the ladder API could not understand still opens the ladder", () => {
+    for (const hash of [
+      "#ladder/nonsense",
+      "#ladder/game:abc",
+      "#ladder/game:0",
+      "#ladder/game:2147483648",
+      "#ladder/standalone:",
+      "#ladder/game:3/", // trailing slash is fine
+    ]) {
+      const route = parseSiteHash(hash);
+      if (hash.endsWith("/")) {
+        assert.deepEqual(route, { kind: "ladder", key: "game:3", season: null }, hash);
+      } else {
+        assert.deepEqual(route, { kind: "tab", tab: "ladder" }, `${hash} falls back to the section`);
+      }
+    }
+  });
+
+  test("oversized or hostile values are dropped, not trusted", () => {
+    assert.deepEqual(parseSiteHash(`#ladder/standalone:${"x".repeat(200)}`), {
+      kind: "tab",
+      tab: "ladder",
+    });
+    const longSeason = parseSiteHash(`#ladder/game:4/${"s".repeat(80)}`);
+    assert.deepEqual(longSeason, { kind: "ladder", key: "game:4", season: null });
+    assert.deepEqual(parseSiteHash("#ladder/game:4/%00"), {
+      kind: "ladder",
+      key: "game:4",
+      season: null,
+    });
+  });
+});
+
 describe("routes serialise to canonical hashes", () => {
   const routes: SiteRoute[] = [
     HOME_ROUTE,
@@ -93,13 +149,17 @@ describe("routes serialise to canonical hashes", () => {
     { kind: "post", id: 3 },
     { kind: "category", id: 4 },
     { kind: "thread", id: 5 },
+    { kind: "ladder", key: "game:9", season: "S3" },
+    { kind: "ladder", key: "standalone:Bronze League", season: null },
     { kind: "site-editor" },
   ];
 
   test("every route survives a trip through the address bar", () => {
     for (const route of routes) {
       const hash = siteRouteToHash(route);
-      assert.match(hash, /^#[a-z0-9/-]+$/, `${hash} is a plain hash`);
+      // No spaces, quotes or markup: a hash must survive being pasted into
+      // chat, HTML and a shell without escaping tricks.
+      assert.match(hash, /^#[^\s"'<>\\]+$/, `${hash} is a plain hash`);
       assert.deepEqual(parseSiteHash(hash), route);
       assert.equal(isSameRoute(parseSiteHash(hash), route), true);
     }
