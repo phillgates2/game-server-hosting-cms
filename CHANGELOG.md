@@ -122,6 +122,10 @@ back, and no way to find a setting other than scrolling.
   storefront), and a panel the account cannot open is never opened from a link
   — the operator stays where they are instead of landing in a view whose every
   request is refused.
+- **The file manager remembers the server and folder.** `#panel/files/12/plugins`
+  reopens that server's folder — bookmarkable, linkable to a colleague, and safe
+  to refresh mid-edit. Browsing replaces the address instead of filling the Back
+  button, so history still means "the panels I visited".
 - **Ladders are addressable too.** `#ladder/game:3/S2` opens one ladder and one
   season, `#ladder/standalone:Bronze%20League` opens a standalone ladder, and
   picking a ladder or season keeps the URL in step, so the exact standing you
@@ -131,6 +135,10 @@ back, and no way to find a setting other than scrolling.
   the global keys, the quick-jump keys and every panel shortcut. The list is
   built from the same navigation table the keyboard handler uses, so it cannot
   advertise a key that does not work or miss one that does.
+- **The site editor works on a phone.** The save bar sticks to the bottom of the
+  screen (a long form no longer leaves Save below the fold), the header wraps
+  instead of squeezing, and the per-link move/remove controls are proper touch
+  targets.
 - **An expired session is named.** `installSessionExpiryWatch` notices the first
   `401` from any `/api/` request (never the auth endpoints — a signed-out
   `/api/auth/me` and a wrong password are not expiries) and the shell shows a

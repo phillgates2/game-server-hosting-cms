@@ -714,9 +714,9 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
         {/* ═══ SITE EDITOR (admin only) ═══ */}
         {tab === "site-editor" && isAdmin && (
           <div className="animate-fade-in space-y-6 max-w-3xl mx-auto">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-xl sm:text-2xl font-bold">✏️ Edit Frontpage</h2>
-              <button onClick={() => goTab("home")} className="text-accent text-sm hover:underline">← Back to Site</button>
+              <button type="button" onClick={() => goTab("home")} className="text-accent text-sm hover:underline">← Back to Site</button>
             </div>
             <form onSubmit={saveSettings} className="space-y-4 sm:space-y-6">
               <div className="bg-bg-card border border-border rounded-xl p-4 sm:p-6 space-y-4">
@@ -803,13 +803,13 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                           <div className="flex items-center justify-end gap-2">
                             <button type="button" onClick={() => moveEditorNavLink(index, -1)} disabled={index === 0}
                               aria-label={`Move ${link.label || "link"} up`} title="Move up"
-                              className="w-8 h-8 rounded-lg bg-bg-hover text-text-secondary hover:text-text-primary disabled:opacity-30">↑</button>
+                              className="w-9 h-9 rounded-lg bg-bg-hover text-text-secondary hover:text-text-primary disabled:opacity-30">↑</button>
                             <button type="button" onClick={() => moveEditorNavLink(index, 1)} disabled={index === editorNavLinks.length - 1}
                               aria-label={`Move ${link.label || "link"} down`} title="Move down"
-                              className="w-8 h-8 rounded-lg bg-bg-hover text-text-secondary hover:text-text-primary disabled:opacity-30">↓</button>
+                              className="w-9 h-9 rounded-lg bg-bg-hover text-text-secondary hover:text-text-primary disabled:opacity-30">↓</button>
                             <button type="button" onClick={() => setEditorNavLinks((links) => links.filter((_, linkIndex) => linkIndex !== index))}
                               aria-label={`Remove ${link.label || "link"}`}
-                              className="px-3 h-8 rounded-lg bg-danger/15 text-danger hover:bg-danger/25 text-xs font-medium">Remove</button>
+                              className="px-3 h-9 rounded-lg bg-danger/15 text-danger hover:bg-danger/25 text-xs font-medium">Remove</button>
                           </div>
                         </div>
                       );
@@ -843,11 +843,11 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                 </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
+              <div className="sticky bottom-0 z-10 -mx-4 flex flex-col items-start gap-3 border-t border-border bg-bg-primary/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:flex-row sm:items-center sm:gap-4 sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
                 <button type="submit" disabled={editorSaving} className="px-6 py-2.5 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium disabled:opacity-50 w-full sm:w-auto">
                   {editorSaving ? "Saving..." : "💾 Save Changes"}
                 </button>
-                {editorMsg && <span className="text-sm">{editorMsg}</span>}
+                {editorMsg && <span className="text-sm" role="status">{editorMsg}</span>}
               </div>
             </form>
 

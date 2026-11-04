@@ -31,7 +31,8 @@ import { LanguageSelector } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 import { clampPaletteIndex, stepPaletteIndex } from "@/lib/palette";
 import { buildShortcutGroups } from "@/lib/panel-shortcuts";
-import { panelHash, parsePanelHash } from "@/lib/panel-url";
+import { useDialogFocus } from "@/components/useDialogFocus";
+import { panelAddressHash, panelHash, parsePanelAddress, parsePanelHash } from "@/lib/panel-url";
 import { fetchWithTimeout } from "@/lib/api-client";
 
 const PALETTE_TYPE_TAB_MAP: Record<string, Tab> = { server: "servers", user: "users", game: "games", thread: "forum", cms: "cms", node: "nodes" };
@@ -97,70 +98,6 @@ const TAB_META: Record<Tab, { title: string; subtitle: string }> = {
     licenses: { title: "License Keys", subtitle: "Issue and manage installation licenses — the master key desk for distributed panels." },
   settings: { title: "Settings", subtitle: "Access, retention, automation, alerts and integrations — one screen at a time." },
   };
-
-/**
- * Focus treatment shared by the command palette and the mobile navigation
- * drawer: focus moves inside, Tab cycles within, the page behind cannot scroll,
- * Escape closes, and focus returns to the control that opened it. Without this
- * a keyboard user could tab out of a modal into content hidden behind it, or be
- * dropped at the top of the document when it closed.
- */
-function useDialogFocus(
-  open: boolean,
-  containerRef: React.RefObject<HTMLElement | null>,
-  onClose: () => void
-) {
-  const openerRef = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    openerRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const timer = window.setTimeout(() => {
-      const root = containerRef.current;
-      if (!root) return;
-      const first = root.querySelector<HTMLElement>(
-        'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
-      (first ?? root).focus();
-    }, 0);
-    return () => {
-      window.clearTimeout(timer);
-      document.body.style.overflow = previousOverflow;
-      openerRef.current?.focus?.();
-      openerRef.current = null;
-    };
-  }, [open, containerRef]);
-
-  return function onDialogKeyDown(event: React.KeyboardEvent) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const root = containerRef.current;
-    if (!root) return;
-    const focusable = Array.from(
-      root.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
-      )
-    );
-    if (focusable.length === 0) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
-}
 
 export default function Dashboard({ user, onLogout, onGoHome }: Props) {
   const router = useRouter();
@@ -353,6 +290,20 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
     else window.history.pushState(null, "", hash);
   }
 
+  // Replacing rather than pushing: browsing folders should not fill the Back
+  // button, but a refresh should still land in the same folder.
+  const filesLocationChange = useCallback((location: { serverId: number | null; path: string }) => {
+    if (typeof window === "undefined") return;
+    const parts = location.serverId
+      ? [
+          String(location.serverId),
+          ...(location.path && location.path !== "." ? [location.path] : []),
+        ]
+      : [];
+    const hash = panelAddressHash("files", parts);
+    if (window.location.hash !== hash) window.history.replaceState(null, "", hash);
+  }, []);
+
   function navTo(t: Tab) { selectTab(t); }
 
   // Switching panels used to keep the previous scroll offset, so a new panel
@@ -366,6 +317,19 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
   // account's permissions are known. A panel the account cannot open is left
   // alone rather than opened to refuse every request it makes.
   const pendingTabRef = useRef<Tab | null>(null);
+
+  // The file manager's open server and folder live in the address too, so a
+  // refresh (or a link sent to a colleague) reopens the same directory.
+  const [filesAddress, setFilesAddress] = useState<{ serverId: number | null; path: string | null }>({
+    serverId: null,
+    path: null,
+  });
+  const applyFilesAddress = useCallback((address: ReturnType<typeof parsePanelAddress>) => {
+    if (!address || address.tab !== "files" || !address.parts[0]) return;
+    const serverId = Number(address.parts[0]);
+    if (!Number.isInteger(serverId) || serverId <= 0) return;
+    setFilesAddress({ serverId, path: address.parts[1] ?? null });
+  }, []);
   useEffect(() => {
     const requested = parsePanelHash(window.location.hash);
     if (requested && NAV_ITEMS.some((item) => item.key === requested)) {
@@ -376,7 +340,13 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
       // returns to the page the operator came from.
       window.history.pushState(null, "", panelHash(tab));
     }
-    // Mount only: `tab` is the initial panel.
+    // Deferred: applying an address sets state.
+    const timer = window.setTimeout(
+      () => applyFilesAddress(parsePanelAddress(window.location.hash)),
+      0
+    );
+    return () => window.clearTimeout(timer);
+    // Mount only: `tab` is the initial panel here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -414,17 +384,26 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
       if (item.permission && perms[item.permission] !== true) return;
       setTab(item.key);
       setOpenGroup(null);
+      if (item.key === "files") applyFilesAddress(parsePanelAddress(window.location.hash));
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
-  }, [tab, perms, onGoHome]);
+  }, [tab, perms, onGoHome, applyFilesAddress]);
 
   function renderPanel() {
     switch (tab) {
       case "overview": return <OverviewPanel user={user} onNavigate={navTo} />;
       case "servers": return <ServersPanel user={user} />;
       // The FTP cross-link only appears for somebody who can actually open that panel.
-      case "files": return <FilesPanel user={user} onNavigate={perms["transfer.view"] ? navTo : undefined} />;
+      case "files": return (
+        <FilesPanel
+          user={user}
+          onNavigate={perms["transfer.view"] ? navTo : undefined}
+          initialServerId={filesAddress.serverId}
+          initialPath={filesAddress.path}
+          onLocationChange={filesLocationChange}
+        />
+      );
       case "transfer": return <FileTransferPanel />;
       case "rcon": return <RconPanel user={user} />;
       case "nodes": return <NodesPanel user={user} />;

@@ -12,7 +12,13 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { PANEL_HASH_PREFIX, panelHash, parsePanelHash } from "../src/lib/panel-url";
+import {
+  PANEL_HASH_PREFIX,
+  panelAddressHash,
+  panelHash,
+  parsePanelAddress,
+  parsePanelHash,
+} from "../src/lib/panel-url";
 
 const PANEL_KEYS = [
   "overview",
@@ -82,5 +88,44 @@ describe("panel hashes", () => {
     // `#panel/shop` is the panel; `#shop` is the public storefront.
     assert.equal(parsePanelHash(panelHash("shop")), "shop");
     assert.equal(parsePanelHash("#shop"), null);
+  });
+});
+
+describe("inner panel state", () => {
+  test("the file manager can address a server and a folder", () => {
+    const hash = panelAddressHash("files", ["12", "plugins/config"]);
+    assert.equal(hash, "#panel/files/12/plugins%2Fconfig");
+
+    const address = parsePanelAddress(hash);
+    assert.equal(address?.tab, "files");
+    assert.deepEqual(address?.parts, ["12", "plugins/config"]);
+  });
+
+  test("paths survive spaces, unicode and separators", () => {
+    const path = "world/Ünïcode map & café";
+    const address = parsePanelAddress(panelAddressHash("files", ["3", path]));
+    assert.deepEqual(address?.parts, ["3", path]);
+  });
+
+  test("decoded parts are bounded, so a link cannot smuggle in junk", () => {
+    const long = parsePanelAddress(`#panel/files/12/${"a".repeat(300)}`);
+    assert.deepEqual(long?.parts, ["12"]);
+
+    const control = parsePanelAddress("#panel/files/12/%00%07");
+    assert.deepEqual(control?.parts, ["12"]);
+
+    // A broken escape sequence is kept verbatim rather than throwing.
+    assert.deepEqual(parsePanelAddress("#panel/files/12/100%")?.parts, ["12", "100%"]);
+  });
+
+  test("the tab alone still parses when there is no inner state", () => {
+    assert.deepEqual(parsePanelAddress("#panel/files"), { tab: "files", parts: [] });
+    assert.equal(parsePanelHash("#panel/files"), "files");
+    assert.equal(panelAddressHash("files"), "#panel/files");
+  });
+
+  test("an inner path never leaks into the public site's namespace", () => {
+    assert.equal(parsePanelAddress("#files/12"), null);
+    assert.equal(parsePanelAddress("#post/12"), null);
   });
 });

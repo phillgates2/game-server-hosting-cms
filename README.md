@@ -751,6 +751,7 @@ you visited:
 | Link | Opens |
 |:--|:--|
 | `#panel/servers` · `#panel/monitor` · `#panel/settings` · … | any panel |
+| `#panel/files/12/plugins` | the file manager, on server 12 in `plugins/` |
 
 `#panel/shop` is the management panel; `#shop` is the public storefront. A link
 to a panel your account cannot open is ignored rather than opened.

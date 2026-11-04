@@ -205,11 +205,25 @@ function streamUpload(
   });
 }
 
-export default function FilesPanel({ user, onNavigate }: { user: AuthUser; onNavigate?: (tab: "transfer") => void }) {
+export default function FilesPanel({
+  user,
+  onNavigate,
+  initialServerId = null,
+  initialPath = null,
+  onLocationChange,
+}: {
+  user: AuthUser;
+  onNavigate?: (tab: "transfer") => void;
+  /** Deep link (`#panel/files/12/plugins`): reopen this server and folder. */
+  initialServerId?: number | null;
+  initialPath?: string | null;
+  /** Tell the shell where we are, so the address bar can show it. */
+  onLocationChange?: (location: { serverId: number | null; path: string }) => void;
+}) {
   const confirm = useConfirm();
   const [servers, setServers] = useState<Server[]>([]);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [currentPath, setCurrentPath] = useState(".");
+  const [selectedId, setSelectedId] = useState<number | null>(initialServerId);
+  const [currentPath, setCurrentPath] = useState(initialPath && initialPath.trim() ? initialPath : ".");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [basePath, setBasePath] = useState("");
   const [editingFile, setEditingFile] = useState<FileContent | null>(null);
@@ -260,6 +274,24 @@ export default function FilesPanel({ user, onNavigate }: { user: AuthUser; onNav
       setLoaded(true);
     }
   }, []);
+
+  // A deep link opens that server's folder once, without waiting for a click.
+  const didInitialLoad = useRef(false);
+  useEffect(() => {
+    if (didInitialLoad.current) return;
+    didInitialLoad.current = true;
+    if (!initialServerId) return;
+    const path = initialPath && initialPath.trim() ? initialPath : ".";
+    // Deferred: loadDir sets state, which must not happen synchronously in an
+    // effect body.
+    const timer = window.setTimeout(() => void loadDir(initialServerId, path), 0);
+    return () => window.clearTimeout(timer);
+  }, [initialServerId, initialPath, loadDir]);
+
+  // Keep the address bar (and therefore a refresh) pointing at what is open.
+  useEffect(() => {
+    onLocationChange?.({ serverId: selectedId, path: currentPath });
+  }, [selectedId, currentPath, onLocationChange]);
 
   function selectServer(id: number) {
     setSelectedId(id);
