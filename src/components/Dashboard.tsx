@@ -92,7 +92,7 @@ const TAB_META: Record<Tab, { title: string; subtitle: string }> = {
     scheduler: { title: "Scheduler", subtitle: "Automate server restarts, backups, and updates on a schedule." },
     apikeys: { title: "API Keys", subtitle: "Generate personal keys for external tools and scripts." },
     licenses: { title: "License Keys", subtitle: "Issue and manage installation licenses — the master key desk for distributed panels." },
-  settings: { title: "Settings", subtitle: "Retention, account defaults, and Discord channel management." },
+  settings: { title: "Settings", subtitle: "Access, retention, automation, alerts and integrations — one screen at a time." },
   };
 
 export default function Dashboard({ user, onLogout, onGoHome }: Props) {

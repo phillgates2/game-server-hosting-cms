@@ -207,7 +207,7 @@ Then visit `http://your-server:3000` to finish setup in the install wizard.
 <td width="33%" valign="top">
 
 #### 👥 Community & Admin
-- **Settings panel** — retention, quotas
+- **Settings panel** — eight focused screens with search, inline validation and one staged save
 - **Forum** with categories and threads
 - **Sandbox chat** — live shoutbox
 - **CMS** — posts, changelogs, pages
@@ -562,11 +562,29 @@ Two places to configure things, split by who they are for:
 
 | Where | What |
 |:--|:--|
-| **Settings** *(Administration)* | Data retention, default server quota, self-registration, age verification (minimum age, Australian 16+ default), pre-update auto-backup, login attempt limit, session length, **🔑 Master Key** (generate/rotate/revoke the one operator key), **idle auto-stop policy**, **alert mute windows**, **weekly fleet digest schedule**, **outbound webhook with delivery log**, IP allowlist, and everything Discord — webhook, bot, and channel backfill |
+| **Settings** *(Administration)* | Eight screens: **Accounts & registration** (self-registration, default server quota, age verification with the Australian 16+ minimum), **Sign-in & sessions** (login attempt limit, session length, IP allowlist), **Retention & backups** (data retention, backup retention, pre-update auto-backup, export/restore), **Automation** (idle auto-stop, weekly fleet digest, scheduled-task announcements), **Host alerts** (CPU/RAM/disk thresholds and mute windows), **Outbound webhook** (with delivery log), **Discord** (webhook, bot, channels, backfill) and the **Public status page** embed codes |
 | **Site Editor** *(✏️ on the public site)* | Panel name, hero text, footer, announcements, navigation links, chat widget, and **custom CSS** |
 
 Everything in **Settings** overrides the matching environment variable, so you
 can change it without editing `.env` or restarting the panel.
+
+The page is split into screens so nothing is a scroll hunt and every control is
+one search away:
+
+- **Search** in the top-right corner matches setting names, help text and
+  keywords, and jumps straight to the field.
+- **Staged saves.** Screens that change panel behaviour share a single save bar.
+  It appears only while something is pending, says how many changes are waiting
+  and on which screens, and sends *only the fields you changed* — so two
+  administrators working on different screens no longer overwrite each other.
+  Screens that drive an integration (webhook, Discord, status page) save with
+  their own button and say so.
+- **Inline validation.** A value outside its documented range is marked at the
+  field with a one-click "use the nearest legal value", and the save is refused
+  until it is fixed. The API validates against the same table, so the browser
+  and the server can never disagree about what is legal.
+- **Reset to defaults** stages a screen's factory values without storing them;
+  **Discard** puts every pending change back.
 
 <details>
 <summary><b>🔔 Giving existing servers a Discord channel</b></summary>
@@ -578,7 +596,7 @@ that already existed do not — and a channel someone deletes by hand in Discord
 leaves the panel posting into a webhook that silently returns 404, because
 webhook delivery never throws.
 
-**Settings → Discord Channels** fixes both:
+**Settings → Discord → Existing servers** fixes both:
 
 | Button | Does |
 |:--|:--|

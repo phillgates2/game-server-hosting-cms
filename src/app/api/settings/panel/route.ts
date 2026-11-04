@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { settings } from "@/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import { settings, auditLog } from "@/db/schema";
+import { inArray, sql } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { apiError } from "@/lib/api-error";
+import { clientIpForRecord } from "@/lib/ip-allowlist";
 import {
   PANEL_SETTING_KEYS,
+  normalisePanelSettingsInput,
   parsePanelSettings,
-  validatePanelSetting,
 } from "@/lib/panel-settings";
 import {
   METRICS_RETENTION_DAYS,
@@ -16,6 +17,9 @@ import {
   invalidateRetentionCache,
   retentionStats,
 } from "@/lib/retention";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 /**
  * Operational settings for the panel itself.
@@ -56,6 +60,19 @@ export async function GET(req: NextRequest) {
   }
 }
 
+/**
+ * POST /api/settings/panel
+ *
+ * Body: `{ settings: { session_days: 14, registration_enabled: false } }`.
+ * Both the stored column names and the camelCase names used by GET are
+ * accepted, because an integration written against the GET payload should not
+ * have to translate before it can save.
+ *
+ * Every field is validated and every failure is returned at once, keyed by
+ * column name, so the screen can mark each bad input instead of making the
+ * operator resubmit until the messages stop. Only the values supplied are
+ * touched — the whole object is not rewritten from a possibly stale copy.
+ */
 export async function POST(req: NextRequest) {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -64,60 +81,119 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = await req.json().catch(() => ({}));
-    const incoming = body?.settings;
-    if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) {
-      return NextResponse.json({ error: "Provide { settings: { ... } }" }, { status: 400 });
+    const body: unknown = await req.json().catch(() => null);
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return NextResponse.json(
+        { error: "Provide { settings: { ... } }" },
+        { status: 400 }
+      );
     }
 
-    const allowed = new Set<string>(PANEL_SETTING_KEYS);
-    const updates: Record<string, string> = {};
+    // Accept the documented wrapper, and also a bare map of settings, which is
+    // what a hand-written curl call usually sends.
+    const envelope = body as Record<string, unknown>;
+    const incoming =
+      envelope.settings !== undefined &&
+      envelope.settings !== null &&
+      typeof envelope.settings === "object" &&
+      !Array.isArray(envelope.settings)
+        ? (envelope.settings as Record<string, unknown>)
+        : envelope;
 
-    for (const [key, raw] of Object.entries(incoming as Record<string, unknown>)) {
-      if (raw === undefined) continue;
-      if (!allowed.has(key)) {
-        return NextResponse.json(
-          { error: `Unknown setting: ${key}` },
-          { status: 400 }
-        );
-      }
-      const checked = validatePanelSetting(key, raw);
-      if (checked.error !== null) {
-        return NextResponse.json({ error: checked.error }, { status: 400 });
-      }
-      updates[key] = checked.value;
+    const result = normalisePanelSettingsInput(incoming);
+
+    if (result.unknown.length > 0) {
+      return NextResponse.json(
+        {
+          error: `Unknown setting: ${result.unknown[0]}`,
+          errors: Object.fromEntries(
+            result.unknown.map((key) => [key, "Not a panel setting."])
+          ),
+          unknown: result.unknown,
+        },
+        { status: 400 }
+      );
     }
 
-    if (Object.keys(updates).length === 0) {
+    const errorKeys = Object.keys(result.errors);
+    if (errorKeys.length > 0) {
+      return NextResponse.json(
+        {
+          error: result.errors[errorKeys[0]],
+          errors: result.errors,
+        },
+        { status: 400 }
+      );
+    }
+
+    const keys = Object.keys(result.updates) as (keyof typeof result.updates)[];
+    if (keys.length === 0) {
       return NextResponse.json({ error: "No settings provided" }, { status: 400 });
     }
 
-    for (const [key, value] of Object.entries(updates)) {
-      const existing = await db
-        .select({ key: settings.key })
+    // One transaction: read the previous values for the audit trail, then
+    // upsert all of them in a single statement. The old loop read each key and
+    // then wrote it back, which could drop a simultaneous change from another
+    // administrator and left a half-applied save behind on error.
+    let changes: Array<{ key: string; from: string | null; to: string }> = [];
+    await db.transaction(async (tx) => {
+      const existing = await tx
+        .select({ key: settings.key, value: settings.value })
         .from(settings)
-        .where(eq(settings.key, key))
-        .limit(1);
-      if (existing.length === 0) {
-        await db.insert(settings).values({ key, value });
-      } else {
-        await db
-          .update(settings)
-          .set({ value, updatedAt: new Date() })
-          .where(eq(settings.key, key));
+        .where(inArray(settings.key, keys as string[]));
+      const before = new Map(existing.map((row) => [row.key, row.value]));
+
+      changes = keys
+        .filter((key) => before.get(key) !== result.updates[key])
+        .map((key) => ({
+          key,
+          from: before.get(key) ?? null,
+          to: result.updates[key] as string,
+        }));
+
+      if (changes.length === 0) return;
+
+      await tx
+        .insert(settings)
+        .values(keys.map((key) => ({ key, value: result.updates[key] as string })))
+        .onConflictDoUpdate({
+          target: settings.key,
+          set: { value: sql`excluded.value`, updatedAt: new Date() },
+        });
+    });
+
+    if (changes.length > 0) {
+      // Both caches are short-lived by design; drop them so a change here takes
+      // effect on the next request rather than up to 30 seconds later.
+      invalidateRetentionCache();
+      const { invalidateAuthPolicy, getAuthPolicy } = await import("@/lib/auth-policy");
+      invalidateAuthPolicy();
+      // Re-read immediately so the throttle and session length inside auth.ts
+      // are refreshed now, not on the next login.
+      await getAuthPolicy();
+
+      // Best-effort: a failed audit write must not fail a save that already
+      // committed, but a silent settings change is exactly what the trail is for.
+      try {
+        await db.insert(auditLog).values({
+          userId: auth.userId || null,
+          action: "panel.settings.update",
+          entityType: "panel",
+          entityId: null,
+          details: { changed: changes },
+          ipAddress: clientIpForRecord(req.headers),
+        });
+      } catch {
+        /* best-effort */
       }
     }
 
-    // Both caches are short-lived by design; drop them so a change here takes
-    // effect on the next request rather than up to 30 seconds later.
-    invalidateRetentionCache();
-    const { invalidateAuthPolicy, getAuthPolicy } = await import("@/lib/auth-policy");
-    invalidateAuthPolicy();
-    // Re-read immediately so the throttle and session length inside auth.ts
-    // are refreshed now, not on the next login.
-    await getAuthPolicy();
-
-    return NextResponse.json({ ok: true, saved: Object.keys(updates).length });
+    return NextResponse.json({
+      ok: true,
+      saved: changes.length,
+      unchanged: keys.length - changes.length,
+      changed: changes,
+    });
   } catch (e: unknown) {
     return apiError(e, "Could not save settings", 500);
   }

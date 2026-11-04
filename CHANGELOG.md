@@ -6,6 +6,45 @@ All notable changes to GameServer Manager are documented here.
 
 ## [Unreleased]
 
+### 🎛️ Settings, rebuilt around one save and one source of truth
+
+The Settings page was a single long column in which some cards applied
+immediately and others waited for a Save button at the very bottom — with
+nothing on screen saying which was which, no validation until the request came
+back, and no way to find a setting other than scrolling.
+
+- **Eight focused screens** — Accounts, Sign-in & security, Retention &
+  backups, Automation, Host alerts, Outbound webhook, Discord and Public status
+  page — with a search box that jumps to any setting by name, help text or
+  keyword.
+- **One description per setting.** Labels, help text, bounds, defaults and
+  screen live in `panel-settings.ts`; the API validates against that registry
+  and the UI renders from it, so an input's limit and the server's limit can no
+  longer drift apart.
+- **Staged saves with a visible state.** Draft screens share one save bar that
+  only appears while something is pending, lists the affected screens, and
+  sends only the changed fields. Screens that drive an integration save with
+  their own button and are labelled as such. Discard and per-screen
+  Reset-to-defaults undo a draft before it is stored, and leaving the page with
+  pending changes warns first.
+- **Inline validation.** Out-of-range or empty values are flagged at the field
+  with a one-click "use the nearest legal value"; Save jumps to the first
+  problem instead of failing silently. The API returns every error at once,
+  keyed by field, instead of only the first.
+- **Hardened API.** `POST /api/settings/panel` validates in a single pass,
+  accepts both the stored column names and the camelCase names the GET returns,
+  upserts all fields in one transaction (no more select-then-write per key, so
+  a simultaneous change cannot be lost and a failure cannot half-apply), and
+  records the before/after of every change in the audit log.
+- **Stored values are bounded on read.** A hand-edited or imported row outside
+  its range now falls back to the default instead of being used — a session
+  length of `0` or a minimum age of `8` can no longer weaken the panel.
+- **Safer secondary controls**: the IP allowlist validates rules as you type,
+  previews whether your own address is still covered and asks before a save
+  that would shut you out; the idle policy no longer saves on every click of a
+  toggle; the webhook URL is checked and http:// is called out; the fleet digest
+  reads its real schedule back from the scheduler.
+
 ### ⬆️ Panel updater reliability
 
 The panel updater now refuses ambiguous or partially successful upgrades instead

@@ -36,6 +36,16 @@ import { detectAnomalies } from "../src/lib/anomaly";
 import { formatFleetDigest } from "../src/lib/fleet-digest";
 import { validateWebhookUrl, verifyWebhookSignature, signWebhookPayload } from "../src/lib/outbound-webhook";
 import { validatePanelImport, IMPORTABLE_SETTING_KEYS, IMPORTABLE_TASK_TYPES } from "../src/lib/panel-export";
+import {
+  PANEL_SETTING_BOUNDS,
+  PANEL_SETTING_KEYS,
+  parsePanelSettings,
+  validatePanelSetting,
+} from "../src/lib/panel-settings";
+
+/** Environment-provided retention defaults, for parse checks below. */
+const PANEL_DEFAULTS = { metricsRetentionDays: 30, auditRetentionDays: 365 };
+const PANEL_SETTING_KEY_SET = new Set<string>(PANEL_SETTING_KEYS);
 
 let failures = 0;
 let checks = 0;
@@ -1066,13 +1076,16 @@ console.log("\nAge verification & pre-update backup");
       /at least 16/.test(loginForm)
   );
 
-  const panelSettings = read("../src/lib/panel-settings.ts");
+  // Asserted against the registry itself, not its source text: the bound has to
+  // actually reject 15, not merely appear somewhere in the file.
   check(
     "the minimum-age setting cannot be saved below 16 and both gates are panel settings",
-    /minimum_account_age: \{ min: 16, max: 120/.test(panelSettings) &&
-      /"update_auto_backup"/.test(panelSettings) &&
-      /"age_verification_enabled"/.test(panelSettings) &&
-      /"minimum_account_age"/.test(panelSettings)
+    validatePanelSetting("minimum_account_age", 15).error !== null &&
+      validatePanelSetting("minimum_account_age", 16).error === null &&
+      parsePanelSettings([], PANEL_DEFAULTS).minimumAccountAge === 16 &&
+      PANEL_SETTING_KEY_SET.has("update_auto_backup") &&
+      PANEL_SETTING_KEY_SET.has("age_verification_enabled") &&
+      PANEL_SETTING_KEY_SET.has("minimum_account_age")
   );
 
   const update = read("../src/app/api/servers/[id]/update/route.ts");
@@ -1226,11 +1239,12 @@ console.log("\nBackup retention, disk guard & crash-loop breaker");
       /latest version installed\$\{backupNote\}/.test(scheduler)
   );
 
-  const panelSettings = read("../src/lib/panel-settings.ts");
   check(
     "backup retention is a bounded panel setting (0 keeps everything)",
-    /backup_retention_count: \{ min: 0, max: 100/.test(panelSettings) &&
-      /backupRetentionCount: num\("backup_retention_count", 10\)/.test(panelSettings)
+    validatePanelSetting("backup_retention_count", 0).error === null &&
+      validatePanelSetting("backup_retention_count", 101).error !== null &&
+      PANEL_SETTING_BOUNDS.backup_retention_count.max === 100 &&
+      parsePanelSettings([], PANEL_DEFAULTS).backupRetentionCount === 10
   );
 }
 
@@ -1368,13 +1382,18 @@ console.log("\nHost threshold alerts");
       /threshold_alert: 0xf59e0b/.test(discord)
   );
 
-  const panelSettings = read("../src/lib/panel-settings.ts");
   check(
     "alert thresholds are bounded panel settings, defaulting to 90 and off-at-zero",
-    /alert_cpu_percent: \{ min: 0, max: 1000/.test(panelSettings) &&
-      /alert_ram_percent: \{ min: 0, max: 100/.test(panelSettings) &&
-      /alert_disk_percent: \{ min: 0, max: 100/.test(panelSettings) &&
-      /alertCpuPercent: num\("alert_cpu_percent", 90\)/.test(panelSettings)
+    PANEL_SETTING_BOUNDS.alert_cpu_percent.max === 1000 &&
+      PANEL_SETTING_BOUNDS.alert_ram_percent.max === 100 &&
+      PANEL_SETTING_BOUNDS.alert_disk_percent.max === 100 &&
+      validatePanelSetting("alert_cpu_percent", 0).error === null &&
+      validatePanelSetting("alert_cpu_percent", 1001).error !== null &&
+      validatePanelSetting("alert_ram_percent", 101).error !== null &&
+      validatePanelSetting("alert_disk_percent", 101).error !== null &&
+      parsePanelSettings([], PANEL_DEFAULTS).alertCpuPercent === 90 &&
+      parsePanelSettings([], PANEL_DEFAULTS).alertRamPercent === 90 &&
+      parsePanelSettings([], PANEL_DEFAULTS).alertDiskPercent === 90
   );
 }
 
@@ -4053,11 +4072,10 @@ console.log("\nDBG46 second-debug-pass rails");
   // 3. The lockout threshold the settings page DISPLAYS must equal the one
   //    auth-policy ENFORCES before the operator ever saves the form.
   const policy = read("../src/lib/auth-policy.ts");
-  const panelSettings = read("../src/lib/panel-settings.ts");
   check(
     "login throttle: displayed default equals enforced default",
     /loginThrottleAttempts: 5,/.test(policy) &&
-      /num\("login_throttle_attempts", 5\)/.test(panelSettings)
+      parsePanelSettings([], PANEL_DEFAULTS).loginThrottleAttempts === 5
   );
 }
 
