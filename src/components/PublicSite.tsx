@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import PublicChatWidget from "@/components/PublicChatWidget";
+import { useToast } from "@/components/ToastProvider";
+import { fetchWithTimeout, mutate } from "@/lib/api-client";
 import PublicShop from "@/components/PublicShop";
 import {
   MAX_PUBLIC_NAV_LABEL_LENGTH,
@@ -96,6 +98,17 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [loaded, setLoaded] = useState(false);
+  // Content that failed to load must say so; the old behaviour was an empty
+  // "No content yet" card, which reads as "this site has nothing" rather than
+  // "the panel could not be reached".
+  const [cmsError, setCmsError] = useState<string | null>(null);
+  const [reloadingCms, setReloadingCms] = useState(false);
+  const [postingThread, setPostingThread] = useState(false);
+  const [threadError, setThreadError] = useState("");
+  const [postingReply, setPostingReply] = useState(false);
+  const [replyError, setReplyError] = useState("");
+  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const { success: showSuccess } = useToast();
   const isAdmin = user?.role === "admin";
   const roleColor = user?.roleColor || "#3b82f6";
   const roleIcon = user?.roleIcon || "👤";
@@ -104,21 +117,46 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
   // ── Loaders ───────────────────────────────────────────────────────────────
   const loadCms = useCallback(async () => {
     try {
+      // A deadline, because a hung request used to leave the homepage with no
+      // posts and no explanation, forever.
       const [a, b, c] = await Promise.allSettled([
-        fetch("/api/cms?type=blog&published=true"),
-        fetch("/api/cms?type=changelog&published=true"),
-        fetch("/api/site-settings"),
+        fetchWithTimeout("/api/cms?type=blog&published=true", { cache: "no-store" }, 10_000),
+        fetchWithTimeout("/api/cms?type=changelog&published=true", { cache: "no-store" }, 10_000),
+        fetchWithTimeout("/api/site-settings", { cache: "no-store" }, 10_000),
       ]);
-      if (a.status === "fulfilled" && a.value.ok) setBlogs((await a.value.json()).posts || []);
-      if (b.status === "fulfilled" && b.value.ok) setChangelogs((await b.value.json()).posts || []);
+      let failures = 0;
+      if (a.status === "fulfilled" && a.value.ok) {
+        setBlogs((await a.value.json().catch(() => ({}))).posts || []);
+      } else failures += 1;
+      if (b.status === "fulfilled" && b.value.ok) {
+        setChangelogs((await b.value.json().catch(() => ({}))).posts || []);
+      } else failures += 1;
       if (c.status === "fulfilled" && c.value.ok) {
-        const s = (await c.value.json()).settings || {};
+        const s = (await c.value.json().catch(() => ({}))).settings || {};
         setSs(s);
         setEditorSettings(s);
         setEditorNavLinks(parsePublicNavLinks(s.nav_links_json));
-      }
-    } catch { /* */ } finally { setLoaded(true); }
+      } else failures += 1;
+
+      setCmsError(
+        failures === 0
+          ? null
+          : failures === 3
+            ? "This site could not load its content. The panel may be restarting or unreachable."
+            : "Some of this site's content could not be loaded. The panel may be restarting."
+      );
+    } catch {
+      setCmsError("This site could not load its content. The panel may be restarting or unreachable.");
+    } finally {
+      setLoaded(true);
+      setReloadingCms(false);
+    }
   }, []);
+
+  function retryContent() {
+    setReloadingCms(true);
+    void loadCms();
+  }
   // Load once on mount rather than whenever the callback identity changes.
   const didLoadCms = useRef(false);
   useEffect(() => {
@@ -180,16 +218,75 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
   function openCategory(c: ForumCategory) { setSelectedCat(c); setTab("forum-cat"); setShowNewThread(false); loadThreads(c.id); setMobileMenuOpen(false); }
   function openThread(t: ForumThread) { setSelectedThread(t); setTab("forum-thread"); loadThread(t.id); setMobileMenuOpen(false); }
 
+  // A new tab should start at the top. Without this, opening a post from the
+  // bottom of the blog list left the reader half-way down the post, and keyboard
+  // users kept their reading position inside content that had been replaced.
+  const mainRef = useRef<HTMLElement>(null);
+  const firstTabRender = useRef(true);
+  useEffect(() => {
+    if (firstTabRender.current) {
+      firstTabRender.current = false;
+      return;
+    }
+    window.scrollTo({ top: 0 });
+    mainRef.current?.focus({ preventScroll: true });
+  }, [tab]);
+
+  // Escape closes the mobile menu and returns focus to the button that opened
+  // it — otherwise the menu could only be dismissed by finding that button
+  // again with the mouse.
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setMobileMenuOpen(false);
+      mobileMenuButtonRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileMenuOpen]);
+
   // ── Forum actions ─────────────────────────────────────────────────────────
+  // Both of these used to ignore a failed response entirely: a rejected post
+  // looked exactly like a successful one until the page was reloaded. They now
+  // report the server's message, cannot be double-submitted, and confirm success.
   async function createThread(e: React.FormEvent) {
-    e.preventDefault(); if (!selectedCat || !user) return;
-    const r = await fetch("/api/forum/threads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ categoryId: selectedCat.id, title: newThread.title, body: newThread.body }) });
-    if (r.ok) { setShowNewThread(false); setNewThread({ title: "", body: "" }); loadThreads(selectedCat.id); }
+    e.preventDefault();
+    if (!selectedCat || !user || postingThread) return;
+    setPostingThread(true);
+    setThreadError("");
+    const result = await mutate("/api/forum/threads", {
+      method: "POST",
+      body: JSON.stringify({ categoryId: selectedCat.id, title: newThread.title, body: newThread.body }),
+    });
+    setPostingThread(false);
+    if (!result.ok) {
+      setThreadError(result.error ?? "Could not create the thread.");
+      return;
+    }
+    setShowNewThread(false);
+    setNewThread({ title: "", body: "" });
+    showSuccess("Thread created", "Your thread is live.");
+    void loadThreads(selectedCat.id);
   }
+
   async function createReply(e: React.FormEvent) {
-    e.preventDefault(); if (!selectedThread || !user) return;
-    const r = await fetch(`/api/forum/threads/${selectedThread.id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body: replyBody }) });
-    if (r.ok) { setReplyBody(""); loadThread(selectedThread.id); }
+    e.preventDefault();
+    if (!selectedThread || !user || postingReply) return;
+    setPostingReply(true);
+    setReplyError("");
+    const result = await mutate(`/api/forum/threads/${selectedThread.id}`, {
+      method: "POST",
+      body: JSON.stringify({ body: replyBody }),
+    });
+    setPostingReply(false);
+    if (!result.ok) {
+      setReplyError(result.error ?? "Could not post the reply.");
+      return;
+    }
+    setReplyBody("");
+    showSuccess("Reply posted", "");
+    void loadThread(selectedThread.id);
   }
 
   // ── Site editor ───────────────────────────────────────────────────────────
@@ -272,6 +369,13 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
   /* ═══════════════════════════════════════════════════════════════════════════ */
   return (
     <div className="min-h-screen bg-bg-primary flex flex-col">
+      {/* Keyboard users land here first; the header has up to a dozen links. */}
+      <a
+        href="#site-main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-[200] focus:rounded-lg focus:bg-accent focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-white"
+      >
+        Skip to content
+      </a>
       {ss.custom_css?.trim() && (
         // Admin-authored CSS is applied verbatim; escaping would turn CSS
         // combinators like `>` into entities and break the stylesheet. The
@@ -280,7 +384,13 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
         <style dangerouslySetInnerHTML={{ __html: ss.custom_css.replace(/<\/style/gi, "") }} />
       )}
       {ss.announcement && (
-        <div className={`text-center text-xs sm:text-sm py-2 px-4 ${ss.announcement_type === "warning" ? "bg-warning/15 text-warning" : ss.announcement_type === "error" ? "bg-danger/15 text-danger" : "bg-accent/15 text-accent"}`}>{ss.announcement}</div>
+        <div
+          role="status"
+          aria-live="polite"
+          className={`text-center text-xs sm:text-sm py-2 px-4 ${ss.announcement_type === "warning" ? "bg-warning/15 text-warning" : ss.announcement_type === "error" ? "bg-danger/15 text-danger" : "bg-accent/15 text-accent"}`}
+        >
+          {ss.announcement}
+        </div>
       )}
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
@@ -317,9 +427,13 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
               </button>
             )}
             <button
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              ref={mobileMenuButtonRef}
+              type="button"
+              onClick={() => setMobileMenuOpen((open) => !open)}
               className="p-2 rounded-lg hover:bg-bg-hover transition-colors"
-              aria-label="Toggle menu"
+              aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="site-mobile-menu"
             >
               {mobileMenuOpen ? (
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
@@ -332,7 +446,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
 
         {/* Mobile dropdown menu */}
         {mobileMenuOpen && (
-          <div className="md:hidden border-t border-border bg-bg-secondary/95 backdrop-blur-sm animate-fade-in">
+          <div id="site-mobile-menu" className="md:hidden border-t border-border bg-bg-secondary/95 backdrop-blur-sm animate-fade-in">
             <div className="px-4 py-3 space-y-1">
               {navLinks.map((link, index) => menuLink(link, index, true))}
               {navLinks.length > 0 && <div className="border-t border-border/50 my-2" />}
@@ -357,7 +471,32 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
         )}
       </header>
 
-      <main className="flex-1 max-w-6xl mx-auto px-4 sm:px-6 py-4 sm:py-8 w-full">
+      {cmsError && (
+        <div className="mx-auto w-full max-w-6xl px-4 pt-4 sm:px-6">
+          <div
+            role="alert"
+            className="flex flex-wrap items-center gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning"
+          >
+            <span aria-hidden>⚠️</span>
+            <span className="min-w-0 flex-1">{cmsError}</span>
+            <button
+              type="button"
+              onClick={retryContent}
+              disabled={reloadingCms}
+              className="rounded-lg border border-warning/40 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-warning/20 disabled:opacity-40"
+            >
+              {reloadingCms ? "Retrying…" : "Retry"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <main
+        ref={mainRef}
+        id="site-main"
+        tabIndex={-1}
+        className="flex-1 max-w-6xl mx-auto px-4 sm:px-6 py-4 sm:py-8 w-full outline-none"
+      >
 
         {/* ═══ HOME ═══ */}
         {tab === "home" && (
@@ -389,7 +528,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                 </div>
               </section>
             )}
-            {loaded && blogs.length === 0 && changelogs.length === 0 && (
+            {loaded && !cmsError && blogs.length === 0 && changelogs.length === 0 && (
               <section className="text-center py-10 sm:py-12 bg-bg-card border border-border rounded-xl">
                 <span className="text-4xl block mb-3">✍️</span>
                 <h3 className="font-semibold mb-1">No content yet</h3>
@@ -696,9 +835,12 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                 </div>
                 {showNewThread && user && (
                   <form onSubmit={createThread} className="bg-bg-card border border-border rounded-xl p-4 sm:p-6 space-y-4">
-                    <input value={newThread.title} onChange={(e) => setNewThread({ ...newThread, title: e.target.value })} placeholder="Thread title" className="w-full px-3 sm:px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent" required />
-                    <textarea value={newThread.body} onChange={(e) => setNewThread({ ...newThread, body: e.target.value })} placeholder="Write your post..." rows={5} className="w-full px-3 sm:px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-accent" required />
-                    <button type="submit" className="px-6 py-2 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium w-full sm:w-auto">Create Thread</button>
+                    <input value={newThread.title} onChange={(e) => setNewThread({ ...newThread, title: e.target.value })} placeholder="Thread title" aria-label="Thread title" className="w-full px-3 sm:px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent" required />
+                    <textarea value={newThread.body} onChange={(e) => setNewThread({ ...newThread, body: e.target.value })} placeholder="Write your post..." aria-label="Thread body" rows={5} className="w-full px-3 sm:px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-accent" required />
+                    {threadError && (
+                      <p role="alert" className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs font-medium text-danger">{threadError}</p>
+                    )}
+                    <button type="submit" disabled={postingThread} className="px-6 py-2 bg-success hover:opacity-90 disabled:opacity-50 text-white rounded-lg text-sm font-medium w-full sm:w-auto">{postingThread ? "Posting…" : "Create Thread"}</button>
                   </form>
                 )}
                 {threads.length === 0 ? <Empty text="No threads yet. Be the first!" /> : (
@@ -764,8 +906,11 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                 {selectedThread.locked ? <div className="bg-bg-card border border-border rounded-xl p-4 sm:p-6 text-center text-text-muted text-sm">🔒 This thread is locked.</div>
                   : user ? (
                     <form onSubmit={createReply} className="bg-bg-card border border-border rounded-xl p-4 sm:p-6 space-y-4"><h3 className="font-semibold text-sm">Reply</h3>
-                      <textarea value={replyBody} onChange={(e) => setReplyBody(e.target.value)} placeholder="Write your reply..." rows={4} className="w-full px-3 sm:px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-accent" required />
-                      <button type="submit" className="px-6 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium w-full sm:w-auto">Post Reply</button></form>
+                      <textarea value={replyBody} onChange={(e) => setReplyBody(e.target.value)} placeholder="Write your reply..." aria-label="Reply body" rows={4} className="w-full px-3 sm:px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-accent" required />
+                      {replyError && (
+                        <p role="alert" className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs font-medium text-danger">{replyError}</p>
+                      )}
+                      <button type="submit" disabled={postingReply} className="px-6 py-2 bg-accent hover:bg-accent-hover disabled:opacity-50 text-white rounded-lg text-sm font-medium w-full sm:w-auto">{postingReply ? "Posting…" : "Post Reply"}</button></form>
                   ) : <div className="bg-bg-card border border-border rounded-xl p-4 sm:p-6 text-center"><button onClick={onLoginClick} className="text-accent hover:underline text-sm">Log in to reply</button></div>}
               </div>
               <div className="hidden xl:block xl:sticky xl:top-20 self-start">
@@ -779,7 +924,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
         {tab === "blog" && !selectedPost && (
           <div className="animate-fade-in space-y-4 sm:space-y-6">
             <h2 className="text-xl sm:text-2xl font-bold">📝 Blog</h2>
-            {blogs.length === 0 && loaded ? <Empty text="No blog posts yet." /> : (
+            {blogs.length === 0 && loaded && !cmsError ? <Empty text="No blog posts yet." /> : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">{blogs.map((p) => <PostCard key={p.id} post={p} onClick={() => openPost(p)} fmt={fmt} />)}</div>
             )}
           </div>
@@ -787,7 +932,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
         {tab === "changelog" && !selectedPost && (
           <div className="animate-fade-in space-y-4 sm:space-y-6">
             <h2 className="text-xl sm:text-2xl font-bold">📋 Changelog</h2>
-            {changelogs.length === 0 && loaded ? <Empty text="No changelogs yet." /> : (
+            {changelogs.length === 0 && loaded && !cmsError ? <Empty text="No changelogs yet." /> : (
               <div className="space-y-3 sm:space-y-4">{changelogs.map((p) => <LogCard key={p.id} post={p} onClick={() => openPost(p)} fmt={fmt} />)}</div>
             )}
           </div>

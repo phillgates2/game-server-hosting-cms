@@ -236,3 +236,36 @@ h3,
   50% { box-shadow: 0 0 18px rgba(34, 211, 238, 0.48); }
 }
 .pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
+
+/* ── Keyboard focus ───────────────────────────────────────────────────────────
+   Most buttons in this app are styled individually, and several of them remove
+   the browser's default outline without replacing it — so a keyboard user
+   could tab through a crowded header with no idea where they were. This gives
+   every interactive control a visible focus ring. `:focus-visible` means mouse
+   and touch users never see it, and the more-specific Tailwind
+   `focus:outline-none` + ring classes on inputs still win where they exist. */
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible,
+[role="button"]:focus-visible,
+[role="switch"]:focus-visible,
+[role="tab"]:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────────────
+   The panel leans on entrance animations and pulsing glows. Anyone who has
+   asked their operating system for less motion gets none of it — the content
+   still arrives, it just stops moving. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

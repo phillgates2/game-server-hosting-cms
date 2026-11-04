@@ -6,6 +6,54 @@ All notable changes to GameServer Manager are documented here.
 
 ## [Unreleased]
 
+### 🧭 A panel and a site that say what is actually wrong
+
+The shell had three ways to mislead you: a failed boot probe looked exactly like
+"not installed", so a dropped request or a database outage put you in the
+install wizard on a panel that already had servers; a failed content request
+looked exactly like "no content yet"; and a hung request looked like a page that
+would load eventually. All three now report themselves, with a way out.
+
+- **A failed boot probe never opens the installer.** `GET /api/install` answers
+  `503 { installed: null }` when it cannot reach the database instead of a `200`
+  that claims the panel is uninstalled. `app-boot.ts` decides the boot outcome
+  from an explicit contract — only `200 { installed: true }` is *ready*, only
+  `200 { installed: false }` is *install*, and every other answer (network
+  failure, 4xx, 5xx, non-JSON, missing/odd `installed` value, timeout, offline)
+  is *unreachable*.
+- **Unreachable is a screen, not a spinner.** It names the fault, says nothing
+  has been lost, offers *Try again* and *Status page*, and retries by itself
+  when the browser comes back online.
+- **Every boot request has a deadline** (12 s probe, 15 s default) via the new
+  `fetchWithTimeout`, so a wedged panel process can no longer leave a permanent
+  spinner. A dead `/api/auth/me` degrades to signed-out instead of blocking the
+  site.
+- **Branded failure pages**: a route-level `error.tsx` with *Try again* (stack
+  details only outside production), a self-contained `global-error.tsx` that
+  needs no stylesheet, and a `not-found.tsx` with real navigation.
+- **Offline banner.** Losing the connection shows a fixed banner and hides the
+  content's "error" state until it is clear the failure was not just offline;
+  reconnecting raises a toast. The banner is hydration-safe (the connection state is read after mount).
+- **A failed content request no longer reads as an empty site.** The public site
+  names what failed and offers *Retry*; the shop distinguishes "could not load"
+  from "no products found" instead of silently showing an empty catalogue.
+- **Forum posts report failure.** Creating a thread or posting a reply used to
+  ignore a non-2xx answer entirely — a rejected post looked posted until you
+  reloaded. Both now show the server's message inline, cannot be double-submitted,
+  and confirm success with a toast.
+- **The menu tells you when it is incomplete.** Losing
+  `/api/auth/permissions` used to hide most of the navigation with no
+  explanation; there is now a banner and a retry.
+- **Navigating is predictable.** Switching panels or public tabs starts at the
+  top of the new content (and moves the reading position there), instead of
+  inheriting the previous scroll offset. Both shells have a *Skip to content*
+  link, focus rings on every interactive control, `prefers-reduced-motion`
+  support, and the command palette is a real dialog: focus moves into it, Tab is
+  trapped inside it, Escape closes it even while typing, and focus returns to
+  whatever opened it.
+- **Crash cards stay useful**: the exception text is shown in development only,
+  and the card offers *Reload the panel* alongside *Try again*.
+
 ### 🎛️ Settings, rebuilt around one save and one source of truth
 
 The Settings page was a single long column in which some cards applied

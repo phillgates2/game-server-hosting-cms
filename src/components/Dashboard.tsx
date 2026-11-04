@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import ErrorBoundary from "./ErrorBoundary";
 import ServersPanel from "./panels/ServersPanel";
 import MonitorPanel from "./panels/MonitorPanel";
@@ -30,6 +30,7 @@ import { LanguageSelector } from "@/lib/i18n";
 
 import { useRouter } from "next/navigation";
 import { clampPaletteIndex, stepPaletteIndex } from "@/lib/palette";
+import { fetchWithTimeout } from "@/lib/api-client";
 
 const PALETTE_TYPE_TAB_MAP: Record<string, Tab> = { server: "servers", user: "users", game: "games", thread: "forum", cms: "cms", node: "nodes" };
 
@@ -105,8 +106,67 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
   const [searchResults, setSearchResults] = useState<Array<{ type: string; icon: string; id: number; title: string; subtitle: string }>>([]);
   const [paletteIndex, setPaletteIndex] = useState(0);
 
+  // ── Command palette focus management ─────────────────────────────────────
+  // The palette is a modal: while it is open the rest of the page must not be
+  // reachable by Tab, the page behind it must not scroll, and closing it must
+  // put focus back where it came from.
+  const paletteInputRef = useRef<HTMLInputElement>(null);
+  const paletteDialogRef = useRef<HTMLDivElement>(null);
+  const paletteOpenerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!paletteOpen) return;
+    paletteOpenerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const timer = window.setTimeout(() => paletteInputRef.current?.focus(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      document.body.style.overflow = previousOverflow;
+      paletteOpenerRef.current?.focus?.();
+      paletteOpenerRef.current = null;
+    };
+  }, [paletteOpen]);
+
+  function trapPaletteFocus(event: React.KeyboardEvent) {
+    if (event.key !== "Tab") return;
+    const root = paletteDialogRef.current;
+    if (!root) return;
+    const focusable = Array.from(
+      root.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
+      )
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  const [permsError, setPermsError] = useState(false);
+
+  // The nav is built from these permissions. If the request fails the menu
+  // silently loses every gated panel, which looks like an account that lost its
+  // rights — so the failure is surfaced with a retry instead.
   const loadPerms = useCallback(async () => {
-    try { const res = await fetch("/api/auth/permissions"); if (res.ok) setPerms((await res.json()).permissions || {}); } catch { /**/ }
+    try {
+      const res = await fetchWithTimeout("/api/auth/permissions", { cache: "no-store" }, 10_000);
+      if (res.ok) {
+        setPerms((await res.json()).permissions || {});
+        setPermsError(false);
+      } else {
+        setPermsError(true);
+      }
+    } catch {
+      setPermsError(true);
+    }
   }, []);
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -228,6 +288,13 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
 
   function navTo(t: Tab) { setTab(t); setOpenGroup(null); }
 
+  // Switching panels used to keep the previous scroll offset, so a new panel
+  // opened half-way down with its heading off-screen.
+  const mainRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0 });
+  }, [tab]);
+
   function renderPanel() {
     switch (tab) {
       case "overview": return <OverviewPanel user={user} onNavigate={navTo} />;
@@ -265,7 +332,15 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
 
   return (
     <div className="dashboard-shell min-h-screen relative isolate">
-      <main className="overflow-auto min-w-0 relative z-10">
+      {/* Keyboard users should be able to jump past the header and nav — there
+          are more than twenty destinations in it. */}
+      <a
+        href="#panel-main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-[200] focus:rounded-lg focus:bg-accent focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-white"
+      >
+        Skip to content
+      </a>
+      <main ref={mainRef} id="panel-main" tabIndex={-1} className="overflow-auto min-w-0 relative z-10 outline-none">
         <div className="dashboard-content p-4 lg:p-6 space-y-6 animate-panel-lift">
           {licenseBanner && (
             <div role="alert" className={`rounded-xl border px-4 py-3 text-sm font-medium ${licenseLocked ? "border-danger/40 bg-danger/10 text-danger" : "border-warning/40 bg-warning/10 text-warning"}`}>
@@ -298,6 +373,8 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
                     <button
                       onClick={() => setOpenGroup((curr) => (curr === sectionKey ? null : sectionKey))}
                       className="nav-button gaming-chip menu-chip-opaque px-3 py-2 rounded-lg text-xs uppercase tracking-[0.14em] text-text-secondary hover:text-text-primary flex items-center gap-2"
+                      aria-expanded={openGroup === sectionKey}
+                      aria-haspopup="true"
                       data-top-menu
                     >
                       <span>{SECTION_LABELS[sectionKey] || sectionKey}</span>
@@ -338,6 +415,26 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
             </div>
           </header>
 
+          {permsError && (
+            <div
+              role="alert"
+              className="flex flex-wrap items-center gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-2.5 text-xs font-medium text-warning"
+            >
+              <span aria-hidden>⚠️</span>
+              <span className="min-w-0 flex-1">
+                Your menu permissions could not be loaded, so some panels may be
+                missing from the menu. Retry — nothing has changed on your account.
+              </span>
+              <button
+                type="button"
+                onClick={() => void loadPerms()}
+                className="rounded-lg border border-warning/40 px-3 py-1 text-[11px] font-medium transition-colors hover:bg-warning/20"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
           <ErrorBoundary key={tab} name={tab}>{renderPanel()}</ErrorBoundary>
         </div>
       </main>
@@ -345,18 +442,30 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
       {/* Command Palette */}
       {paletteOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-start justify-center p-4" onClick={() => setPaletteOpen(false)}>
-          <div className="w-full max-w-2xl gaming-surface rounded-2xl shadow-2xl overflow-hidden mt-16 lg:mt-20" onClick={(e) => e.stopPropagation()}>
+          <div
+            ref={paletteDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Quick jump"
+            className="w-full max-w-2xl gaming-surface rounded-2xl shadow-2xl overflow-hidden mt-16 lg:mt-20"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={trapPaletteFocus}
+          >
             <div className="p-4 border-b border-border">
               <input
-                autoFocus
+                ref={paletteInputRef}
                 value={paletteQuery}
                 onChange={(e) => { setPaletteQuery(e.target.value); setPaletteIndex(0); }}
                 onKeyDown={(e) => {
+                  // Escape while typing in the palette used to do nothing: the
+                  // global handler ignores key events that come from an input.
+                  if (e.key === "Escape") { e.preventDefault(); setPaletteOpen(false); return; }
                   if (e.key === "ArrowDown") { e.preventDefault(); setPaletteIndex((i) => stepPaletteIndex(i, selectables.length, 1)); }
                   else if (e.key === "ArrowUp") { e.preventDefault(); setPaletteIndex((i) => stepPaletteIndex(i, selectables.length, -1)); }
                   else if (e.key === "Enter") { e.preventDefault(); const sel = selectables[activeIndex]; if (sel) sel.run(); }
                 }}
                 placeholder="Search pages and actions..."
+                aria-label="Search pages and actions"
                 className="w-full px-4 py-3 bg-bg-secondary border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-accent"
               />
               <p className="text-[10px] text-text-muted mt-2">Tip: ↑↓ to move · Enter to select · type a page name or press its shortcut key · Esc to close.</p>

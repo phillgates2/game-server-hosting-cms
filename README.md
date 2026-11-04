@@ -705,6 +705,23 @@ lftp -u alice,password -e 'set ftp:ssl-allow true; put modpack.zip -o /survival-
 
 ---
 
+## 🧭 When something goes wrong
+
+The panel is designed to fail visibly rather than plausibly:
+
+| What happened | What you see |
+|:--|:--|
+| Panel cannot reach its database at boot | **"The panel could not be reached"** — *Try again*, *Status page*, automatic retry when the browser reconnects. The install wizard is **not** shown. |
+| A request hangs | Every boot request has a deadline (12 s); the screen reports the timeout instead of spinning forever. |
+| A panel crashes | That panel's card is replaced by a *Try again* / *Reload the panel* card. The rest of the panel keeps working. |
+| Session expired / request refused | The panel says so in place; nothing is silently dropped. |
+| Public site content fails to load | A banner names the failure and offers **Retry** — it never looks like an empty site. |
+| You go offline | An offline banner appears; on reconnect a toast confirms the panel is back. |
+| Wrong URL | A branded 404 with the way home. |
+
+The boot decision lives in `src/lib/app-boot.ts` and is unit-tested: only an
+explicit `200 { installed: false }` from `GET /api/install` opens the wizard.
+
 ## 🛠️ Operations
 
 ### Day-to-day
