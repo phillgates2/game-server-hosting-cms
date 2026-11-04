@@ -717,10 +717,27 @@ The panel is designed to fail visibly rather than plausibly:
 | Session expired / request refused | The panel says so in place; nothing is silently dropped. |
 | Public site content fails to load | A banner names the failure and offers **Retry** — it never looks like an empty site. |
 | You go offline | An offline banner appears; on reconnect a toast confirms the panel is back. |
+| Session expires while the panel is open | A banner says *your session has expired — changes will not be saved* with **Sign in again**. |
 | Wrong URL | A branded 404 with the way home. |
 
 The boot decision lives in `src/lib/app-boot.ts` and is unit-tested: only an
 explicit `200 { installed: false }` from `GET /api/install` opens the wizard.
+
+### Shareable public pages
+
+Every view on the public site has its own link, so a thread can be posted in
+Discord and a page survives a refresh or the Back button:
+
+| Link | Opens |
+|:--|:--|
+| `#home` · `#forums` · `#ladder` · `#shop` · `#blog` · `#changelog` | the six sections |
+| `#post/12` | a blog post or changelog entry |
+| `#forum/7` | a forum category |
+| `#thread/9` | a thread, loaded directly |
+| `#site-editor` | the site editor *(administrators only)* |
+
+Anything unrecognised resolves to the homepage, so a mistyped or outdated link
+never lands on a blank page.
 
 ## 🛠️ Operations
 

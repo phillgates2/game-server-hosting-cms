@@ -93,6 +93,34 @@ back, and no way to find a setting other than scrolling.
   toggle; the webhook URL is checked and http:// is called out; the fleet digest
   reads its real schedule back from the scheduler.
 
+### 🔗 Addressable public pages, a phone-sized panel menu, and a voice for expired sessions
+
+- **Every public view has a URL.** `#forums`, `#ladder`, `#post/12`,
+  `#forum/7`, `#thread/9`, `#site-editor` — so a thread can be linked, a page
+  survives a refresh, and Back returns to the list you came from instead of
+  leaving the site. `src/lib/site-url.ts` parses hashes totally: unknown,
+  truncated, mistyped, percent-encoded or out-of-range values land on the
+  homepage rather than addressing a view that does not exist, and only
+  administrators can open `#site-editor`.
+- **Deep links wait for their data**, then explain themselves. A post or forum
+  that is still loading keeps the route pending instead of bouncing to the
+  homepage; if it never resolves (deleted or stale), the reader is told and sent
+  to the nearest list. A thread link shows a skeleton while loading and a
+  "thread not found" card with a way back.
+- **The panel has a real mobile menu.** Below `lg` the four group menus —
+  three wrapped rows of small targets — are replaced by one **Menu** button
+  opening a drawer that lists every permitted panel by section and marks the
+  current one. The drawer and the command palette share one dialog
+  implementation: focus moves in, Tab cycles inside, the page behind does not
+  scroll, Escape closes, focus returns to the opener, and single-key shortcuts
+  stay inert while either is open.
+- **An expired session is named.** `installSessionExpiryWatch` notices the first
+  `401` from any `/api/` request (never the auth endpoints — a signed-out
+  `/api/auth/me` and a wrong password are not expiries) and the shell shows a
+  banner: *your session has expired, changes will not be saved* with **Sign in
+  again** and **Dismiss**. Previously the operator only saw a scattering of
+  "unauthorised" toasts and had to guess.
+
 ### ⬆️ Panel updater reliability
 
 The panel updater now refuses ambiguous or partially successful upgrades instead
