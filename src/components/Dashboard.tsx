@@ -96,42 +96,51 @@ const TAB_META: Record<Tab, { title: string; subtitle: string }> = {
   settings: { title: "Settings", subtitle: "Access, retention, automation, alerts and integrations — one screen at a time." },
   };
 
-export default function Dashboard({ user, onLogout, onGoHome }: Props) {
-  const router = useRouter();
-  const [tab, setTab] = useState<Tab>("overview");
-  const [openGroup, setOpenGroup] = useState<string | null>(null);
-  const [perms, setPerms] = useState<Record<string, boolean>>({});
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [paletteQuery, setPaletteQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<Array<{ type: string; icon: string; id: number; title: string; subtitle: string }>>([]);
-  const [paletteIndex, setPaletteIndex] = useState(0);
-
-  // ── Command palette focus management ─────────────────────────────────────
-  // The palette is a modal: while it is open the rest of the page must not be
-  // reachable by Tab, the page behind it must not scroll, and closing it must
-  // put focus back where it came from.
-  const paletteInputRef = useRef<HTMLInputElement>(null);
-  const paletteDialogRef = useRef<HTMLDivElement>(null);
-  const paletteOpenerRef = useRef<HTMLElement | null>(null);
+/**
+ * Focus treatment shared by the command palette and the mobile navigation
+ * drawer: focus moves inside, Tab cycles within, the page behind cannot scroll,
+ * Escape closes, and focus returns to the control that opened it. Without this
+ * a keyboard user could tab out of a modal into content hidden behind it, or be
+ * dropped at the top of the document when it closed.
+ */
+function useDialogFocus(
+  open: boolean,
+  containerRef: React.RefObject<HTMLElement | null>,
+  onClose: () => void
+) {
+  const openerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (!paletteOpen) return;
-    paletteOpenerRef.current =
+    if (!open) return;
+    openerRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const timer = window.setTimeout(() => paletteInputRef.current?.focus(), 0);
+    const timer = window.setTimeout(() => {
+      const root = containerRef.current;
+      if (!root) return;
+      const first = root.querySelector<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      (first ?? root).focus();
+    }, 0);
     return () => {
       window.clearTimeout(timer);
       document.body.style.overflow = previousOverflow;
-      paletteOpenerRef.current?.focus?.();
-      paletteOpenerRef.current = null;
+      openerRef.current?.focus?.();
+      openerRef.current = null;
     };
-  }, [paletteOpen]);
+  }, [open, containerRef]);
 
-  function trapPaletteFocus(event: React.KeyboardEvent) {
+  return function onDialogKeyDown(event: React.KeyboardEvent) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      return;
+    }
     if (event.key !== "Tab") return;
-    const root = paletteDialogRef.current;
+    const root = containerRef.current;
     if (!root) return;
     const focusable = Array.from(
       root.querySelectorAll<HTMLElement>(
@@ -148,7 +157,32 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
       event.preventDefault();
       first.focus();
     }
-  }
+  };
+}
+
+export default function Dashboard({ user, onLogout, onGoHome }: Props) {
+  const router = useRouter();
+  const [tab, setTab] = useState<Tab>("overview");
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const [perms, setPerms] = useState<Record<string, boolean>>({});
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Array<{ type: string; icon: string; id: number; title: string; subtitle: string }>>([]);
+  const [paletteIndex, setPaletteIndex] = useState(0);
+
+  // ── dialogs: command palette + mobile navigation ─────────────────────────
+  // Both are modal: while open the rest of the page must not be reachable by
+  // Tab, the page behind must not scroll, and closing must return focus to the
+  // control that opened it (see useDialogFocus).
+  const paletteInputRef = useRef<HTMLInputElement>(null);
+  const paletteDialogRef = useRef<HTMLDivElement>(null);
+  const mobileNavRef = useRef<HTMLDivElement>(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  const closePalette = useCallback(() => setPaletteOpen(false), []);
+  const closeMobileNav = useCallback(() => setMobileNavOpen(false), []);
+  const paletteKeyDown = useDialogFocus(paletteOpen, paletteDialogRef, closePalette);
+  const mobileNavKeyDown = useDialogFocus(mobileNavOpen, mobileNavRef, closeMobileNav);
 
   const [permsError, setPermsError] = useState(false);
 
@@ -215,6 +249,9 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPaletteIndex(0); setPaletteOpen((v) => !v); return; }
       if (e.key === "Escape") { setPaletteOpen(false); setOpenGroup(null); return; }
 
+      // A modal owns the keyboard while it is open.
+      if (paletteOpen || mobileNavOpen) return;
+
       // Single-key shortcuts (only when no modifiers)
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
@@ -226,7 +263,7 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [filteredNav]);
+  }, [filteredNav, mobileNavOpen, paletteOpen]);
 
   // License heartbeat banner: warn during grace, show the lock when locked.
   useEffect(() => {
@@ -367,7 +404,18 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
             </div>
 
             <div className="flex items-center justify-between gap-3 flex-wrap" data-top-menu>
-              <nav className="flex items-center gap-2 flex-wrap" data-top-menu>
+              {/* Below lg the group menus would wrap into three rows of tiny
+                  targets, so they move into a single drawer instead. */}
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(true)}
+                aria-expanded={mobileNavOpen}
+                aria-controls="panel-mobile-nav"
+                className="nav-button gaming-chip menu-chip-opaque px-3 py-2 rounded-lg text-xs uppercase tracking-[0.14em] text-text-secondary hover:text-text-primary flex items-center gap-2 lg:hidden"
+              >
+                <span aria-hidden>☰</span> Menu
+              </button>
+              <nav className="hidden lg:flex items-center gap-2 flex-wrap" data-top-menu>
                 {orderedSections.map((sectionKey) => (
                   <div key={sectionKey} className="relative" data-top-menu>
                     <button
@@ -440,6 +488,77 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
       </main>
 
       {/* Command Palette */}
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-[80] lg:hidden">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={closeMobileNav} aria-hidden />
+          <div
+            ref={mobileNavRef}
+            id="panel-mobile-nav"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Panel navigation"
+            onKeyDown={mobileNavKeyDown}
+            tabIndex={-1}
+            className="absolute inset-y-0 left-0 flex w-[88%] max-w-sm flex-col overflow-y-auto gaming-surface p-4 shadow-2xl animate-fade-in outline-none"
+          >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-[10px] uppercase tracking-[0.22em] text-text-muted">Navigation</p>
+              <button
+                type="button"
+                onClick={closeMobileNav}
+                aria-label="Close navigation"
+                className="rounded-lg p-2 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {orderedSections.map((sectionKey) => (
+                <div key={sectionKey}>
+                  <p className="mb-1 px-2 text-[10px] uppercase tracking-[0.18em] text-text-muted">
+                    {SECTION_LABELS[sectionKey] || sectionKey}
+                  </p>
+                  <div className="space-y-1">
+                    {sections[sectionKey].map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => { navTo(item.key); closeMobileNav(); }}
+                        aria-current={tab === item.key ? "page" : undefined}
+                        className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${tab === item.key ? "bg-accent/10 text-accent" : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"}`}
+                      >
+                        <span className="flex-1 text-left">{item.label}</span>
+                        {item.shortcut && (
+                          <kbd className="gaming-chip rounded px-1.5 py-0.5 font-mono text-[9px] text-text-muted">{item.shortcut}</kbd>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 space-y-1 border-t border-border pt-3">
+              <button
+                type="button"
+                onClick={() => { closeMobileNav(); navTo("profile"); }}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+              >
+                <span className="flex-1 text-left">Profile</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { closeMobileNav(); (onGoHome || (() => router.push("/")))(); }}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+              >
+                <span className="flex-1 text-left">Frontpage</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {paletteOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-start justify-center p-4" onClick={() => setPaletteOpen(false)}>
           <div
@@ -449,7 +568,7 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
             aria-label="Quick jump"
             className="w-full max-w-2xl gaming-surface rounded-2xl shadow-2xl overflow-hidden mt-16 lg:mt-20"
             onClick={(e) => e.stopPropagation()}
-            onKeyDown={trapPaletteFocus}
+            onKeyDown={paletteKeyDown}
           >
             <div className="p-4 border-b border-border">
               <input

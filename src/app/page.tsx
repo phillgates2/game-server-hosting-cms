@@ -14,6 +14,7 @@ import {
   isTimeoutError,
 } from "@/lib/app-boot";
 import { fetchWithTimeout } from "@/lib/api-client";
+import { SESSION_EXPIRED_EVENT, installSessionExpiryWatch } from "@/lib/session-expiry";
 
 type AppState =
   | "loading"
@@ -54,6 +55,9 @@ function HomeContent() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [bootMessage, setBootMessage] = useState("");
   const [retrying, setRetrying] = useState(false);
+  // Set when any panel request comes back 401: the session ended while the tab
+  // was open, which is otherwise indistinguishable from "the button is broken".
+  const [sessionExpired, setSessionExpired] = useState(false);
   // A retry clicked twice (or a reconnect arriving mid-flight) must not run two
   // boot probes that race each other into different states.
   const inFlight = useRef(false);
@@ -134,7 +138,20 @@ function HomeContent() {
     return () => window.removeEventListener("online", onOnline);
   }, [state, checkStatus]);
 
+  // While the dashboard is open, watch for an expired session and say so once.
+  useEffect(() => {
+    if (state !== "dashboard") return;
+    const uninstall = installSessionExpiryWatch();
+    const onExpired = () => setSessionExpired(true);
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => {
+      window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+      uninstall();
+    };
+  }, [state]);
+
   async function handleLogin(u: AuthUser) {
+    setSessionExpired(false);
     try {
       const meRes = await fetchWithTimeout("/api/auth/me", { cache: "no-store" });
       if (meRes.ok) {
@@ -231,13 +248,47 @@ function HomeContent() {
 
   if (state === "dashboard" && user) {
     return (
-      <ErrorBoundary name="Dashboard">
-        <Dashboard
-          user={user}
-          onLogout={handleLogout}
-          onGoHome={() => setState("public")}
-        />
-      </ErrorBoundary>
+      <>
+        <ErrorBoundary name="Dashboard">
+          <Dashboard
+            user={user}
+            onLogout={handleLogout}
+            onGoHome={() => setState("public")}
+          />
+        </ErrorBoundary>
+        {sessionExpired && (
+          <div className="fixed inset-x-0 bottom-0 z-[120] p-3 sm:p-4">
+            <div
+              role="alert"
+              className="mx-auto flex max-w-3xl flex-wrap items-center gap-3 rounded-xl border border-warning/40 bg-bg-card/95 px-4 py-3 shadow-2xl backdrop-blur"
+            >
+              <span aria-hidden>🔒</span>
+              <p className="min-w-0 flex-1 text-sm text-text-secondary">
+                <span className="font-medium text-warning">Your session has expired.</span>{" "}
+                You can keep reading, but nothing you change will be saved until
+                you sign in again.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setSessionExpired(false);
+                  setState("login");
+                }}
+                className={primaryButton}
+              >
+                Sign in again
+              </button>
+              <button
+                type="button"
+                onClick={() => setSessionExpired(false)}
+                className="text-xs text-text-muted transition-colors hover:text-text-primary"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+      </>
     );
   }
 

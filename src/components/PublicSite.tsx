@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import PublicChatWidget from "@/components/PublicChatWidget";
 import { useToast } from "@/components/ToastProvider";
 import { fetchWithTimeout, mutate } from "@/lib/api-client";
+import { parseSiteHash, siteRouteToHash, type SiteRoute } from "@/lib/site-url";
 import PublicShop from "@/components/PublicShop";
 import {
   MAX_PUBLIC_NAV_LABEL_LENGTH,
@@ -61,6 +62,13 @@ interface Props {
 type Tab = "home" | "forums" | "ladder" | "shop" | "blog" | "changelog" | "post"
   | "forum-cat" | "forum-thread" | "site-editor";
 
+/** Already-loaded objects, so a route can be applied without re-fetching. */
+interface RouteHint {
+  post?: CmsPost;
+  category?: ForumCategory;
+  thread?: ForumThread;
+}
+
 
 
 /* ── Component ──────────────────────────────────────────────────────────────── */
@@ -107,8 +115,13 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
   const [threadError, setThreadError] = useState("");
   const [postingReply, setPostingReply] = useState(false);
   const [replyError, setReplyError] = useState("");
+  // Deep links: a thread opened straight from a URL is fetched, so the view has
+  // to distinguish "still loading" from "this thread no longer exists".
+  const [forumLoaded, setForumLoaded] = useState(false);
+  const [threadLoading, setThreadLoading] = useState(false);
+  const [threadMissing, setThreadMissing] = useState(false);
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
-  const { success: showSuccess } = useToast();
+  const { error: showError, success: showSuccess } = useToast();
   const isAdmin = user?.role === "admin";
   const roleColor = user?.roleColor || "#3b82f6";
   const roleIcon = user?.roleIcon || "👤";
@@ -166,13 +179,34 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
   }, [loadCms]);
 
   const loadCategories = useCallback(async () => {
-    try { const r = await fetch("/api/forum/categories"); if (r.ok) setForumCategories((await r.json()).categories || []); } catch { /* */ }
+    try {
+      const r = await fetchWithTimeout("/api/forum/categories", { cache: "no-store" }, 10_000);
+      if (r.ok) setForumCategories((await r.json()).categories || []);
+    } catch { /* */ } finally { setForumLoaded(true); }
   }, []);
   const loadThreads = useCallback(async (catId: number) => {
-    try { const r = await fetch(`/api/forum/threads?categoryId=${catId}`); if (r.ok) setThreads((await r.json()).threads || []); } catch { /* */ }
+    try {
+      const r = await fetchWithTimeout(`/api/forum/threads?categoryId=${catId}`, { cache: "no-store" }, 10_000);
+      if (r.ok) setThreads((await r.json()).threads || []);
+    } catch { /* */ }
   }, []);
   const loadThread = useCallback(async (tid: number) => {
-    try { const r = await fetch(`/api/forum/threads/${tid}`); if (r.ok) { const d = await r.json(); if (d.thread) setSelectedThread(d.thread); setPosts(d.posts || []); } } catch { /* */ }
+    setThreadLoading(true);
+    setThreadMissing(false);
+    try {
+      const r = await fetchWithTimeout(`/api/forum/threads/${tid}`, { cache: "no-store" }, 10_000);
+      if (r.ok) {
+        const d = await r.json();
+        if (d.thread) { setSelectedThread(d.thread); setPosts(d.posts || []); }
+        else setThreadMissing(true);
+      } else {
+        setThreadMissing(true);
+      }
+    } catch {
+      setThreadMissing(true);
+    } finally {
+      setThreadLoading(false);
+    }
   }, []);
   const loadLadder = useCallback(async (key?: string, season?: string) => {
     try {
@@ -195,6 +229,127 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
     } catch { /* */ }
   }, []);
 
+  // ── Routing ───────────────────────────────────────────────────────────────
+  // The hash is the source of truth. Applying a route is the only way the view
+  // changes, so a link, the Back button, a refresh and a click all travel the
+  // same path and cannot disagree with the address bar.
+  const lastHashRef = useRef<string>("#home");
+  const pendingRouteRef = useRef<SiteRoute | null>(null);
+
+  const applyRoute = useCallback((route: SiteRoute, hint?: RouteHint) => {
+    setMobileMenuOpen(false);
+    setShowNewThread(false);
+
+    if (route.kind === "tab") {
+      pendingRouteRef.current = null;
+      setTab(route.tab);
+      setSelectedPost(null);
+      setSelectedCat(null);
+      setSelectedThread(null);
+      return;
+    }
+
+    if (route.kind === "site-editor") {
+      pendingRouteRef.current = null;
+      // Only administrators have an editor; anyone else who lands on this link
+      // gets the site rather than an empty page.
+      setTab(isAdmin ? "site-editor" : "home");
+      return;
+    }
+
+    if (route.kind === "post") {
+      const post =
+        hint?.post ??
+        blogs.find((p) => p.id === route.id) ??
+        changelogs.find((p) => p.id === route.id) ??
+        null;
+      // The post list may not have arrived yet (deep link / slow panel); hold the
+      // route until it does rather than bouncing the reader somewhere else.
+      if (!post) { pendingRouteRef.current = route; return; }
+      pendingRouteRef.current = null;
+      setSelectedPost(post);
+      setSelectedCat(null);
+      setSelectedThread(null);
+      setTab("post");
+      return;
+    }
+
+    if (route.kind === "category") {
+      const category = hint?.category ?? forumCategories.find((c) => c.id === route.id) ?? null;
+      if (!category) { pendingRouteRef.current = route; return; }
+      pendingRouteRef.current = null;
+      setSelectedCat(category);
+      setSelectedPost(null);
+      setSelectedThread(null);
+      setTab("forum-cat");
+      void loadThreads(category.id);
+      return;
+    }
+
+    // Thread. The object may only exist in the current list, so the fetch below
+    // fills the view in; the render shows a loading state until it does.
+    const known = hint?.thread ?? threads.find((t) => t.id === route.id) ?? null;
+    pendingRouteRef.current = null;
+    setSelectedPost(null);
+    setSelectedThread(known);
+    setTab("forum-thread");
+    void loadThread(route.id);
+  }, [blogs, changelogs, forumCategories, threads, isAdmin, loadThread, loadThreads]);
+
+  const navigate = useCallback((route: SiteRoute, hint?: RouteHint, replace = false) => {
+    applyRoute(route, hint);
+    const hash = siteRouteToHash(route);
+    lastHashRef.current = hash;
+    if (typeof window === "undefined" || window.location.hash === hash) return;
+    if (replace) window.history.replaceState(null, "", hash);
+    else window.history.pushState(null, "", hash);
+  }, [applyRoute]);
+
+  // Apply the URL on mount and whenever the reader travels back or forward.
+  useEffect(() => {
+    const sync = () => {
+      const route = parseSiteHash(window.location.hash);
+      const hash = siteRouteToHash(route);
+      if (hash === lastHashRef.current) return;
+      lastHashRef.current = hash;
+      applyRoute(route);
+    };
+    // Deferred: applying a route sets state, which must not happen synchronously
+    // inside an effect body (cascading render).
+    const timer = window.setTimeout(sync, 0);
+    const onPop = () => sync();
+    window.addEventListener("popstate", onPop);
+    window.addEventListener("hashchange", onPop);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("popstate", onPop);
+      window.removeEventListener("hashchange", onPop);
+    };
+  }, [applyRoute]);
+
+  // A held route gets another chance once the data it needs arrives. If the data
+  // is here and the target still is not, the link is stale: say so and send the
+  // reader to the nearest list instead of leaving a view that does not exist.
+  useEffect(() => {
+    if (!pendingRouteRef.current) return;
+    const timer = window.setTimeout(() => {
+      const route = pendingRouteRef.current;
+      if (!route) return;
+      applyRoute(route);
+      if (!pendingRouteRef.current) return;
+      if (route.kind === "post" && loaded) {
+        pendingRouteRef.current = null;
+        showError("That post could not be found", "It may have been unpublished. Here is the blog.");
+        navigate({ kind: "tab", tab: "blog" }, undefined, true);
+      } else if (route.kind === "category" && forumLoaded) {
+        pendingRouteRef.current = null;
+        showError("That forum could not be found", "It may have been removed. Here are the other forums.");
+        navigate({ kind: "tab", tab: "forums" }, undefined, true);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [blogs, changelogs, forumCategories, loaded, forumLoaded, applyRoute, navigate, showError]);
+
   // Fetch each section the first time its tab is opened. Depending on
   // forumCategories.length / ladderEntries.length made this effect re-run as a
   // direct result of its own setState, which is the cascading-render pattern.
@@ -212,11 +367,17 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
     }
   }, [tab, loadCategories, loadLadder]);
 
-  // Close mobile menu on tab change
-  function goTab(t: Tab) { setTab(t); setSelectedPost(null); setSelectedCat(null); setSelectedThread(null); setShowNewThread(false); setMobileMenuOpen(false); }
-  function openPost(p: CmsPost) { setSelectedPost(p); setTab("post"); setMobileMenuOpen(false); }
-  function openCategory(c: ForumCategory) { setSelectedCat(c); setTab("forum-cat"); setShowNewThread(false); loadThreads(c.id); setMobileMenuOpen(false); }
-  function openThread(t: ForumThread) { setSelectedThread(t); setTab("forum-thread"); loadThread(t.id); setMobileMenuOpen(false); }
+  // ── Navigation ────────────────────────────────────────────────────────────
+  // These keep the call sites readable while everything funnels through one
+  // function that updates both the view and the address bar.
+  function goTab(t: Tab) {
+    if (t === "site-editor") { navigate({ kind: "site-editor" }); return; }
+    const destination = PUBLIC_NAV_DESTINATIONS.find((d) => d.tab === t);
+    navigate({ kind: "tab", tab: destination ? destination.tab : "home" });
+  }
+  function openPost(p: CmsPost) { navigate({ kind: "post", id: p.id }, { post: p }); }
+  function openCategory(c: ForumCategory) { navigate({ kind: "category", id: c.id }, { category: c }); }
+  function openThread(t: ForumThread) { navigate({ kind: "thread", id: t.id }, { thread: t }); }
 
   // A new tab should start at the top. Without this, opening a post from the
   // bottom of the blog list left the reader half-way down the post, and keyboard
@@ -407,7 +568,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
             {user ? (
               <>
                 <button onClick={onDashboardClick} className="ml-2 px-3 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition-colors">⚙️ Panel</button>
-                {isAdmin && <button onClick={() => { setTab("site-editor"); setMobileMenuOpen(false); }} className="ml-1 px-3 py-2 text-sm rounded-lg transition-colors text-text-muted hover:text-accent hover:bg-bg-hover" title="Edit Site">✏️</button>}
+                {isAdmin && <button type="button" onClick={() => goTab("site-editor")} className="ml-1 px-3 py-2 text-sm rounded-lg transition-colors text-text-muted hover:text-accent hover:bg-bg-hover" title="Edit Site">✏️</button>}
                 <button onClick={onDashboardClick} className="ml-1 flex items-center gap-2 px-2 py-1.5 rounded-lg border border-border hover:bg-bg-hover transition-colors">
                   <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold" style={{ backgroundColor: `${roleColor}20`, color: roleColor }}>{user.username[0].toUpperCase()}</div>
                   <div className="hidden lg:block text-left"><p className="text-xs font-medium leading-none">{user.username}</p><p className="text-[10px] text-text-muted">{roleIcon} {roleName}</p></div>
@@ -460,7 +621,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                     </div>
                   </div>
                   <button onClick={() => { onDashboardClick(); setMobileMenuOpen(false); }} className="w-full text-left px-4 py-2.5 text-sm font-medium rounded-lg bg-accent/10 text-accent hover:bg-accent/20 transition-colors">⚙️ Control Panel</button>
-                  {isAdmin && <button onClick={() => { setTab("site-editor"); setMobileMenuOpen(false); }} className="w-full text-left px-4 py-2.5 text-sm font-medium rounded-lg text-text-muted hover:text-accent hover:bg-bg-hover transition-colors">✏️ Edit Site</button>}
+                  {isAdmin && <button type="button" onClick={() => goTab("site-editor")} className="w-full text-left px-4 py-2.5 text-sm font-medium rounded-lg text-text-muted hover:text-accent hover:bg-bg-hover transition-colors">✏️ Edit Site</button>}
                   <button onClick={() => { onLogout(); setMobileMenuOpen(false); }} className="w-full text-left px-4 py-2.5 text-sm font-medium rounded-lg text-danger hover:bg-danger/10 transition-colors">Logout</button>
                 </>
               ) : (
@@ -870,11 +1031,41 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
         )}
 
         {/* ═══ FORUM THREAD ═══ */}
+        {tab === "forum-thread" && !selectedThread && (
+          <div className="max-w-3xl animate-fade-in">
+            {threadMissing && !threadLoading ? (
+              <div role="alert" className="rounded-xl border border-warning/40 bg-warning/10 p-6 text-center">
+                <p className="text-sm font-medium text-warning">That thread could not be found</p>
+                <p className="mt-1 text-xs text-text-muted">
+                  It may have been deleted, or the link may be out of date.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => goTab("forums")}
+                  className="mt-4 rounded-lg border border-warning/40 px-4 py-2 text-xs font-medium text-warning transition-colors hover:bg-warning/20"
+                >
+                  Browse the forums
+                </button>
+              </div>
+            ) : (
+              <div aria-busy="true" className="rounded-xl border border-border bg-bg-card p-6">
+                <div className="h-6 w-2/3 animate-pulse rounded bg-bg-hover" />
+                <div className="mt-4 space-y-2">
+                  <div className="h-3 w-full animate-pulse rounded bg-bg-hover" />
+                  <div className="h-3 w-5/6 animate-pulse rounded bg-bg-hover" />
+                  <div className="h-3 w-3/4 animate-pulse rounded bg-bg-hover" />
+                </div>
+                <p className="mt-4 text-xs text-text-muted">Loading thread…</p>
+              </div>
+            )}
+          </div>
+        )}
+
         {tab === "forum-thread" && selectedThread && (
           <div className="animate-fade-in">
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6">
               <div className="space-y-4 min-w-0">
-                <Crumb items={[["Forums", () => goTab("forums")], ...(selectedCat ? [[selectedCat.name, () => { setTab("forum-cat"); loadThreads(selectedCat.id); }] as [string, () => void]] : []), [selectedThread.title]]} />
+                <Crumb items={[["Forums", () => goTab("forums")], ...(selectedCat ? [[selectedCat.name, () => openCategory(selectedCat)] as [string, () => void]] : []), [selectedThread.title]]} />
                 <h2 className="text-lg sm:text-xl font-bold">{selectedThread.title}</h2>
                 <div className="space-y-3 sm:space-y-4">{posts.map((p) => (
                   <div key={p.id} className="bg-bg-card border border-border rounded-xl overflow-hidden">
@@ -939,7 +1130,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
         )}
         {tab === "post" && selectedPost && (
           <article className="animate-fade-in max-w-3xl mx-auto">
-            <button onClick={() => { setTab(selectedPost.type === "changelog" ? "changelog" : "blog"); setSelectedPost(null); }} className="text-accent text-sm hover:underline mb-4 sm:mb-6 block">← Back</button>
+            <button type="button" onClick={() => goTab(selectedPost.type === "changelog" ? "changelog" : "blog")} className="text-accent text-sm hover:underline mb-4 sm:mb-6 block">← Back</button>
             <div className="mb-4 sm:mb-6">
               <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-text-muted mb-3 flex-wrap">
                 {selectedPost.pinned && <span className="text-warning">📌</span>}
