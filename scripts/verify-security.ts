@@ -42,6 +42,11 @@ import {
   parsePanelSettings,
   validatePanelSetting,
 } from "../src/lib/panel-settings";
+import {
+  selfUpdateCommand,
+  detachedUpdateCommand,
+  DEFAULT_SELF_UPDATE_WRAPPER,
+} from "../src/lib/panel-update";
 
 /** Environment-provided retention defaults, for parse checks below. */
 const PANEL_DEFAULTS = { metricsRetentionDays: 30, auditRetentionDays: 365 };
@@ -4388,6 +4393,132 @@ console.log("\nFILEXFER permission set rails");
     // the UI would leave a brand-new panel unable to use its own feature.
     /permissions: Object\.fromEntries\(ALL_PERMISSIONS\.map\(\(p\) => \[p, true\]\)\)/.test(perms) &&
       /"transfer\.view": true, "transfer\.manage": true, "transfer\.disconnect": true,/.test(perms)
+  );
+}
+
+// ── PANELUPDATE: "Update panel" button ───────────────────────────────────────
+console.log("\nPANELUPDATE self-update rails");
+{
+  const repoFile = (p: string) => readFileAbs(new URL(p, import.meta.url).pathname);
+  const template = repoFile("../public/gsm-self-update.sh");
+  const installer = repoFile("../public/install.sh");
+  const updater = repoFile("../public/update.sh");
+  const route = repoFile("../src/app/api/system/update/route.ts");
+
+  // The panel runs as an unprivileged user, so the button executes exactly one
+  // root command. sudo wildcards span spaces: a rule for "update.sh *" would
+  // let the panel pass --install-dir and write anywhere as root. The helper
+  // bakes the install path in at render time and whitelists its arguments.
+  check(
+    "the sudo helper takes its install path from the installer, not the caller",
+    /UPDATER='@INSTALL_DIR@\/public\/update\.sh'/.test(template) &&
+      // The path is baked in when the helper is rendered; nothing reads the
+      // install directory from an argument or the environment.
+      !/(^|\n)\s*(INSTALL_DIR|UPDATER)=[^\n]*\$/m.test(template.split("\n").filter((l) => !l.startsWith("#")).join("\n"))
+  );
+  check(
+    "the sudo helper refuses every argument except --no-backup",
+    /--no-backup\)/.test(template) &&
+      /refusing unknown argument/.test(template) &&
+      /too many arguments/.test(template) &&
+      !/"\$@"/.test(template) &&
+      !/\$\{@:/.test(template)
+  );
+  check(
+    "both installers write the sudo rule for the helper only, without a wildcard",
+    [installer, updater].every(
+      (text) =>
+        /\/etc\/sudoers\.d\/gsm-panel-update/.test(text) &&
+        /\$GSM_USER ALL=\(ALL\) NOPASSWD: \$SELF_UPDATE_WRAPPER\n/.test(text) &&
+        !/NOPASSWD:[^\n]*gsm-self-update\s+\S/.test(text) &&
+        !/NOPASSWD:[^\n]*update\.sh/.test(text)
+    )
+  );
+  check(
+    "a sudoers file that does not validate is never installed",
+    [installer, updater].every(
+      (text) =>
+        /visudo -cf "\$new_sudoers"/.test(text) &&
+        /rm -f "\$new_sudoers"\n\s*return 1/.test(text)
+    )
+  );
+
+  // The command the API builds is fixed: no request field reaches it.
+  const asUser = selfUpdateCommand({ isRoot: false, updaterPath: "/opt/gsm-panel/public/update.sh" });
+  check(
+    "the panel's command is sudo -n against the helper",
+    asUser.file === "sudo" &&
+      asUser.args[0] === "-n" &&
+      asUser.args[1] === DEFAULT_SELF_UPDATE_WRAPPER &&
+      asUser.args.length === 2
+  );
+  const asRoot = selfUpdateCommand({ isRoot: true, updaterPath: "/opt/gsm-panel/public/update.sh", noBackup: true });
+  check(
+    "a root panel runs the updater with fixed flags only",
+    asRoot.file === "/bin/bash" &&
+      asRoot.args.join(" ") === "/opt/gsm-panel/public/update.sh --force --no-backup"
+  );
+  check(
+    "no generated command carries operator-chosen flags",
+    [asUser, asRoot].every((cmd) =>
+      !/--install-dir|--branch|--rollback|[;&|`$]/.test([cmd.file, ...cmd.args].join(" "))
+    )
+  );
+  check(
+    "the updater is started detached, so the restart cannot orphan it",
+    /^setsid nohup /.test(detachedUpdateCommand(asUser, "/tmp/x.log").args[1])
+  );
+
+  // The route must be gated, confirmed, and single-flight.
+  check(
+    "the update endpoint requires the panel.updates permission",
+    /hasPermission\(auth\.userId, "panel\.updates", auth\.keyScope\)/.test(route)
+  );
+  check(
+    "starting an update requires an explicit confirmation field",
+    /input\.confirm !== "update"/.test(route)
+  );
+  check(
+    "a second update is refused while one is running",
+    /updateIsRunning\(existing, Date\.now\(\)\)/.test(route) && /status: 409/.test(route)
+  );
+  check(
+    "the endpoint never builds a command from request input",
+    !/--install-dir/.test(route) && !/--branch/.test(route) && !/exec\(|execSync|spawnSync/.test(route)
+  );
+  check(
+    "starting an update is written to the audit log",
+    /action: "panel\.update\.start"/.test(route)
+  );
+
+  // Progress publishing: the panel cannot watch the process, so the updater
+  // writes a state file the panel reads after the restart.
+  check(
+    "the updater publishes progress to a state file",
+    /STATE_FILE=/.test(updater) &&
+      /"status": "%s"/.test(updater) &&
+      /state_write/.test(updater) &&
+      /\$STATE_DIR\/state\.json|\$\{GSM_UPDATE_STATE_FILE:-\$STATE_DIR\/state\.json\}/.test(updater)
+  );
+  check(
+    "the updater records success and failure on every exit path",
+    /state_finish \|\| true' EXIT/.test(updater) &&
+      /STATE_STATUS="success"/.test(updater) &&
+      /STATE_STATUS="failed"/.test(updater) &&
+      /PANEL_OK/.test(updater)
+  );
+  check(
+    "a rollback never publishes a half-finished update",
+    updater.indexOf("state_begin\n") > updater.indexOf('"$ROLLBACK" == "true"')
+  );
+  check(
+    "the published state directory is readable but holds no secrets",
+    /install -d -o root -g root -m 0755 "\$STATE_DIR"/.test(updater) &&
+      !/DATABASE_URL/.test(updater.slice(updater.indexOf("STATE_DIR="), updater.indexOf("state_begin()")))
+  );
+  check(
+    "the updater keeps a stable log copy for the panel",
+    /exec > >\(tee -a "\$STABLE_LOG"\)/.test(updater)
   );
 }
 

@@ -775,8 +775,27 @@ pm2 stop gsm-panel      # stop
 
 ### Updating
 
+Administrators get an **Updates** tab in the panel (Administration → Updates) with
+an *Update panel now* button. It shows the commit you are running, starts
+`public/update.sh`, streams the step it is on (backup, pull, `npm ci`,
+migrations, build, restart, health check) and reports the verdict — including
+after the panel restarts itself at the end, because progress is written to
+`/var/lib/gsm-panel-update/state.json` rather than held in the browser. Game
+servers are untouched; only the panel process restarts.
+
+The button is safe by construction: the panel runs as `gsm` and may execute one
+root-owned helper, `/usr/local/bin/gsm-self-update`, through passwordless sudo.
+That helper bakes your install path in when it is generated and accepts a single
+optional argument (`--no-backup`), so the panel can never point the updater at
+another directory, branch or repository. If the helper is missing, the tab says
+so and shows the command to run instead. `install.sh` and every update install
+it; one `sudo bash public/update.sh` on an older install is enough to enable the
+button.
+
 ```bash
-# One-liner, from anywhere
+# From the panel: Administration → Updates → Update panel now
+
+# Or from a shell
 bash <(curl -fsSL https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/public/update.sh)
 
 # Or, if the panel is installed
@@ -951,7 +970,7 @@ src/
 └── instrumentation.ts    boot hook — starts servers marked "start on boot"
 tests/                    unit tests + PostgreSQL integrity tests
 scripts/                  verify-templates · verify-installers · verify-security
-public/                   install.sh · update.sh · uninstall.sh · setup-webroot.sh
+public/                   install.sh · update.sh · gsm-self-update.sh · uninstall.sh · setup-webroot.sh
 ```
 
 Adding a game? Drop a module into `src/db/games/`, export it from `index.ts`, and run `npm run verify:templates` — it will tell you about unused or undeclared variables. See `src/db/games/README.md`.

@@ -47,7 +47,13 @@ test("the updater builds the push config from .env and removes it afterwards", (
   );
   const removals = updateSh.match(/rm -f -- "\$DRIZZLE_UPDATE_CONFIG"/g) ?? [];
   assert.ok(removals.length >= 2, "the throwaway config must be removed on success and on failure");
-  assert.match(updateSh, /rm -f -- "\$DRIZZLE_UPDATE_CONFIG"' EXIT/, "the EXIT trap must clean up too");
+  // The trap also finalises the progress state the panel's update button reads,
+  // so it is matched as a whole rather than by its last command.
+  assert.match(
+    updateSh,
+    /trap '[^']*rm -f -- "\$DRIZZLE_UPDATE_CONFIG"[^']*' EXIT/,
+    "the EXIT trap must clean up too"
+  );
 });
 
 test("migration failures name the migration log", () => {

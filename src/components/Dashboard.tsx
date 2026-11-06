@@ -22,6 +22,7 @@ import SchedulerPanel from "./panels/SchedulerPanel";
 import ApiKeysPanel from "./panels/ApiKeysPanel";
 import LicensesPanel from "./panels/LicensesPanel";
 import SettingsPanel from "./panels/SettingsPanel";
+import UpdatesPanel from "./panels/UpdatesPanel";
 import LadderPanel from "./panels/LadderPanel";
 import ShopPanel from "./panels/ShopPanel";
 import { ThemeToggleButton } from "./ThemeToggle";
@@ -43,7 +44,7 @@ interface AuthUser {
 }
 interface Props { user: AuthUser; onLogout: () => void; onGoHome?: () => void }
 
-type Tab = "overview" | "servers" | "files" | "transfer" | "rcon" | "nodes" | "games" | "audit" | "monitor" | "forum" | "cms" | "ladder" | "shop" | "users" | "roles" | "profile" | "database" | "activity" | "scheduler" | "apikeys" | "licenses" | "settings";
+type Tab = "overview" | "servers" | "files" | "transfer" | "rcon" | "nodes" | "games" | "audit" | "monitor" | "forum" | "cms" | "ladder" | "shop" | "users" | "roles" | "profile" | "database" | "activity" | "scheduler" | "apikeys" | "licenses" | "settings" | "updates";
 
 interface NavItem { key: Tab; label: string; permission?: string; section: string; shortcut?: string }
 
@@ -66,6 +67,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: "database", label: "Database", permission: "database.view", section: "admin", shortcut: "D" },
   { key: "activity", label: "Activity Log", permission: "security.audit", section: "admin" },
   { key: "settings", label: "Settings", permission: "panel.settings", section: "admin" },
+  { key: "updates", label: "Updates", permission: "panel.updates", section: "admin" },
   { key: "scheduler", label: "Scheduler", permission: "scheduler.view", section: "main" },
   { key: "licenses", label: "License Keys", permission: "licenses.view", section: "admin" },
   { key: "apikeys", label: "API Keys", permission: "apikeys.view", section: "account" },
@@ -97,6 +99,7 @@ const TAB_META: Record<Tab, { title: string; subtitle: string }> = {
     apikeys: { title: "API Keys", subtitle: "Generate personal keys for external tools and scripts." },
     licenses: { title: "License Keys", subtitle: "Issue and manage installation licenses — the master key desk for distributed panels." },
   settings: { title: "Settings", subtitle: "Access, retention, automation, alerts and integrations — one screen at a time." },
+  updates: { title: "Updates", subtitle: "Update the panel software, and see exactly what the last update did." },
   };
 
 export default function Dashboard({ user, onLogout, onGoHome }: Props) {
@@ -423,6 +426,7 @@ export default function Dashboard({ user, onLogout, onGoHome }: Props) {
       case "apikeys": return <ApiKeysPanel />;
       case "licenses": return <LicensesPanel />;
       case "settings": return <SettingsPanel />;
+      case "updates": return <UpdatesPanel />;
       default: return <OverviewPanel user={user} onNavigate={navTo} />;
     }
   }

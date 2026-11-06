@@ -6,6 +6,39 @@ All notable changes to GameServer Manager are documented here.
 
 ## [Unreleased]
 
+### 🔄 An update button that survives updating itself
+
+Updating the panel meant sshing in and running a shell script. The panel now has
+**Administration → Updates → Update panel now**: it shows the commit you are
+running, runs `public/update.sh`, and reports the step, the live output and the
+final health verdict.
+
+The hard part is that the updater restarts the panel that is serving the
+request. So:
+
+- **Progress is a file, not a request.** `update.sh` publishes
+  `/var/lib/gsm-panel-update/state.json` (status, step, timestamps, commits) and
+  keeps a stable log copy beside it. The panel reads both, so the tab still
+  knows what happened after it has been restarted under the operator's feet, and
+  a run that dies mid-way is reported as *stopped part-way* instead of spinning
+  forever.
+- **The panel cannot be turned into a shell.** It runs as `gsm`, which may
+  execute exactly one root command: the generated helper
+  `/usr/local/bin/gsm-self-update`, whose install path is baked in and whose only
+  accepted argument is `--no-backup`. A sudo rule for `update.sh` would have
+  needed a wildcard, and sudo wildcards span spaces — `--install-dir /etc` would
+  have been root code execution. The updater starts detached (`setsid nohup`), so
+  the restart cannot orphan it in the middle of `npm ci`.
+- **It refuses honestly.** No helper, no sudo rule, no updater, or an update
+  already running each produce a plain explanation and (for the first three) the
+  exact command to run instead — never a button that silently does nothing. The
+  endpoint is gated on `panel.updates`, requires `{ "confirm": "update" }`, is
+  single-flight (409), and writes an audit entry before the panel disappears.
+- **Installs older than this release get the helper from the updater itself** —
+  `install.sh` and `update.sh` both render the helper and validate the sudoers
+  file with `visudo -cf` before installing it.
+
+
 ### 🧭 A panel and a site that say what is actually wrong
 
 The shell had three ways to mislead you: a failed boot probe looked exactly like
