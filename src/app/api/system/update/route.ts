@@ -271,9 +271,26 @@ export async function POST(req: NextRequest) {
           GSM_UPDATE_LOG_FILE: env.logPath,
         },
       });
+      // A detached child reports trouble asynchronously; without a listener an
+      // ENOENT would surface as an uncaught exception and take the panel down.
+      child.on("error", (error: Error) => {
+        console.error("[panel-update] could not start the updater:", error.message);
+        void seedUpdateState(env.statePath, {
+          ...optimistic,
+          status: "failed",
+          error: "Could not start the updater. Check the panel's logs.",
+          finishedAt: new Date().toISOString(),
+        });
+      });
       child.unref();
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Could not start the updater.";
+      await seedUpdateState(env.statePath, {
+        ...optimistic,
+        status: "failed",
+        error: message,
+        finishedAt: new Date().toISOString(),
+      });
       return NextResponse.json({ error: message }, { status: 500 });
     }
 
