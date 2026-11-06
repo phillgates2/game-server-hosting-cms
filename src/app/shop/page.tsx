@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { fetchWithTimeout } from "@/lib/api-client";
 
 interface ShopProduct {
   id: number;
@@ -58,6 +59,7 @@ export default function ShopPage() {
   const [products, setProducts] = useState<ShopProduct[]>([]);
   const [categories, setCategories] = useState<ShopCategory[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [shopError, setShopError] = useState<string | null>(null);
   const [stripeEnabled, setStripeEnabled] = useState(false);
   const [activeCat, setActiveCat] = useState("all");
   const [search, setSearch] = useState("");
@@ -77,15 +79,23 @@ export default function ShopPage() {
 
   const loadShop = useCallback(async () => {
     try {
-      const res = await fetch("/api/shop/products");
+      const res = await fetchWithTimeout("/api/shop/products", { cache: "no-store" }, 10_000);
       const data = await res.json().catch(() => null);
       if (res.ok) {
         setProducts(data.products ?? []);
         setCategories(data.categories ?? []);
         setStripeEnabled(data.stripeEnabled === true);
+        setShopError(null);
+      } else {
+        // A failed load is not an empty catalogue: "No products found" when the
+        // API is down reads as "this shop sells nothing" and loses the sale.
+        setShopError(
+          data?.error || `The shop could not load its products (HTTP ${res.status}).`
+        );
       }
-    } catch {}
-    finally { setLoaded(true); }
+    } catch {
+      setShopError("The shop could not load — the panel may be restarting. Try again in a moment.");
+    } finally { setLoaded(true); }
   }, []);
 
   useEffect(() => {
@@ -326,6 +336,19 @@ export default function ShopPage() {
         {!loaded ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[1,2,3,4,5,6].map((i) => <div key={i} className="h-64 rounded-2xl bg-[#111827] border border-[#1f2937] animate-pulse" />)}
+          </div>
+        ) : shopError ? (
+          <div role="alert" className="rounded-2xl border border-[#ef4444]/30 bg-[#ef4444]/10 px-6 py-10 text-center">
+            <span className="mb-3 block text-4xl" aria-hidden>⚠️</span>
+            <h3 className="mb-1 font-semibold text-white">The shop could not load</h3>
+            <p className="mx-auto max-w-md text-sm text-[#94a3b8]">{shopError}</p>
+            <button
+              type="button"
+              onClick={() => { setLoaded(false); void loadShop(); }}
+              className="mt-4 rounded-xl border border-[#374151] bg-[#1f2937] px-5 py-2.5 text-sm font-medium text-white transition-colors hover:border-[#6366f1]/40"
+            >
+              Try again
+            </button>
           </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-16 rounded-2xl bg-[#111827] border border-[#1f2937]">

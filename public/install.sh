@@ -1320,6 +1320,63 @@ else
   warn "Panel will not be able to clear RAM buffers (non-fatal)"
 fi
 
+# ── Let the panel update itself ──────────────────────────────────────────────
+# The panel runs as $GSM_USER, so "Update panel" in the UI runs one root-owned
+# helper through passwordless sudo. The helper is rendered from a template in
+# the repository and whitelists its arguments — see public/gsm-self-update.sh
+# and the rule written below for why a plain sudo rule for update.sh would hand
+# root to anyone who can reach the panel.
+log "Installing the panel self-update helper..."
+SELF_UPDATE_TEMPLATE="$INSTALL_DIR/public/gsm-self-update.sh"
+SELF_UPDATE_WRAPPER="/usr/local/bin/gsm-self-update"
+SELF_UPDATE_SUDOERS="/etc/sudoers.d/gsm-panel-update"
+
+sed_replacement() {
+  printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'
+}
+
+install_self_update_helper() {
+  local new_wrapper="$SELF_UPDATE_WRAPPER.$$.new"
+  local new_sudoers="$SELF_UPDATE_SUDOERS.$$.new"
+
+  if [[ ! -f "$SELF_UPDATE_TEMPLATE" ]]; then
+    warn "Self-update template missing at $SELF_UPDATE_TEMPLATE"
+    return 1
+  fi
+  sed "s|@INSTALL_DIR@|$(sed_replacement "$INSTALL_DIR")|g" "$SELF_UPDATE_TEMPLATE" > "$new_wrapper" \
+    || { rm -f "$new_wrapper"; return 1; }
+  chmod 0755 "$new_wrapper" && chown root:root "$new_wrapper" \
+    || { rm -f "$new_wrapper"; return 1; }
+  mv -f "$new_wrapper" "$SELF_UPDATE_WRAPPER" || { rm -f "$new_wrapper"; return 1; }
+
+  cat > "$new_sudoers" <<EOF || return 1
+# GameServer Manager — lets the panel start its own update.
+# Installed by the GSM installer. Remove with: sudo rm $SELF_UPDATE_SUDOERS
+#
+# Exactly one command, with no arguments on the rule itself:
+# $SELF_UPDATE_WRAPPER checks its arguments and only ever runs
+# $INSTALL_DIR/public/update.sh. Do not add a wildcard here — sudo's wildcards
+# span spaces, so a trailing * would let the panel choose the updater's flags,
+# including --install-dir, which is root code execution.
+$GSM_USER ALL=(ALL) NOPASSWD: $SELF_UPDATE_WRAPPER
+EOF
+  chmod 0440 "$new_sudoers" && chown root:root "$new_sudoers" \
+    || { rm -f "$new_sudoers"; return 1; }
+  if visudo -cf "$new_sudoers" > /dev/null 2>&1; then
+    mv -f "$new_sudoers" "$SELF_UPDATE_SUDOERS" || { rm -f "$new_sudoers"; return 1; }
+  else
+    rm -f "$new_sudoers"
+    return 1
+  fi
+  return 0
+}
+
+if install_self_update_helper; then
+  ok "Panel update helper installed ($SELF_UPDATE_WRAPPER)"
+else
+  warn "Panel update helper not installed — the Updates tab will explain how to enable it"
+fi
+
 # Create a wrapper script so root (and other users) can manage the gsm PM2 instance
 # without needing to `su - gsm` first. Embed the selected path so custom
 # --install-dir deployments do not depend on /opt/gsm-panel/.install-info.

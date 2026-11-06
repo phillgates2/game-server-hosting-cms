@@ -96,3 +96,53 @@ export async function mutate<T = unknown>(
     };
   }
 }
+
+/**
+ * How long a request may hang before it is treated as failed.
+ *
+ * `fetch` has no timeout of its own. If the panel process is wedged — a
+ * blocked event loop, a half-open connection, a laptop whose Wi-Fi dropped —
+ * the promise never settles and the screen sits on a spinner forever with no
+ * way to tell "slow" from "never". Fifteen seconds is longer than any panel
+ * request should take and short enough that the user gets an answer.
+ */
+export const DEFAULT_TIMEOUT_MS = 15_000;
+
+/**
+ * `fetch` with a deadline.
+ *
+ * Aborting produces a rejection whose reason names the timeout, so callers can
+ * distinguish "you are offline", "the server said no" and "it never answered".
+ * A caller-supplied signal still works: it is forwarded to the inner
+ * controller, so either deadline can cancel the request.
+ */
+export async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs: number = DEFAULT_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort(
+      new DOMException(`Request timed out after ${timeoutMs}ms`, "TimeoutError")
+    );
+  }, timeoutMs);
+
+  const outer = init.signal;
+  const forwardAbort = () => controller.abort(outer?.reason);
+  if (outer) {
+    if (outer.aborted) forwardAbort();
+    else outer.addEventListener("abort", forwardAbort, { once: true });
+  }
+
+  try {
+    // Already cancelled before we started: do not bother the network.
+    if (controller.signal.aborted) {
+      throw controller.signal.reason ?? new DOMException("Request aborted", "AbortError");
+    }
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+    outer?.removeEventListener("abort", forwardAbort);
+  }
+}

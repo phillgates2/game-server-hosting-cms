@@ -16,6 +16,7 @@
  */
 
 import { parseCron } from "./cron";
+import { PANEL_SETTING_KEYS } from "./panel-settings";
 import { validatePresetInput } from "./server-presets";
 
 export const PANEL_EXPORT_KIND = "panel-export";
@@ -23,23 +24,14 @@ export const IMPORT_MAX_SETTINGS = 100;
 export const IMPORT_MAX_PRESETS = 50;
 export const IMPORT_MAX_TASKS = 100;
 
-/** The only settings an import may touch (mirrors panel-settings). */
-export const IMPORTABLE_SETTING_KEYS = new Set([
-  "metrics_retention_days",
-  "audit_retention_days",
-  "default_max_servers",
-  "registration_enabled",
-  "login_throttle_attempts",
-  "session_days",
-  "update_auto_backup",
-  "age_verification_enabled",
-  "minimum_account_age",
-  "scheduler_discord_notify",
-  "backup_retention_count",
-  "alert_cpu_percent",
-  "alert_ram_percent",
-  "alert_disk_percent",
-]);
+/**
+ * The only settings an import may touch.
+ *
+ * Derived from the registry rather than copied, so a new operational setting
+ * cannot be silently left out of a restore — or, worse, a key that stops being
+ * a panel setting cannot linger here and be written back into the table.
+ */
+export const IMPORTABLE_SETTING_KEYS = new Set<string>(PANEL_SETTING_KEYS);
 
 export const IMPORTABLE_TASK_TYPES = new Set(["restart", "backup", "update"]);
 

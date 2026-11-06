@@ -26,7 +26,23 @@ export async function GET() {
     }
     return NextResponse.json({ installed, logs });
   } catch {
-    return NextResponse.json({ installed: false, logs: [] });
+    // A database outage is NOT "not installed".
+    //
+    // This used to answer `{ installed: false }` with a 200 whenever the query
+    // failed, so a panel whose database was briefly down showed the install
+    // wizard — offering to claim a panel that already had accounts and servers.
+    // The failure now has its own status, and the shell shows a retry screen
+    // instead of the wizard. The body still carries `installed: null` so an
+    // older client cannot mistake it for a negative answer.
+    return NextResponse.json(
+      {
+        installed: null,
+        error:
+          "The panel could not read its install state — the database is unavailable.",
+        logs: [],
+      },
+      { status: 503 }
+    );
   }
 }
 

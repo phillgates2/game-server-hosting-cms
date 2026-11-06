@@ -207,7 +207,7 @@ Then visit `http://your-server:3000` to finish setup in the install wizard.
 <td width="33%" valign="top">
 
 #### 👥 Community & Admin
-- **Settings panel** — retention, quotas
+- **Settings panel** — eight focused screens with search, inline validation and one staged save
 - **Forum** with categories and threads
 - **Sandbox chat** — live shoutbox
 - **CMS** — posts, changelogs, pages
@@ -562,11 +562,29 @@ Two places to configure things, split by who they are for:
 
 | Where | What |
 |:--|:--|
-| **Settings** *(Administration)* | Data retention, default server quota, self-registration, age verification (minimum age, Australian 16+ default), pre-update auto-backup, login attempt limit, session length, **🔑 Master Key** (generate/rotate/revoke the one operator key), **idle auto-stop policy**, **alert mute windows**, **weekly fleet digest schedule**, **outbound webhook with delivery log**, IP allowlist, and everything Discord — webhook, bot, and channel backfill |
+| **Settings** *(Administration)* | Eight screens: **Accounts & registration** (self-registration, default server quota, age verification with the Australian 16+ minimum), **Sign-in & sessions** (login attempt limit, session length, IP allowlist), **Retention & backups** (data retention, backup retention, pre-update auto-backup, export/restore), **Automation** (idle auto-stop, weekly fleet digest, scheduled-task announcements), **Host alerts** (CPU/RAM/disk thresholds and mute windows), **Outbound webhook** (with delivery log), **Discord** (webhook, bot, channels, backfill) and the **Public status page** embed codes |
 | **Site Editor** *(✏️ on the public site)* | Panel name, hero text, footer, announcements, navigation links, chat widget, and **custom CSS** |
 
 Everything in **Settings** overrides the matching environment variable, so you
 can change it without editing `.env` or restarting the panel.
+
+The page is split into screens so nothing is a scroll hunt and every control is
+one search away:
+
+- **Search** in the top-right corner matches setting names, help text and
+  keywords, and jumps straight to the field.
+- **Staged saves.** Screens that change panel behaviour share a single save bar.
+  It appears only while something is pending, says how many changes are waiting
+  and on which screens, and sends *only the fields you changed* — so two
+  administrators working on different screens no longer overwrite each other.
+  Screens that drive an integration (webhook, Discord, status page) save with
+  their own button and say so.
+- **Inline validation.** A value outside its documented range is marked at the
+  field with a one-click "use the nearest legal value", and the save is refused
+  until it is fixed. The API validates against the same table, so the browser
+  and the server can never disagree about what is legal.
+- **Reset to defaults** stages a screen's factory values without storing them;
+  **Discard** puts every pending change back.
 
 <details>
 <summary><b>🔔 Giving existing servers a Discord channel</b></summary>
@@ -578,7 +596,7 @@ that already existed do not — and a channel someone deletes by hand in Discord
 leaves the panel posting into a webhook that silently returns 404, because
 webhook delivery never throws.
 
-**Settings → Discord Channels** fixes both:
+**Settings → Discord → Existing servers** fixes both:
 
 | Button | Does |
 |:--|:--|
@@ -687,6 +705,63 @@ lftp -u alice,password -e 'set ftp:ssl-allow true; put modpack.zip -o /survival-
 
 ---
 
+## 🧭 When something goes wrong
+
+The panel is designed to fail visibly rather than plausibly:
+
+| What happened | What you see |
+|:--|:--|
+| Panel cannot reach its database at boot | **"The panel could not be reached"** — *Try again*, *Status page*, automatic retry when the browser reconnects. The install wizard is **not** shown. |
+| A request hangs | Every boot request has a deadline (12 s); the screen reports the timeout instead of spinning forever. |
+| A panel crashes | That panel's card is replaced by a *Try again* / *Reload the panel* card. The rest of the panel keeps working. |
+| Session expired / request refused | The panel says so in place; nothing is silently dropped. |
+| Public site content fails to load | A banner names the failure and offers **Retry** — it never looks like an empty site. |
+| You go offline | An offline banner appears; on reconnect a toast confirms the panel is back. |
+| Session expires while the panel is open | A banner says *your session has expired — changes will not be saved* with **Sign in again**. |
+| Wrong URL | A branded 404 with the way home. |
+
+The boot decision lives in `src/lib/app-boot.ts` and is unit-tested: only an
+explicit `200 { installed: false }` from `GET /api/install` opens the wizard.
+
+### Shareable public pages
+
+Every view on the public site has its own link, so a thread can be posted in
+Discord and a page survives a refresh or the Back button:
+
+| Link | Opens |
+|:--|:--|
+| `#home` · `#forums` · `#ladder` · `#shop` · `#blog` · `#changelog` | the six sections |
+| `#post/12` | a blog post or changelog entry |
+| `#forum/7` | a forum category |
+| `#thread/9` | a thread, loaded directly |
+| `#site-editor` | the site editor *(administrators only)* |
+
+| `#ladder/game:3/S2` | one ladder and one season |
+| `#ladder/standalone:Bronze%20League` | a standalone ladder |
+
+Anything unrecognised resolves to the homepage, so a mistyped or outdated link
+never lands on a blank page.
+
+### Shareable panel pages
+
+The control panel uses a separate namespace, so a refresh reopens the panel you
+were on rather than dropping back to Overview, and Back/Forward walk the panels
+you visited:
+
+| Link | Opens |
+|:--|:--|
+| `#panel/servers` · `#panel/monitor` · `#panel/settings` · … | any panel |
+| `#panel/files/12/plugins` | the file manager, on server 12 in `plugins/` |
+
+`#panel/shop` is the management panel; `#shop` is the public storefront. A link
+to a panel your account cannot open is ignored rather than opened.
+
+### Keyboard shortcuts
+
+Press **?** in the panel (or pick *Keyboard shortcuts* in quick jump / the mobile
+menu) for the full list: `Ctrl/⌘ K` quick jump, `?` help, `Esc` to close, plus
+one letter per panel (`S` servers, `M` monitor, `F` files, …).
+
 ## 🛠️ Operations
 
 ### Day-to-day
@@ -700,8 +775,27 @@ pm2 stop gsm-panel      # stop
 
 ### Updating
 
+Administrators get an **Updates** tab in the panel (Administration → Updates) with
+an *Update panel now* button. It shows the commit you are running, starts
+`public/update.sh`, streams the step it is on (backup, pull, `npm ci`,
+migrations, build, restart, health check) and reports the verdict — including
+after the panel restarts itself at the end, because progress is written to
+`/var/lib/gsm-panel-update/state.json` rather than held in the browser. Game
+servers are untouched; only the panel process restarts.
+
+The button is safe by construction: the panel runs as `gsm` and may execute one
+root-owned helper, `/usr/local/bin/gsm-self-update`, through passwordless sudo.
+That helper bakes your install path in when it is generated and accepts a single
+optional argument (`--no-backup`), so the panel can never point the updater at
+another directory, branch or repository. If the helper is missing, the tab says
+so and shows the command to run instead. `install.sh` and every update install
+it; one `sudo bash public/update.sh` on an older install is enough to enable the
+button.
+
 ```bash
-# One-liner, from anywhere
+# From the panel: Administration → Updates → Update panel now
+
+# Or from a shell
 bash <(curl -fsSL https://raw.githubusercontent.com/phillgates2/game-server-hosting-cms/main/public/update.sh)
 
 # Or, if the panel is installed
@@ -876,7 +970,7 @@ src/
 └── instrumentation.ts    boot hook — starts servers marked "start on boot"
 tests/                    unit tests + PostgreSQL integrity tests
 scripts/                  verify-templates · verify-installers · verify-security
-public/                   install.sh · update.sh · uninstall.sh · setup-webroot.sh
+public/                   install.sh · update.sh · gsm-self-update.sh · uninstall.sh · setup-webroot.sh
 ```
 
 Adding a game? Drop a module into `src/db/games/`, export it from `index.ts`, and run `npm run verify:templates` — it will tell you about unused or undeclared variables. See `src/db/games/README.md`.

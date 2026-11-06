@@ -113,6 +113,16 @@ export const API_DOCS: ApiDocGroup[] = [
     ],
   },
   {
+    title: "Panel software",
+    icon: "🧩",
+    note:
+      "The Updates tab calls these. The panel restarts itself mid-update, so progress is published to a state file rather than streamed; a fresh GET after the restart shows the outcome.",
+    endpoints: [
+      { method: "GET", path: "/api/system/update", description: "Running version, last update, live progress, and whether this install can self-update.", auth: "panel.updates" },
+      { method: "POST", path: "/api/system/update", description: 'Start an update ({ "confirm": "update" }). 409 while one runs or when sudo access is missing.', auth: "panel.updates" },
+    ],
+  },
+  {
     title: "Games & templates",
     icon: "📦",
     endpoints: [

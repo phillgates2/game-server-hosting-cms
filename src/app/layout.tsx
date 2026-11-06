@@ -9,6 +9,7 @@ import "./globals.css";
 import { ToastProvider } from "@/components/ToastProvider";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
 import { NotificationProvider } from "@/components/NotificationCenter";
+import ConnectionBanner from "@/components/ConnectionBanner";
 import { I18nProvider } from "@/lib/i18n";
 
 const headingFont = localFont({
@@ -47,6 +48,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en" className="dark">
       <body className={`${headingFont.variable} ${bodyFont.variable} bg-bg-primary text-text-primary antialiased min-h-screen`}>
         <ToastProvider>
+          {/* Inside ToastProvider so reconnecting can raise a toast. */}
+          <ConnectionBanner />
           <ConfirmProvider>
             <NotificationProvider>
               <I18nProvider>

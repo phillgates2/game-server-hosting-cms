@@ -36,6 +36,21 @@ import { detectAnomalies } from "../src/lib/anomaly";
 import { formatFleetDigest } from "../src/lib/fleet-digest";
 import { validateWebhookUrl, verifyWebhookSignature, signWebhookPayload } from "../src/lib/outbound-webhook";
 import { validatePanelImport, IMPORTABLE_SETTING_KEYS, IMPORTABLE_TASK_TYPES } from "../src/lib/panel-export";
+import {
+  PANEL_SETTING_BOUNDS,
+  PANEL_SETTING_KEYS,
+  parsePanelSettings,
+  validatePanelSetting,
+} from "../src/lib/panel-settings";
+import {
+  selfUpdateCommand,
+  detachedUpdateCommand,
+  DEFAULT_SELF_UPDATE_WRAPPER,
+} from "../src/lib/panel-update";
+
+/** Environment-provided retention defaults, for parse checks below. */
+const PANEL_DEFAULTS = { metricsRetentionDays: 30, auditRetentionDays: 365 };
+const PANEL_SETTING_KEY_SET = new Set<string>(PANEL_SETTING_KEYS);
 
 let failures = 0;
 let checks = 0;
@@ -1066,13 +1081,16 @@ console.log("\nAge verification & pre-update backup");
       /at least 16/.test(loginForm)
   );
 
-  const panelSettings = read("../src/lib/panel-settings.ts");
+  // Asserted against the registry itself, not its source text: the bound has to
+  // actually reject 15, not merely appear somewhere in the file.
   check(
     "the minimum-age setting cannot be saved below 16 and both gates are panel settings",
-    /minimum_account_age: \{ min: 16, max: 120/.test(panelSettings) &&
-      /"update_auto_backup"/.test(panelSettings) &&
-      /"age_verification_enabled"/.test(panelSettings) &&
-      /"minimum_account_age"/.test(panelSettings)
+    validatePanelSetting("minimum_account_age", 15).error !== null &&
+      validatePanelSetting("minimum_account_age", 16).error === null &&
+      parsePanelSettings([], PANEL_DEFAULTS).minimumAccountAge === 16 &&
+      PANEL_SETTING_KEY_SET.has("update_auto_backup") &&
+      PANEL_SETTING_KEY_SET.has("age_verification_enabled") &&
+      PANEL_SETTING_KEY_SET.has("minimum_account_age")
   );
 
   const update = read("../src/app/api/servers/[id]/update/route.ts");
@@ -1226,11 +1244,12 @@ console.log("\nBackup retention, disk guard & crash-loop breaker");
       /latest version installed\$\{backupNote\}/.test(scheduler)
   );
 
-  const panelSettings = read("../src/lib/panel-settings.ts");
   check(
     "backup retention is a bounded panel setting (0 keeps everything)",
-    /backup_retention_count: \{ min: 0, max: 100/.test(panelSettings) &&
-      /backupRetentionCount: num\("backup_retention_count", 10\)/.test(panelSettings)
+    validatePanelSetting("backup_retention_count", 0).error === null &&
+      validatePanelSetting("backup_retention_count", 101).error !== null &&
+      PANEL_SETTING_BOUNDS.backup_retention_count.max === 100 &&
+      parsePanelSettings([], PANEL_DEFAULTS).backupRetentionCount === 10
   );
 }
 
@@ -1368,13 +1387,18 @@ console.log("\nHost threshold alerts");
       /threshold_alert: 0xf59e0b/.test(discord)
   );
 
-  const panelSettings = read("../src/lib/panel-settings.ts");
   check(
     "alert thresholds are bounded panel settings, defaulting to 90 and off-at-zero",
-    /alert_cpu_percent: \{ min: 0, max: 1000/.test(panelSettings) &&
-      /alert_ram_percent: \{ min: 0, max: 100/.test(panelSettings) &&
-      /alert_disk_percent: \{ min: 0, max: 100/.test(panelSettings) &&
-      /alertCpuPercent: num\("alert_cpu_percent", 90\)/.test(panelSettings)
+    PANEL_SETTING_BOUNDS.alert_cpu_percent.max === 1000 &&
+      PANEL_SETTING_BOUNDS.alert_ram_percent.max === 100 &&
+      PANEL_SETTING_BOUNDS.alert_disk_percent.max === 100 &&
+      validatePanelSetting("alert_cpu_percent", 0).error === null &&
+      validatePanelSetting("alert_cpu_percent", 1001).error !== null &&
+      validatePanelSetting("alert_ram_percent", 101).error !== null &&
+      validatePanelSetting("alert_disk_percent", 101).error !== null &&
+      parsePanelSettings([], PANEL_DEFAULTS).alertCpuPercent === 90 &&
+      parsePanelSettings([], PANEL_DEFAULTS).alertRamPercent === 90 &&
+      parsePanelSettings([], PANEL_DEFAULTS).alertDiskPercent === 90
   );
 }
 
@@ -4053,11 +4077,10 @@ console.log("\nDBG46 second-debug-pass rails");
   // 3. The lockout threshold the settings page DISPLAYS must equal the one
   //    auth-policy ENFORCES before the operator ever saves the form.
   const policy = read("../src/lib/auth-policy.ts");
-  const panelSettings = read("../src/lib/panel-settings.ts");
   check(
     "login throttle: displayed default equals enforced default",
     /loginThrottleAttempts: 5,/.test(policy) &&
-      /num\("login_throttle_attempts", 5\)/.test(panelSettings)
+      parsePanelSettings([], PANEL_DEFAULTS).loginThrottleAttempts === 5
   );
 }
 
@@ -4370,6 +4393,132 @@ console.log("\nFILEXFER permission set rails");
     // the UI would leave a brand-new panel unable to use its own feature.
     /permissions: Object\.fromEntries\(ALL_PERMISSIONS\.map\(\(p\) => \[p, true\]\)\)/.test(perms) &&
       /"transfer\.view": true, "transfer\.manage": true, "transfer\.disconnect": true,/.test(perms)
+  );
+}
+
+// ── PANELUPDATE: "Update panel" button ───────────────────────────────────────
+console.log("\nPANELUPDATE self-update rails");
+{
+  const repoFile = (p: string) => readFileAbs(new URL(p, import.meta.url).pathname);
+  const template = repoFile("../public/gsm-self-update.sh");
+  const installer = repoFile("../public/install.sh");
+  const updater = repoFile("../public/update.sh");
+  const route = repoFile("../src/app/api/system/update/route.ts");
+
+  // The panel runs as an unprivileged user, so the button executes exactly one
+  // root command. sudo wildcards span spaces: a rule for "update.sh *" would
+  // let the panel pass --install-dir and write anywhere as root. The helper
+  // bakes the install path in at render time and whitelists its arguments.
+  check(
+    "the sudo helper takes its install path from the installer, not the caller",
+    /UPDATER='@INSTALL_DIR@\/public\/update\.sh'/.test(template) &&
+      // The path is baked in when the helper is rendered; nothing reads the
+      // install directory from an argument or the environment.
+      !/(^|\n)\s*(INSTALL_DIR|UPDATER)=[^\n]*\$/m.test(template.split("\n").filter((l) => !l.startsWith("#")).join("\n"))
+  );
+  check(
+    "the sudo helper refuses every argument except --no-backup",
+    /--no-backup\)/.test(template) &&
+      /refusing unknown argument/.test(template) &&
+      /too many arguments/.test(template) &&
+      !/"\$@"/.test(template) &&
+      !/\$\{@:/.test(template)
+  );
+  check(
+    "both installers write the sudo rule for the helper only, without a wildcard",
+    [installer, updater].every(
+      (text) =>
+        /\/etc\/sudoers\.d\/gsm-panel-update/.test(text) &&
+        /\$GSM_USER ALL=\(ALL\) NOPASSWD: \$SELF_UPDATE_WRAPPER\n/.test(text) &&
+        !/NOPASSWD:[^\n]*gsm-self-update\s+\S/.test(text) &&
+        !/NOPASSWD:[^\n]*update\.sh/.test(text)
+    )
+  );
+  check(
+    "a sudoers file that does not validate is never installed",
+    [installer, updater].every(
+      (text) =>
+        /visudo -cf "\$new_sudoers"/.test(text) &&
+        /rm -f "\$new_sudoers"\n\s*return 1/.test(text)
+    )
+  );
+
+  // The command the API builds is fixed: no request field reaches it.
+  const asUser = selfUpdateCommand({ isRoot: false, updaterPath: "/opt/gsm-panel/public/update.sh" });
+  check(
+    "the panel's command is sudo -n against the helper",
+    asUser.file === "sudo" &&
+      asUser.args[0] === "-n" &&
+      asUser.args[1] === DEFAULT_SELF_UPDATE_WRAPPER &&
+      asUser.args.length === 2
+  );
+  const asRoot = selfUpdateCommand({ isRoot: true, updaterPath: "/opt/gsm-panel/public/update.sh", noBackup: true });
+  check(
+    "a root panel runs the updater with fixed flags only",
+    asRoot.file === "/bin/bash" &&
+      asRoot.args.join(" ") === "/opt/gsm-panel/public/update.sh --force --no-backup"
+  );
+  check(
+    "no generated command carries operator-chosen flags",
+    [asUser, asRoot].every((cmd) =>
+      !/--install-dir|--branch|--rollback|[;&|`$]/.test([cmd.file, ...cmd.args].join(" "))
+    )
+  );
+  check(
+    "the updater is started detached, so the restart cannot orphan it",
+    /^setsid nohup /.test(detachedUpdateCommand(asUser, "/tmp/x.log").args[1])
+  );
+
+  // The route must be gated, confirmed, and single-flight.
+  check(
+    "the update endpoint requires the panel.updates permission",
+    /hasPermission\(auth\.userId, "panel\.updates", auth\.keyScope\)/.test(route)
+  );
+  check(
+    "starting an update requires an explicit confirmation field",
+    /input\.confirm !== "update"/.test(route)
+  );
+  check(
+    "a second update is refused while one is running",
+    /updateIsRunning\(existing, Date\.now\(\)\)/.test(route) && /status: 409/.test(route)
+  );
+  check(
+    "the endpoint never builds a command from request input",
+    !/--install-dir/.test(route) && !/--branch/.test(route) && !/exec\(|execSync|spawnSync/.test(route)
+  );
+  check(
+    "starting an update is written to the audit log",
+    /action: "panel\.update\.start"/.test(route)
+  );
+
+  // Progress publishing: the panel cannot watch the process, so the updater
+  // writes a state file the panel reads after the restart.
+  check(
+    "the updater publishes progress to a state file",
+    /STATE_FILE=/.test(updater) &&
+      /"status": "%s"/.test(updater) &&
+      /state_write/.test(updater) &&
+      /\$STATE_DIR\/state\.json|\$\{GSM_UPDATE_STATE_FILE:-\$STATE_DIR\/state\.json\}/.test(updater)
+  );
+  check(
+    "the updater records success and failure on every exit path",
+    /state_finish \|\| true' EXIT/.test(updater) &&
+      /STATE_STATUS="success"/.test(updater) &&
+      /STATE_STATUS="failed"/.test(updater) &&
+      /PANEL_OK/.test(updater)
+  );
+  check(
+    "a rollback never publishes a half-finished update",
+    updater.indexOf("state_begin\n") > updater.indexOf('"$ROLLBACK" == "true"')
+  );
+  check(
+    "the published state directory is readable but holds no secrets",
+    /install -d -o root -g root -m 0755 "\$STATE_DIR"/.test(updater) &&
+      !/DATABASE_URL/.test(updater.slice(updater.indexOf("STATE_DIR="), updater.indexOf("state_begin()")))
+  );
+  check(
+    "the updater keeps a stable log copy for the panel",
+    /exec > >\(tee -a "\$STABLE_LOG"\)/.test(updater)
   );
 }
 

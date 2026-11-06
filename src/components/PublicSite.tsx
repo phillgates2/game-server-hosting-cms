@@ -2,6 +2,9 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import PublicChatWidget from "@/components/PublicChatWidget";
+import { useToast } from "@/components/ToastProvider";
+import { fetchWithTimeout, mutate } from "@/lib/api-client";
+import { parseSiteHash, siteRouteToHash, type SiteRoute } from "@/lib/site-url";
 import PublicShop from "@/components/PublicShop";
 import {
   MAX_PUBLIC_NAV_LABEL_LENGTH,
@@ -59,6 +62,13 @@ interface Props {
 type Tab = "home" | "forums" | "ladder" | "shop" | "blog" | "changelog" | "post"
   | "forum-cat" | "forum-thread" | "site-editor";
 
+/** Already-loaded objects, so a route can be applied without re-fetching. */
+interface RouteHint {
+  post?: CmsPost;
+  category?: ForumCategory;
+  thread?: ForumThread;
+}
+
 
 
 /* ── Component ──────────────────────────────────────────────────────────────── */
@@ -96,6 +106,22 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [loaded, setLoaded] = useState(false);
+  // Content that failed to load must say so; the old behaviour was an empty
+  // "No content yet" card, which reads as "this site has nothing" rather than
+  // "the panel could not be reached".
+  const [cmsError, setCmsError] = useState<string | null>(null);
+  const [reloadingCms, setReloadingCms] = useState(false);
+  const [postingThread, setPostingThread] = useState(false);
+  const [threadError, setThreadError] = useState("");
+  const [postingReply, setPostingReply] = useState(false);
+  const [replyError, setReplyError] = useState("");
+  // Deep links: a thread opened straight from a URL is fetched, so the view has
+  // to distinguish "still loading" from "this thread no longer exists".
+  const [forumLoaded, setForumLoaded] = useState(false);
+  const [threadLoading, setThreadLoading] = useState(false);
+  const [threadMissing, setThreadMissing] = useState(false);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const { error: showError, success: showSuccess } = useToast();
   const isAdmin = user?.role === "admin";
   const roleColor = user?.roleColor || "#3b82f6";
   const roleIcon = user?.roleIcon || "👤";
@@ -104,21 +130,46 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
   // ── Loaders ───────────────────────────────────────────────────────────────
   const loadCms = useCallback(async () => {
     try {
+      // A deadline, because a hung request used to leave the homepage with no
+      // posts and no explanation, forever.
       const [a, b, c] = await Promise.allSettled([
-        fetch("/api/cms?type=blog&published=true"),
-        fetch("/api/cms?type=changelog&published=true"),
-        fetch("/api/site-settings"),
+        fetchWithTimeout("/api/cms?type=blog&published=true", { cache: "no-store" }, 10_000),
+        fetchWithTimeout("/api/cms?type=changelog&published=true", { cache: "no-store" }, 10_000),
+        fetchWithTimeout("/api/site-settings", { cache: "no-store" }, 10_000),
       ]);
-      if (a.status === "fulfilled" && a.value.ok) setBlogs((await a.value.json()).posts || []);
-      if (b.status === "fulfilled" && b.value.ok) setChangelogs((await b.value.json()).posts || []);
+      let failures = 0;
+      if (a.status === "fulfilled" && a.value.ok) {
+        setBlogs((await a.value.json().catch(() => ({}))).posts || []);
+      } else failures += 1;
+      if (b.status === "fulfilled" && b.value.ok) {
+        setChangelogs((await b.value.json().catch(() => ({}))).posts || []);
+      } else failures += 1;
       if (c.status === "fulfilled" && c.value.ok) {
-        const s = (await c.value.json()).settings || {};
+        const s = (await c.value.json().catch(() => ({}))).settings || {};
         setSs(s);
         setEditorSettings(s);
         setEditorNavLinks(parsePublicNavLinks(s.nav_links_json));
-      }
-    } catch { /* */ } finally { setLoaded(true); }
+      } else failures += 1;
+
+      setCmsError(
+        failures === 0
+          ? null
+          : failures === 3
+            ? "This site could not load its content. The panel may be restarting or unreachable."
+            : "Some of this site's content could not be loaded. The panel may be restarting."
+      );
+    } catch {
+      setCmsError("This site could not load its content. The panel may be restarting or unreachable.");
+    } finally {
+      setLoaded(true);
+      setReloadingCms(false);
+    }
   }, []);
+
+  function retryContent() {
+    setReloadingCms(true);
+    void loadCms();
+  }
   // Load once on mount rather than whenever the callback identity changes.
   const didLoadCms = useRef(false);
   useEffect(() => {
@@ -128,13 +179,34 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
   }, [loadCms]);
 
   const loadCategories = useCallback(async () => {
-    try { const r = await fetch("/api/forum/categories"); if (r.ok) setForumCategories((await r.json()).categories || []); } catch { /* */ }
+    try {
+      const r = await fetchWithTimeout("/api/forum/categories", { cache: "no-store" }, 10_000);
+      if (r.ok) setForumCategories((await r.json()).categories || []);
+    } catch { /* */ } finally { setForumLoaded(true); }
   }, []);
   const loadThreads = useCallback(async (catId: number) => {
-    try { const r = await fetch(`/api/forum/threads?categoryId=${catId}`); if (r.ok) setThreads((await r.json()).threads || []); } catch { /* */ }
+    try {
+      const r = await fetchWithTimeout(`/api/forum/threads?categoryId=${catId}`, { cache: "no-store" }, 10_000);
+      if (r.ok) setThreads((await r.json()).threads || []);
+    } catch { /* */ }
   }, []);
   const loadThread = useCallback(async (tid: number) => {
-    try { const r = await fetch(`/api/forum/threads/${tid}`); if (r.ok) { const d = await r.json(); if (d.thread) setSelectedThread(d.thread); setPosts(d.posts || []); } } catch { /* */ }
+    setThreadLoading(true);
+    setThreadMissing(false);
+    try {
+      const r = await fetchWithTimeout(`/api/forum/threads/${tid}`, { cache: "no-store" }, 10_000);
+      if (r.ok) {
+        const d = await r.json();
+        if (d.thread) { setSelectedThread(d.thread); setPosts(d.posts || []); }
+        else setThreadMissing(true);
+      } else {
+        setThreadMissing(true);
+      }
+    } catch {
+      setThreadMissing(true);
+    } finally {
+      setThreadLoading(false);
+    }
   }, []);
   const loadLadder = useCallback(async (key?: string, season?: string) => {
     try {
@@ -157,6 +229,139 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
     } catch { /* */ }
   }, []);
 
+  // ── Routing ───────────────────────────────────────────────────────────────
+  // The hash is the source of truth. Applying a route is the only way the view
+  // changes, so a link, the Back button, a refresh and a click all travel the
+  // same path and cannot disagree with the address bar.
+  const lastHashRef = useRef<string>("#home");
+  const pendingRouteRef = useRef<SiteRoute | null>(null);
+
+  const applyRoute = useCallback((route: SiteRoute, hint?: RouteHint) => {
+    setMobileMenuOpen(false);
+    setShowNewThread(false);
+
+    if (route.kind === "tab") {
+      pendingRouteRef.current = null;
+      setTab(route.tab);
+      setSelectedPost(null);
+      setSelectedCat(null);
+      setSelectedThread(null);
+      return;
+    }
+
+    if (route.kind === "site-editor") {
+      pendingRouteRef.current = null;
+      // Only administrators have an editor; anyone else who lands on this link
+      // gets the site rather than an empty page.
+      setTab(isAdmin ? "site-editor" : "home");
+      return;
+    }
+
+    if (route.kind === "post") {
+      const post =
+        hint?.post ??
+        blogs.find((p) => p.id === route.id) ??
+        changelogs.find((p) => p.id === route.id) ??
+        null;
+      // The post list may not have arrived yet (deep link / slow panel); hold the
+      // route until it does rather than bouncing the reader somewhere else.
+      if (!post) { pendingRouteRef.current = route; return; }
+      pendingRouteRef.current = null;
+      setSelectedPost(post);
+      setSelectedCat(null);
+      setSelectedThread(null);
+      setTab("post");
+      return;
+    }
+
+    if (route.kind === "category") {
+      const category = hint?.category ?? forumCategories.find((c) => c.id === route.id) ?? null;
+      if (!category) { pendingRouteRef.current = route; return; }
+      pendingRouteRef.current = null;
+      setSelectedCat(category);
+      setSelectedPost(null);
+      setSelectedThread(null);
+      setTab("forum-cat");
+      void loadThreads(category.id);
+      return;
+    }
+
+    if (route.kind === "ladder") {
+      pendingRouteRef.current = null;
+      setSelectedPost(null);
+      setSelectedCat(null);
+      setSelectedThread(null);
+      setTab("ladder");
+      if (route.key) setActiveLadderKey(route.key);
+      if (route.season) setLadderSeason(route.season);
+      void loadLadder(route.key ?? undefined, route.season ?? undefined);
+      return;
+    }
+
+    // Thread. The object may only exist in the current list, so the fetch below
+    // fills the view in; the render shows a loading state until it does.
+    const known = hint?.thread ?? threads.find((t) => t.id === route.id) ?? null;
+    pendingRouteRef.current = null;
+    setSelectedPost(null);
+    setSelectedThread(known);
+    setTab("forum-thread");
+    void loadThread(route.id);
+  }, [blogs, changelogs, forumCategories, threads, isAdmin, loadLadder, loadThread, loadThreads]);
+
+  const navigate = useCallback((route: SiteRoute, hint?: RouteHint, replace = false) => {
+    applyRoute(route, hint);
+    const hash = siteRouteToHash(route);
+    lastHashRef.current = hash;
+    if (typeof window === "undefined" || window.location.hash === hash) return;
+    if (replace) window.history.replaceState(null, "", hash);
+    else window.history.pushState(null, "", hash);
+  }, [applyRoute]);
+
+  // Apply the URL on mount and whenever the reader travels back or forward.
+  useEffect(() => {
+    const sync = () => {
+      const route = parseSiteHash(window.location.hash);
+      const hash = siteRouteToHash(route);
+      if (hash === lastHashRef.current) return;
+      lastHashRef.current = hash;
+      applyRoute(route);
+    };
+    // Deferred: applying a route sets state, which must not happen synchronously
+    // inside an effect body (cascading render).
+    const timer = window.setTimeout(sync, 0);
+    const onPop = () => sync();
+    window.addEventListener("popstate", onPop);
+    window.addEventListener("hashchange", onPop);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("popstate", onPop);
+      window.removeEventListener("hashchange", onPop);
+    };
+  }, [applyRoute]);
+
+  // A held route gets another chance once the data it needs arrives. If the data
+  // is here and the target still is not, the link is stale: say so and send the
+  // reader to the nearest list instead of leaving a view that does not exist.
+  useEffect(() => {
+    if (!pendingRouteRef.current) return;
+    const timer = window.setTimeout(() => {
+      const route = pendingRouteRef.current;
+      if (!route) return;
+      applyRoute(route);
+      if (!pendingRouteRef.current) return;
+      if (route.kind === "post" && loaded) {
+        pendingRouteRef.current = null;
+        showError("That post could not be found", "It may have been unpublished. Here is the blog.");
+        navigate({ kind: "tab", tab: "blog" }, undefined, true);
+      } else if (route.kind === "category" && forumLoaded) {
+        pendingRouteRef.current = null;
+        showError("That forum could not be found", "It may have been removed. Here are the other forums.");
+        navigate({ kind: "tab", tab: "forums" }, undefined, true);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [blogs, changelogs, forumCategories, loaded, forumLoaded, applyRoute, navigate, showError]);
+
   // Fetch each section the first time its tab is opened. Depending on
   // forumCategories.length / ladderEntries.length made this effect re-run as a
   // direct result of its own setState, which is the cascading-render pattern.
@@ -174,22 +379,87 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
     }
   }, [tab, loadCategories, loadLadder]);
 
-  // Close mobile menu on tab change
-  function goTab(t: Tab) { setTab(t); setSelectedPost(null); setSelectedCat(null); setSelectedThread(null); setShowNewThread(false); setMobileMenuOpen(false); }
-  function openPost(p: CmsPost) { setSelectedPost(p); setTab("post"); setMobileMenuOpen(false); }
-  function openCategory(c: ForumCategory) { setSelectedCat(c); setTab("forum-cat"); setShowNewThread(false); loadThreads(c.id); setMobileMenuOpen(false); }
-  function openThread(t: ForumThread) { setSelectedThread(t); setTab("forum-thread"); loadThread(t.id); setMobileMenuOpen(false); }
+  // ── Navigation ────────────────────────────────────────────────────────────
+  // These keep the call sites readable while everything funnels through one
+  // function that updates both the view and the address bar.
+  function goTab(t: Tab) {
+    if (t === "site-editor") { navigate({ kind: "site-editor" }); return; }
+    const destination = PUBLIC_NAV_DESTINATIONS.find((d) => d.tab === t);
+    navigate({ kind: "tab", tab: destination ? destination.tab : "home" });
+  }
+  function openPost(p: CmsPost) { navigate({ kind: "post", id: p.id }, { post: p }); }
+  function openCategory(c: ForumCategory) { navigate({ kind: "category", id: c.id }, { category: c }); }
+  function openThread(t: ForumThread) { navigate({ kind: "thread", id: t.id }, { thread: t }); }
+
+  // A new tab should start at the top. Without this, opening a post from the
+  // bottom of the blog list left the reader half-way down the post, and keyboard
+  // users kept their reading position inside content that had been replaced.
+  const mainRef = useRef<HTMLElement>(null);
+  const firstTabRender = useRef(true);
+  useEffect(() => {
+    if (firstTabRender.current) {
+      firstTabRender.current = false;
+      return;
+    }
+    window.scrollTo({ top: 0 });
+    mainRef.current?.focus({ preventScroll: true });
+  }, [tab]);
+
+  // Escape closes the mobile menu and returns focus to the button that opened
+  // it — otherwise the menu could only be dismissed by finding that button
+  // again with the mouse.
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setMobileMenuOpen(false);
+      mobileMenuButtonRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileMenuOpen]);
 
   // ── Forum actions ─────────────────────────────────────────────────────────
+  // Both of these used to ignore a failed response entirely: a rejected post
+  // looked exactly like a successful one until the page was reloaded. They now
+  // report the server's message, cannot be double-submitted, and confirm success.
   async function createThread(e: React.FormEvent) {
-    e.preventDefault(); if (!selectedCat || !user) return;
-    const r = await fetch("/api/forum/threads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ categoryId: selectedCat.id, title: newThread.title, body: newThread.body }) });
-    if (r.ok) { setShowNewThread(false); setNewThread({ title: "", body: "" }); loadThreads(selectedCat.id); }
+    e.preventDefault();
+    if (!selectedCat || !user || postingThread) return;
+    setPostingThread(true);
+    setThreadError("");
+    const result = await mutate("/api/forum/threads", {
+      method: "POST",
+      body: JSON.stringify({ categoryId: selectedCat.id, title: newThread.title, body: newThread.body }),
+    });
+    setPostingThread(false);
+    if (!result.ok) {
+      setThreadError(result.error ?? "Could not create the thread.");
+      return;
+    }
+    setShowNewThread(false);
+    setNewThread({ title: "", body: "" });
+    showSuccess("Thread created", "Your thread is live.");
+    void loadThreads(selectedCat.id);
   }
+
   async function createReply(e: React.FormEvent) {
-    e.preventDefault(); if (!selectedThread || !user) return;
-    const r = await fetch(`/api/forum/threads/${selectedThread.id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body: replyBody }) });
-    if (r.ok) { setReplyBody(""); loadThread(selectedThread.id); }
+    e.preventDefault();
+    if (!selectedThread || !user || postingReply) return;
+    setPostingReply(true);
+    setReplyError("");
+    const result = await mutate(`/api/forum/threads/${selectedThread.id}`, {
+      method: "POST",
+      body: JSON.stringify({ body: replyBody }),
+    });
+    setPostingReply(false);
+    if (!result.ok) {
+      setReplyError(result.error ?? "Could not post the reply.");
+      return;
+    }
+    setReplyBody("");
+    showSuccess("Reply posted", "");
+    void loadThread(selectedThread.id);
   }
 
   // ── Site editor ───────────────────────────────────────────────────────────
@@ -272,6 +542,13 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
   /* ═══════════════════════════════════════════════════════════════════════════ */
   return (
     <div className="min-h-screen bg-bg-primary flex flex-col">
+      {/* Keyboard users land here first; the header has up to a dozen links. */}
+      <a
+        href="#site-main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-[200] focus:rounded-lg focus:bg-accent focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-white"
+      >
+        Skip to content
+      </a>
       {ss.custom_css?.trim() && (
         // Admin-authored CSS is applied verbatim; escaping would turn CSS
         // combinators like `>` into entities and break the stylesheet. The
@@ -280,7 +557,13 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
         <style dangerouslySetInnerHTML={{ __html: ss.custom_css.replace(/<\/style/gi, "") }} />
       )}
       {ss.announcement && (
-        <div className={`text-center text-xs sm:text-sm py-2 px-4 ${ss.announcement_type === "warning" ? "bg-warning/15 text-warning" : ss.announcement_type === "error" ? "bg-danger/15 text-danger" : "bg-accent/15 text-accent"}`}>{ss.announcement}</div>
+        <div
+          role="status"
+          aria-live="polite"
+          className={`text-center text-xs sm:text-sm py-2 px-4 ${ss.announcement_type === "warning" ? "bg-warning/15 text-warning" : ss.announcement_type === "error" ? "bg-danger/15 text-danger" : "bg-accent/15 text-accent"}`}
+        >
+          {ss.announcement}
+        </div>
       )}
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
@@ -297,7 +580,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
             {user ? (
               <>
                 <button onClick={onDashboardClick} className="ml-2 px-3 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition-colors">⚙️ Panel</button>
-                {isAdmin && <button onClick={() => { setTab("site-editor"); setMobileMenuOpen(false); }} className="ml-1 px-3 py-2 text-sm rounded-lg transition-colors text-text-muted hover:text-accent hover:bg-bg-hover" title="Edit Site">✏️</button>}
+                {isAdmin && <button type="button" onClick={() => goTab("site-editor")} className="ml-1 px-3 py-2 text-sm rounded-lg transition-colors text-text-muted hover:text-accent hover:bg-bg-hover" title="Edit Site">✏️</button>}
                 <button onClick={onDashboardClick} className="ml-1 flex items-center gap-2 px-2 py-1.5 rounded-lg border border-border hover:bg-bg-hover transition-colors">
                   <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold" style={{ backgroundColor: `${roleColor}20`, color: roleColor }}>{user.username[0].toUpperCase()}</div>
                   <div className="hidden lg:block text-left"><p className="text-xs font-medium leading-none">{user.username}</p><p className="text-[10px] text-text-muted">{roleIcon} {roleName}</p></div>
@@ -317,9 +600,13 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
               </button>
             )}
             <button
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              ref={mobileMenuButtonRef}
+              type="button"
+              onClick={() => setMobileMenuOpen((open) => !open)}
               className="p-2 rounded-lg hover:bg-bg-hover transition-colors"
-              aria-label="Toggle menu"
+              aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="site-mobile-menu"
             >
               {mobileMenuOpen ? (
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
@@ -332,7 +619,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
 
         {/* Mobile dropdown menu */}
         {mobileMenuOpen && (
-          <div className="md:hidden border-t border-border bg-bg-secondary/95 backdrop-blur-sm animate-fade-in">
+          <div id="site-mobile-menu" className="md:hidden border-t border-border bg-bg-secondary/95 backdrop-blur-sm animate-fade-in">
             <div className="px-4 py-3 space-y-1">
               {navLinks.map((link, index) => menuLink(link, index, true))}
               {navLinks.length > 0 && <div className="border-t border-border/50 my-2" />}
@@ -346,7 +633,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                     </div>
                   </div>
                   <button onClick={() => { onDashboardClick(); setMobileMenuOpen(false); }} className="w-full text-left px-4 py-2.5 text-sm font-medium rounded-lg bg-accent/10 text-accent hover:bg-accent/20 transition-colors">⚙️ Control Panel</button>
-                  {isAdmin && <button onClick={() => { setTab("site-editor"); setMobileMenuOpen(false); }} className="w-full text-left px-4 py-2.5 text-sm font-medium rounded-lg text-text-muted hover:text-accent hover:bg-bg-hover transition-colors">✏️ Edit Site</button>}
+                  {isAdmin && <button type="button" onClick={() => goTab("site-editor")} className="w-full text-left px-4 py-2.5 text-sm font-medium rounded-lg text-text-muted hover:text-accent hover:bg-bg-hover transition-colors">✏️ Edit Site</button>}
                   <button onClick={() => { onLogout(); setMobileMenuOpen(false); }} className="w-full text-left px-4 py-2.5 text-sm font-medium rounded-lg text-danger hover:bg-danger/10 transition-colors">Logout</button>
                 </>
               ) : (
@@ -357,7 +644,32 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
         )}
       </header>
 
-      <main className="flex-1 max-w-6xl mx-auto px-4 sm:px-6 py-4 sm:py-8 w-full">
+      {cmsError && (
+        <div className="mx-auto w-full max-w-6xl px-4 pt-4 sm:px-6">
+          <div
+            role="alert"
+            className="flex flex-wrap items-center gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning"
+          >
+            <span aria-hidden>⚠️</span>
+            <span className="min-w-0 flex-1">{cmsError}</span>
+            <button
+              type="button"
+              onClick={retryContent}
+              disabled={reloadingCms}
+              className="rounded-lg border border-warning/40 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-warning/20 disabled:opacity-40"
+            >
+              {reloadingCms ? "Retrying…" : "Retry"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <main
+        ref={mainRef}
+        id="site-main"
+        tabIndex={-1}
+        className="flex-1 max-w-6xl mx-auto px-4 sm:px-6 py-4 sm:py-8 w-full outline-none"
+      >
 
         {/* ═══ HOME ═══ */}
         {tab === "home" && (
@@ -389,7 +701,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                 </div>
               </section>
             )}
-            {loaded && blogs.length === 0 && changelogs.length === 0 && (
+            {loaded && !cmsError && blogs.length === 0 && changelogs.length === 0 && (
               <section className="text-center py-10 sm:py-12 bg-bg-card border border-border rounded-xl">
                 <span className="text-4xl block mb-3">✍️</span>
                 <h3 className="font-semibold mb-1">No content yet</h3>
@@ -402,9 +714,9 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
         {/* ═══ SITE EDITOR (admin only) ═══ */}
         {tab === "site-editor" && isAdmin && (
           <div className="animate-fade-in space-y-6 max-w-3xl mx-auto">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-xl sm:text-2xl font-bold">✏️ Edit Frontpage</h2>
-              <button onClick={() => goTab("home")} className="text-accent text-sm hover:underline">← Back to Site</button>
+              <button type="button" onClick={() => goTab("home")} className="text-accent text-sm hover:underline">← Back to Site</button>
             </div>
             <form onSubmit={saveSettings} className="space-y-4 sm:space-y-6">
               <div className="bg-bg-card border border-border rounded-xl p-4 sm:p-6 space-y-4">
@@ -491,13 +803,13 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                           <div className="flex items-center justify-end gap-2">
                             <button type="button" onClick={() => moveEditorNavLink(index, -1)} disabled={index === 0}
                               aria-label={`Move ${link.label || "link"} up`} title="Move up"
-                              className="w-8 h-8 rounded-lg bg-bg-hover text-text-secondary hover:text-text-primary disabled:opacity-30">↑</button>
+                              className="w-9 h-9 rounded-lg bg-bg-hover text-text-secondary hover:text-text-primary disabled:opacity-30">↑</button>
                             <button type="button" onClick={() => moveEditorNavLink(index, 1)} disabled={index === editorNavLinks.length - 1}
                               aria-label={`Move ${link.label || "link"} down`} title="Move down"
-                              className="w-8 h-8 rounded-lg bg-bg-hover text-text-secondary hover:text-text-primary disabled:opacity-30">↓</button>
+                              className="w-9 h-9 rounded-lg bg-bg-hover text-text-secondary hover:text-text-primary disabled:opacity-30">↓</button>
                             <button type="button" onClick={() => setEditorNavLinks((links) => links.filter((_, linkIndex) => linkIndex !== index))}
                               aria-label={`Remove ${link.label || "link"}`}
-                              className="px-3 h-8 rounded-lg bg-danger/15 text-danger hover:bg-danger/25 text-xs font-medium">Remove</button>
+                              className="px-3 h-9 rounded-lg bg-danger/15 text-danger hover:bg-danger/25 text-xs font-medium">Remove</button>
                           </div>
                         </div>
                       );
@@ -531,11 +843,11 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                 </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
+              <div className="sticky bottom-0 z-10 -mx-4 flex flex-col items-start gap-3 border-t border-border bg-bg-primary/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:flex-row sm:items-center sm:gap-4 sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
                 <button type="submit" disabled={editorSaving} className="px-6 py-2.5 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium disabled:opacity-50 w-full sm:w-auto">
                   {editorSaving ? "Saving..." : "💾 Save Changes"}
                 </button>
-                {editorMsg && <span className="text-sm">{editorMsg}</span>}
+                {editorMsg && <span className="text-sm" role="status">{editorMsg}</span>}
               </div>
             </form>
 
@@ -559,7 +871,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                   {ladders.map((l) => {
                     const key = l.type === "game" ? `game:${l.id}` : `standalone:${l.name}`;
                     return (
-                      <button key={key} onClick={() => { setActiveLadderKey(key); loadLadder(key, ladderSeason); }}
+                      <button key={key} onClick={() => navigate({ kind: "ladder", key, season: ladderSeason || null }, undefined, true)}
                         className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors ${activeLadderKey === key ? "bg-accent text-white" : "bg-bg-card border border-border hover:border-accent/30 text-text-secondary"}`}>
                         {l.icon} {l.name}
                       </button>
@@ -567,7 +879,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                   })}
                 </div>
                 {ladderSeasons.length > 1 && (
-                  <select value={ladderSeason} onChange={(e) => { setLadderSeason(e.target.value); loadLadder(activeLadderKey, e.target.value); }}
+                  <select value={ladderSeason} onChange={(e) => navigate({ kind: "ladder", key: activeLadderKey || null, season: e.target.value }, undefined, true)}
                     className="px-3 py-1.5 bg-bg-card border border-border rounded-lg text-sm">
                     {ladderSeasons.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
@@ -696,9 +1008,12 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                 </div>
                 {showNewThread && user && (
                   <form onSubmit={createThread} className="bg-bg-card border border-border rounded-xl p-4 sm:p-6 space-y-4">
-                    <input value={newThread.title} onChange={(e) => setNewThread({ ...newThread, title: e.target.value })} placeholder="Thread title" className="w-full px-3 sm:px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent" required />
-                    <textarea value={newThread.body} onChange={(e) => setNewThread({ ...newThread, body: e.target.value })} placeholder="Write your post..." rows={5} className="w-full px-3 sm:px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-accent" required />
-                    <button type="submit" className="px-6 py-2 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium w-full sm:w-auto">Create Thread</button>
+                    <input value={newThread.title} onChange={(e) => setNewThread({ ...newThread, title: e.target.value })} placeholder="Thread title" aria-label="Thread title" className="w-full px-3 sm:px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent" required />
+                    <textarea value={newThread.body} onChange={(e) => setNewThread({ ...newThread, body: e.target.value })} placeholder="Write your post..." aria-label="Thread body" rows={5} className="w-full px-3 sm:px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-accent" required />
+                    {threadError && (
+                      <p role="alert" className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs font-medium text-danger">{threadError}</p>
+                    )}
+                    <button type="submit" disabled={postingThread} className="px-6 py-2 bg-success hover:opacity-90 disabled:opacity-50 text-white rounded-lg text-sm font-medium w-full sm:w-auto">{postingThread ? "Posting…" : "Create Thread"}</button>
                   </form>
                 )}
                 {threads.length === 0 ? <Empty text="No threads yet. Be the first!" /> : (
@@ -728,11 +1043,41 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
         )}
 
         {/* ═══ FORUM THREAD ═══ */}
+        {tab === "forum-thread" && !selectedThread && (
+          <div className="max-w-3xl animate-fade-in">
+            {threadMissing && !threadLoading ? (
+              <div role="alert" className="rounded-xl border border-warning/40 bg-warning/10 p-6 text-center">
+                <p className="text-sm font-medium text-warning">That thread could not be found</p>
+                <p className="mt-1 text-xs text-text-muted">
+                  It may have been deleted, or the link may be out of date.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => goTab("forums")}
+                  className="mt-4 rounded-lg border border-warning/40 px-4 py-2 text-xs font-medium text-warning transition-colors hover:bg-warning/20"
+                >
+                  Browse the forums
+                </button>
+              </div>
+            ) : (
+              <div aria-busy="true" className="rounded-xl border border-border bg-bg-card p-6">
+                <div className="h-6 w-2/3 animate-pulse rounded bg-bg-hover" />
+                <div className="mt-4 space-y-2">
+                  <div className="h-3 w-full animate-pulse rounded bg-bg-hover" />
+                  <div className="h-3 w-5/6 animate-pulse rounded bg-bg-hover" />
+                  <div className="h-3 w-3/4 animate-pulse rounded bg-bg-hover" />
+                </div>
+                <p className="mt-4 text-xs text-text-muted">Loading thread…</p>
+              </div>
+            )}
+          </div>
+        )}
+
         {tab === "forum-thread" && selectedThread && (
           <div className="animate-fade-in">
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6">
               <div className="space-y-4 min-w-0">
-                <Crumb items={[["Forums", () => goTab("forums")], ...(selectedCat ? [[selectedCat.name, () => { setTab("forum-cat"); loadThreads(selectedCat.id); }] as [string, () => void]] : []), [selectedThread.title]]} />
+                <Crumb items={[["Forums", () => goTab("forums")], ...(selectedCat ? [[selectedCat.name, () => openCategory(selectedCat)] as [string, () => void]] : []), [selectedThread.title]]} />
                 <h2 className="text-lg sm:text-xl font-bold">{selectedThread.title}</h2>
                 <div className="space-y-3 sm:space-y-4">{posts.map((p) => (
                   <div key={p.id} className="bg-bg-card border border-border rounded-xl overflow-hidden">
@@ -764,8 +1109,11 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                 {selectedThread.locked ? <div className="bg-bg-card border border-border rounded-xl p-4 sm:p-6 text-center text-text-muted text-sm">🔒 This thread is locked.</div>
                   : user ? (
                     <form onSubmit={createReply} className="bg-bg-card border border-border rounded-xl p-4 sm:p-6 space-y-4"><h3 className="font-semibold text-sm">Reply</h3>
-                      <textarea value={replyBody} onChange={(e) => setReplyBody(e.target.value)} placeholder="Write your reply..." rows={4} className="w-full px-3 sm:px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-accent" required />
-                      <button type="submit" className="px-6 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium w-full sm:w-auto">Post Reply</button></form>
+                      <textarea value={replyBody} onChange={(e) => setReplyBody(e.target.value)} placeholder="Write your reply..." aria-label="Reply body" rows={4} className="w-full px-3 sm:px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-accent" required />
+                      {replyError && (
+                        <p role="alert" className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs font-medium text-danger">{replyError}</p>
+                      )}
+                      <button type="submit" disabled={postingReply} className="px-6 py-2 bg-accent hover:bg-accent-hover disabled:opacity-50 text-white rounded-lg text-sm font-medium w-full sm:w-auto">{postingReply ? "Posting…" : "Post Reply"}</button></form>
                   ) : <div className="bg-bg-card border border-border rounded-xl p-4 sm:p-6 text-center"><button onClick={onLoginClick} className="text-accent hover:underline text-sm">Log in to reply</button></div>}
               </div>
               <div className="hidden xl:block xl:sticky xl:top-20 self-start">
@@ -779,7 +1127,7 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
         {tab === "blog" && !selectedPost && (
           <div className="animate-fade-in space-y-4 sm:space-y-6">
             <h2 className="text-xl sm:text-2xl font-bold">📝 Blog</h2>
-            {blogs.length === 0 && loaded ? <Empty text="No blog posts yet." /> : (
+            {blogs.length === 0 && loaded && !cmsError ? <Empty text="No blog posts yet." /> : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">{blogs.map((p) => <PostCard key={p.id} post={p} onClick={() => openPost(p)} fmt={fmt} />)}</div>
             )}
           </div>
@@ -787,14 +1135,14 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
         {tab === "changelog" && !selectedPost && (
           <div className="animate-fade-in space-y-4 sm:space-y-6">
             <h2 className="text-xl sm:text-2xl font-bold">📋 Changelog</h2>
-            {changelogs.length === 0 && loaded ? <Empty text="No changelogs yet." /> : (
+            {changelogs.length === 0 && loaded && !cmsError ? <Empty text="No changelogs yet." /> : (
               <div className="space-y-3 sm:space-y-4">{changelogs.map((p) => <LogCard key={p.id} post={p} onClick={() => openPost(p)} fmt={fmt} />)}</div>
             )}
           </div>
         )}
         {tab === "post" && selectedPost && (
           <article className="animate-fade-in max-w-3xl mx-auto">
-            <button onClick={() => { setTab(selectedPost.type === "changelog" ? "changelog" : "blog"); setSelectedPost(null); }} className="text-accent text-sm hover:underline mb-4 sm:mb-6 block">← Back</button>
+            <button type="button" onClick={() => goTab(selectedPost.type === "changelog" ? "changelog" : "blog")} className="text-accent text-sm hover:underline mb-4 sm:mb-6 block">← Back</button>
             <div className="mb-4 sm:mb-6">
               <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-text-muted mb-3 flex-wrap">
                 {selectedPost.pinned && <span className="text-warning">📌</span>}

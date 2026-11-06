@@ -246,7 +246,13 @@ chmod 700 "$WORK_DIR"
 # The throwaway drizzle config holds the database URL — remove it on every
 # exit path, not just the happy one.
 DRIZZLE_UPDATE_CONFIG="$INSTALL_DIR/drizzle.update.json"
-trap 'rm -rf -- "$WORK_DIR"; rm -f -- "$DRIZZLE_UPDATE_CONFIG"' EXIT
+# The panel's update button watches this update through a state file, not a
+# child process, because the panel restarts (and is replaced) at the end. The
+# trap records the outcome on every exit path. `state_finish` is a no-op until
+# an update actually begins, so argument errors, `--rollback` and the sudo
+# re-exec below leave no misleading "running" state behind.
+state_finish() { return 0; }
+trap 'rm -rf -- "$WORK_DIR"; rm -f -- "$DRIZZLE_UPDATE_CONFIG"; state_finish || true' EXIT
 
 LOG_DIR="/var/log/gsm-update"
 install -d -o root -g root -m 700 "$LOG_DIR" \
@@ -257,6 +263,166 @@ DRIZZLE_LOG="$LOG_PREFIX-drizzle.log"
 BUILD_LOG="$LOG_PREFIX-build.log"
 ROLLBACK_BUILD_LOG="$LOG_PREFIX-rollback-build.log"
 CONFIG_FILES=(.env drizzle.config.json ecosystem.config.cjs .install-info)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Progress for the panel's update button
+# ═══════════════════════════════════════════════════════════════════════════════
+# The panel runs as an unprivileged user and restarts itself during an update,
+# so it cannot watch this process. It reads two world-readable files instead:
+# the state (which step, what happened) and a stable copy of this output.
+# Nothing secret belongs in either.
+STATE_DIR="${GSM_UPDATE_STATE_DIR:-/var/lib/gsm-panel-update}"
+STATE_FILE="${GSM_UPDATE_STATE_FILE:-$STATE_DIR/state.json}"
+STABLE_LOG="${GSM_UPDATE_LOG_FILE:-$STATE_DIR/update.log}"
+install -d -o root -g root -m 0755 "$STATE_DIR" 2>/dev/null \
+  || warn "Could not create $STATE_DIR — the panel's update button will not see progress"
+
+STATE_STATUS="running"
+STATE_PHASE="preflight"
+STATE_MESSAGE="Starting"
+STATE_STEP=0
+STATE_STARTED=""
+STATE_FINISHED_AT=""
+STATE_EXIT_CODE=""
+STATE_ERROR=""
+STATE_DONE=false
+
+state_write() {
+  [[ -n "${STATE_FILE:-}" ]] || return 0
+  local now tmp finished_json exit_json
+  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  if [[ -n "$STATE_FINISHED_AT" ]]; then
+    finished_json="\"$STATE_FINISHED_AT\""
+  else
+    finished_json="null"
+  fi
+  if [[ -n "$STATE_EXIT_CODE" ]]; then exit_json="$STATE_EXIT_CODE"; else exit_json="null"; fi
+
+  tmp="$STATE_FILE.$$.tmp"
+  if printf '{\n  "status": "%s",\n  "phase": "%s",\n  "step": %d,\n  "totalSteps": %d,\n  "message": "%s",\n  "startedAt": "%s",\n  "updatedAt": "%s",\n  "finishedAt": %s,\n  "branch": "%s",\n  "fromCommit": "%s",\n  "toCommit": "%s",\n  "exitCode": %s,\n  "error": "%s"\n}\n' \
+      "$(json_escape "$STATE_STATUS")" \
+      "$(json_escape "$STATE_PHASE")" \
+      "$((STATE_STEP + 0))" \
+      "$((TOTAL_STEPS + 0))" \
+      "$(json_escape "$STATE_MESSAGE")" \
+      "$(json_escape "$STATE_STARTED")" \
+      "$now" \
+      "$finished_json" \
+      "$(json_escape "${BRANCH:-}")" \
+      "$(json_escape "${CURRENT_COMMIT:-}")" \
+      "$(json_escape "${NEW_COMMIT:-}")" \
+      "$exit_json" \
+      "$(json_escape "$STATE_ERROR")" > "$tmp" 2>/dev/null; then
+    chmod 0644 "$tmp" 2>/dev/null || true
+    mv -f "$tmp" "$STATE_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
+  else
+    rm -f "$tmp" 2>/dev/null || true
+  fi
+}
+
+# Called once, after the rollback branch, so a rollback never looks like a
+# half-finished update.
+state_begin() {
+  STATE_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  STATE_STATUS="running"
+  STATE_PHASE="preflight"
+  STATE_MESSAGE="Checking the installation"
+  state_write
+  # Readable by the panel's user and root only: update output can name paths
+  # and settings that should not be public on a shared machine.
+  : > "$STABLE_LOG" 2>/dev/null \
+    && chmod 0640 "$STABLE_LOG" 2>/dev/null \
+    && chown "root:${GSM_USER:-root}" "$STABLE_LOG" 2>/dev/null || true
+  if [[ -w "$STABLE_LOG" ]]; then
+    # Mirror everything the operator sees into the file the panel polls.
+    exec > >(tee -a "$STABLE_LOG") 2>&1
+  fi
+}
+
+state_finish() {
+  local code=$?
+  [[ -n "$STATE_STARTED" ]] || return 0
+  [[ "$STATE_DONE" == "true" ]] && return 0
+  STATE_EXIT_CODE="$code"
+  STATE_FINISHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  if [[ $code -eq 0 && "${PANEL_OK:-}" == "true" ]]; then
+    STATE_STATUS="success"
+    STATE_PHASE="done"
+    STATE_STEP="$TOTAL_STEPS"
+    STATE_MESSAGE="Update complete — the panel is healthy"
+  else
+    STATE_STATUS="failed"
+    STATE_MESSAGE="Update failed"
+    [[ -n "$STATE_ERROR" ]] || STATE_ERROR="The updater stopped on step $STATE_STEP/$TOTAL_STEPS ($STATE_PHASE), exit code $code."
+  fi
+  STATE_DONE=true
+  state_write
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  The helper that lets the panel update itself
+# ═══════════════════════════════════════════════════════════════════════════════
+# The panel is not root, so the button runs this one root-owned wrapper through
+# passwordless sudo. The wrapper whitelists its arguments: sudo's own wildcards
+# span spaces, so a rule such as "/bin/bash .../update.sh *" would hand root a
+# shell, and a rule for this script with a trailing * would let the panel choose
+# --install-dir /etc. Keep the wrapper's argument list and public/install.sh in
+# step — both install the same files.
+SELF_UPDATE_WRAPPER="/usr/local/bin/gsm-self-update"
+SELF_UPDATE_SUDOERS="/etc/sudoers.d/gsm-panel-update"
+SELF_UPDATE_TEMPLATE="$INSTALL_DIR/public/gsm-self-update.sh"
+
+# Escape a value for the replacement side of `sed s|...|...|`.
+sed_replacement() {
+  printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'
+}
+
+install_self_update_helper() {
+  local new_wrapper="$SELF_UPDATE_WRAPPER.$$.new"
+  local new_sudoers="$SELF_UPDATE_SUDOERS.$$.new"
+
+  # The template ships in the repository, so the wrapper always matches the
+  # version of the panel that is installed. Older checkouts do not have it: the
+  # caller tries again after the code is pulled.
+  if [[ ! -f "$SELF_UPDATE_TEMPLATE" ]]; then
+    warn "Skipping the panel update helper: $SELF_UPDATE_TEMPLATE is missing"
+    return 1
+  fi
+  sed "s|@INSTALL_DIR@|$(sed_replacement "$INSTALL_DIR")|g" "$SELF_UPDATE_TEMPLATE" > "$new_wrapper" \
+    || { rm -f "$new_wrapper"; return 1; }
+  chmod 0755 "$new_wrapper" && chown root:root "$new_wrapper" \
+    || { rm -f "$new_wrapper"; return 1; }
+  mv -f "$new_wrapper" "$SELF_UPDATE_WRAPPER" || { rm -f "$new_wrapper"; return 1; }
+
+  cat > "$new_sudoers" <<EOF || return 1
+# GameServer Manager — lets the panel start its own update.
+# Installed by the GSM updater. Remove with: sudo rm $SELF_UPDATE_SUDOERS
+#
+# Exactly one command, with no arguments on the rule itself:
+# $SELF_UPDATE_WRAPPER checks its arguments and only ever runs
+# $INSTALL_DIR/public/update.sh. Do not add a wildcard here — sudo's wildcards
+# span spaces, so a trailing * would let the panel choose the updater's flags,
+# including --install-dir, which is root code execution.
+$GSM_USER ALL=(ALL) NOPASSWD: $SELF_UPDATE_WRAPPER
+EOF
+  chmod 0440 "$new_sudoers" && chown root:root "$new_sudoers" \
+    || { rm -f "$new_sudoers"; return 1; }
+  if visudo -cf "$new_sudoers" > /dev/null 2>&1; then
+    mv -f "$new_sudoers" "$SELF_UPDATE_SUDOERS" || { rm -f "$new_sudoers"; return 1; }
+  else
+    # A broken sudoers file locks the panel user out of every sudo command, so
+    # a file that does not validate is never installed.
+    rm -f "$new_sudoers"
+    return 1
+  fi
+  return 0
+}
+
+if install_self_update_helper; then
+  log "Panel update helper refreshed ($SELF_UPDATE_WRAPPER)"
+else
+  warn "Could not install the panel update helper — the panel's update button will stay disabled"
+fi
 
 # Shell-quoted form of the install dir, for use inside `su -c "..."` strings
 # (a custom --install-dir with spaces would otherwise break those commands).
@@ -553,9 +719,18 @@ TOTAL_STEPS=7
 STEP=0
 step() {
   STEP=$((STEP + 1))
+  STATE_PHASE="step-$STEP"
+  STATE_STEP=$STEP
+  STATE_MESSAGE=$1
+  STATE_STATUS="running"
+  state_write
   echo ""
   echo -e "${CYAN}━━━ Step $STEP/$TOTAL_STEPS: $1 ━━━${NC}"
 }
+
+# From here on the panel can follow along. Anything above this line (bad
+# arguments, a rollback, the sudo re-exec) never publishes a "running" state.
+state_begin
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  STEP 1: Backup
@@ -656,6 +831,15 @@ done
 NEW_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 chown -R "$GSM_USER:$GSM_USER" "$INSTALL_DIR"
 ok "Updated: $CURRENT_COMMIT → $NEW_COMMIT"
+
+# The checkout just changed, so the self-update helper is refreshed here as
+# well: an install that is updating for the first time only has the new
+# template after this pull.
+if install_self_update_helper; then
+  log "Panel update helper refreshed ($SELF_UPDATE_WRAPPER)"
+else
+  warn "Panel update helper not available — the panel's update button will stay disabled"
+fi
 
 # ── Migrate .env for newer requirements ──────────────────────────────────────
 # As of 1.5.0 JWT_SECRET is mandatory in production (the app refuses to boot

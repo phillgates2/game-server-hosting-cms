@@ -6,6 +6,179 @@ All notable changes to GameServer Manager are documented here.
 
 ## [Unreleased]
 
+### 🔄 An update button that survives updating itself
+
+Updating the panel meant sshing in and running a shell script. The panel now has
+**Administration → Updates → Update panel now**: it shows the commit you are
+running, runs `public/update.sh`, and reports the step, the live output and the
+final health verdict.
+
+The hard part is that the updater restarts the panel that is serving the
+request. So:
+
+- **Progress is a file, not a request.** `update.sh` publishes
+  `/var/lib/gsm-panel-update/state.json` (status, step, timestamps, commits) and
+  keeps a stable log copy beside it. The panel reads both, so the tab still
+  knows what happened after it has been restarted under the operator's feet, and
+  a run that dies mid-way is reported as *stopped part-way* instead of spinning
+  forever.
+- **The panel cannot be turned into a shell.** It runs as `gsm`, which may
+  execute exactly one root command: the generated helper
+  `/usr/local/bin/gsm-self-update`, whose install path is baked in and whose only
+  accepted argument is `--no-backup`. A sudo rule for `update.sh` would have
+  needed a wildcard, and sudo wildcards span spaces — `--install-dir /etc` would
+  have been root code execution. The updater starts detached (`setsid nohup`), so
+  the restart cannot orphan it in the middle of `npm ci`.
+- **It refuses honestly.** No helper, no sudo rule, no updater, or an update
+  already running each produce a plain explanation and (for the first three) the
+  exact command to run instead — never a button that silently does nothing. The
+  endpoint is gated on `panel.updates`, requires `{ "confirm": "update" }`, is
+  single-flight (409), and writes an audit entry before the panel disappears.
+- **Installs older than this release get the helper from the updater itself** —
+  `install.sh` and `update.sh` both render the helper and validate the sudoers
+  file with `visudo -cf` before installing it.
+
+
+### 🧭 A panel and a site that say what is actually wrong
+
+The shell had three ways to mislead you: a failed boot probe looked exactly like
+"not installed", so a dropped request or a database outage put you in the
+install wizard on a panel that already had servers; a failed content request
+looked exactly like "no content yet"; and a hung request looked like a page that
+would load eventually. All three now report themselves, with a way out.
+
+- **A failed boot probe never opens the installer.** `GET /api/install` answers
+  `503 { installed: null }` when it cannot reach the database instead of a `200`
+  that claims the panel is uninstalled. `app-boot.ts` decides the boot outcome
+  from an explicit contract — only `200 { installed: true }` is *ready*, only
+  `200 { installed: false }` is *install*, and every other answer (network
+  failure, 4xx, 5xx, non-JSON, missing/odd `installed` value, timeout, offline)
+  is *unreachable*.
+- **Unreachable is a screen, not a spinner.** It names the fault, says nothing
+  has been lost, offers *Try again* and *Status page*, and retries by itself
+  when the browser comes back online.
+- **Every boot request has a deadline** (12 s probe, 15 s default) via the new
+  `fetchWithTimeout`, so a wedged panel process can no longer leave a permanent
+  spinner. A dead `/api/auth/me` degrades to signed-out instead of blocking the
+  site.
+- **Branded failure pages**: a route-level `error.tsx` with *Try again* (stack
+  details only outside production), a self-contained `global-error.tsx` that
+  needs no stylesheet, and a `not-found.tsx` with real navigation.
+- **Offline banner.** Losing the connection shows a fixed banner and hides the
+  content's "error" state until it is clear the failure was not just offline;
+  reconnecting raises a toast. The banner is hydration-safe (the connection state is read after mount).
+- **A failed content request no longer reads as an empty site.** The public site
+  names what failed and offers *Retry*; the shop distinguishes "could not load"
+  from "no products found" instead of silently showing an empty catalogue.
+- **Forum posts report failure.** Creating a thread or posting a reply used to
+  ignore a non-2xx answer entirely — a rejected post looked posted until you
+  reloaded. Both now show the server's message inline, cannot be double-submitted,
+  and confirm success with a toast.
+- **The menu tells you when it is incomplete.** Losing
+  `/api/auth/permissions` used to hide most of the navigation with no
+  explanation; there is now a banner and a retry.
+- **Navigating is predictable.** Switching panels or public tabs starts at the
+  top of the new content (and moves the reading position there), instead of
+  inheriting the previous scroll offset. Both shells have a *Skip to content*
+  link, focus rings on every interactive control, `prefers-reduced-motion`
+  support, and the command palette is a real dialog: focus moves into it, Tab is
+  trapped inside it, Escape closes it even while typing, and focus returns to
+  whatever opened it.
+- **Crash cards stay useful**: the exception text is shown in development only,
+  and the card offers *Reload the panel* alongside *Try again*.
+
+### 🎛️ Settings, rebuilt around one save and one source of truth
+
+The Settings page was a single long column in which some cards applied
+immediately and others waited for a Save button at the very bottom — with
+nothing on screen saying which was which, no validation until the request came
+back, and no way to find a setting other than scrolling.
+
+- **Eight focused screens** — Accounts, Sign-in & security, Retention &
+  backups, Automation, Host alerts, Outbound webhook, Discord and Public status
+  page — with a search box that jumps to any setting by name, help text or
+  keyword.
+- **One description per setting.** Labels, help text, bounds, defaults and
+  screen live in `panel-settings.ts`; the API validates against that registry
+  and the UI renders from it, so an input's limit and the server's limit can no
+  longer drift apart.
+- **Staged saves with a visible state.** Draft screens share one save bar that
+  only appears while something is pending, lists the affected screens, and
+  sends only the changed fields. Screens that drive an integration save with
+  their own button and are labelled as such. Discard and per-screen
+  Reset-to-defaults undo a draft before it is stored, and leaving the page with
+  pending changes warns first.
+- **Inline validation.** Out-of-range or empty values are flagged at the field
+  with a one-click "use the nearest legal value"; Save jumps to the first
+  problem instead of failing silently. The API returns every error at once,
+  keyed by field, instead of only the first.
+- **Hardened API.** `POST /api/settings/panel` validates in a single pass,
+  accepts both the stored column names and the camelCase names the GET returns,
+  upserts all fields in one transaction (no more select-then-write per key, so
+  a simultaneous change cannot be lost and a failure cannot half-apply), and
+  records the before/after of every change in the audit log.
+- **Stored values are bounded on read.** A hand-edited or imported row outside
+  its range now falls back to the default instead of being used — a session
+  length of `0` or a minimum age of `8` can no longer weaken the panel.
+- **Safer secondary controls**: the IP allowlist validates rules as you type,
+  previews whether your own address is still covered and asks before a save
+  that would shut you out; the idle policy no longer saves on every click of a
+  toggle; the webhook URL is checked and http:// is called out; the fleet digest
+  reads its real schedule back from the scheduler.
+
+### 🔗 Addressable public pages, a phone-sized panel menu, and a voice for expired sessions
+
+- **Every public view has a URL.** `#forums`, `#ladder`, `#post/12`,
+  `#forum/7`, `#thread/9`, `#site-editor` — so a thread can be linked, a page
+  survives a refresh, and Back returns to the list you came from instead of
+  leaving the site. `src/lib/site-url.ts` parses hashes totally: unknown,
+  truncated, mistyped, percent-encoded or out-of-range values land on the
+  homepage rather than addressing a view that does not exist, and only
+  administrators can open `#site-editor`.
+- **Deep links wait for their data**, then explain themselves. A post or forum
+  that is still loading keeps the route pending instead of bouncing to the
+  homepage; if it never resolves (deleted or stale), the reader is told and sent
+  to the nearest list. A thread link shows a skeleton while loading and a
+  "thread not found" card with a way back.
+- **The panel has a real mobile menu.** Below `lg` the four group menus —
+  three wrapped rows of small targets — are replaced by one **Menu** button
+  opening a drawer that lists every permitted panel by section and marks the
+  current one. The drawer and the command palette share one dialog
+  implementation: focus moves in, Tab cycles inside, the page behind does not
+  scroll, Escape closes, focus returns to the opener, and single-key shortcuts
+  stay inert while either is open.
+- **The panel remembers where you were.** Panel tabs now live in the address
+  bar as `#panel/servers`, `#panel/monitor`, … — a refresh reopens the panel you
+  were watching instead of dropping back to Overview, a panel link can be
+  bookmarked, and Back/Forward walk the panels you actually visited. The two
+  address spaces are namespaced (`#panel/shop` is the panel, `#shop` is the
+  storefront), and a panel the account cannot open is never opened from a link
+  — the operator stays where they are instead of landing in a view whose every
+  request is refused.
+- **The file manager remembers the server and folder.** `#panel/files/12/plugins`
+  reopens that server's folder — bookmarkable, linkable to a colleague, and safe
+  to refresh mid-edit. Browsing replaces the address instead of filling the Back
+  button, so history still means "the panels I visited".
+- **Ladders are addressable too.** `#ladder/game:3/S2` opens one ladder and one
+  season, `#ladder/standalone:Bronze%20League` opens a standalone ladder, and
+  picking a ladder or season keeps the URL in step, so the exact standing you
+  are looking at can be shared.
+- **Every shortcut, in one list.** Press `?` anywhere in the panel (or choose
+  *Keyboard shortcuts* in quick jump / the mobile drawer) for a cheat sheet of
+  the global keys, the quick-jump keys and every panel shortcut. The list is
+  built from the same navigation table the keyboard handler uses, so it cannot
+  advertise a key that does not work or miss one that does.
+- **The site editor works on a phone.** The save bar sticks to the bottom of the
+  screen (a long form no longer leaves Save below the fold), the header wraps
+  instead of squeezing, and the per-link move/remove controls are proper touch
+  targets.
+- **An expired session is named.** `installSessionExpiryWatch` notices the first
+  `401` from any `/api/` request (never the auth endpoints — a signed-out
+  `/api/auth/me` and a wrong password are not expiries) and the shell shows a
+  banner: *your session has expired, changes will not be saved* with **Sign in
+  again** and **Dismiss**. Previously the operator only saw a scattering of
+  "unauthorised" toasts and had to guess.
+
 ### ⬆️ Panel updater reliability
 
 The panel updater now refuses ambiguous or partially successful upgrades instead
