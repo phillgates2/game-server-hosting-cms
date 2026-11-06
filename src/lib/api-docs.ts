@@ -141,6 +141,16 @@ export const API_DOCS: ApiDocGroup[] = [
       { method: "GET", path: "/api/health", description: "Liveness probe.", auth: "public" },
     ],
   },
+  {
+    title: "Legal pages",
+    icon: "📜",
+    note: "The Terms of Service (/terms) and Privacy Policy (/privacy) are stored settings, editable in the Site Editor. Registration and checkout must accept the published version, and the acceptance is recorded with it.",
+    endpoints: [
+      { method: "GET", path: "/api/legal/public", description: "The published documents' version and paths — what an accepting form needs.", auth: "public" },
+      { method: "GET", path: "/api/legal", description: "Stored text, defaults, placeholders and acceptance counts for the editor.", auth: "panel.settings" },
+      { method: "POST", path: "/api/legal", description: "Publish new text or operator details; blank text restores the shipped default.", auth: "panel.settings" },
+    ],
+  },
 ];
 
 /** Flat count for tests and the docs header. */

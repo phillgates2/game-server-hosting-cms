@@ -6,6 +6,40 @@ All notable changes to GameServer Manager are documented here.
 
 ## [Unreleased]
 
+### 📜 Terms of Service and Privacy Policy, with consent that can be proved
+
+A hosting panel that takes money and holds other people's data needs both
+documents from day one. The panel now publishes them itself, at `/terms` and
+`/privacy`, and records who agreed to which version.
+
+- **Stored, not hard-coded.** Both documents live in the `settings` table and
+  are edited in **Site Editor → 📜 Legal pages**, so changing a refund policy is
+  a save, not a deploy. Blank text restores the shipped default, so undo never
+  depends on a backup.
+- **The shipped text is honest about this software.** The terms keep the
+  Australian Consumer Law floor, the 16+ account age and an explicit "no uptime
+  guarantee"; the privacy policy names bcrypt, the `gsm_token` cookie, and every
+  subprocessor the panel can be configured to use. Anything only the operator
+  can know — the entity, the contact address, the governing law — is a
+  placeholder filled from settings, and an unset contact address renders as
+  *(contact address not configured)* rather than a dead `mailto:` link.
+- **Rendered as data.** A small markdown subset is parsed into blocks; links are
+  scheme-checked (`javascript:` stays literal text) and no path emits raw HTML,
+  so an operator cannot turn a page every visitor loads into an XSS vector.
+- **Consent is versioned.** The version is a fingerprint of the two rendered
+  documents plus their date. Registration and checkout send back the version
+  they displayed, and the server refuses a stale one with **409** — "the terms
+  changed while this page was open" — instead of recording agreement to text
+  nobody read. A panel that cannot resolve a version skips the check rather
+  than failing closed.
+- **Evidence, not decoration.** `legal_acceptances` stores the version, the
+  surface, the email or user, the order reference, the IP and the time; the
+  editor shows how many people accepted each published version and every save
+  is audited as `legal.update`.
+- **A document does not re-version at midnight.** Untouched text is dated by its
+  own revision date, so a quiet deployment does not invalidate yesterday's
+  acceptances without a word changing.
+
 ### 🔄 An update button that survives updating itself
 
 Updating the panel meant sshing in and running a shell script. The panel now has

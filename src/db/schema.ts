@@ -675,3 +675,28 @@ export const ftpAccounts = pgTable("ftp_accounts", {
 }, (t) => ({
     ftp_accounts_user_idx: index("ftp_accounts_user_idx").on(t.userId),
 }));
+
+// ── Legal acceptances (Terms of Service / Privacy Policy) ────
+// Evidence that a person accepted the published terms, and WHICH version.
+// `version` is a fingerprint of the two rendered documents (src/lib/legal.ts),
+// so a change to either policy invalidates nothing historically: each row
+// still names the exact text that person agreed to. Rows are kept when the
+// user is deleted (user_id becomes NULL) because the acceptance is also a
+// record of a transaction — it is the buyer's consent, not a profile field.
+export const legalAcceptances = pgTable("legal_acceptances", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  /** Where consent was captured: "register" (account) or "checkout" (order). */
+  surface: varchar("surface", { length: 16 }).notNull(),
+  version: varchar("version", { length: 64 }).notNull(),
+  /** Comma-separated document ids the person accepted: "terms,privacy". */
+  documents: text("documents").notNull(),
+  email: varchar("email", { length: 254 }),
+  /** User id for a signup, order id for a checkout — as text, both fit. */
+  reference: varchar("reference", { length: 64 }),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: varchar("user_agent", { length: 256 }),
+  acceptedAt: timestamp("accepted_at").defaultNow().notNull(),
+}, (t) => ({
+    legal_acceptances_user_id_idx: index("legal_acceptances_user_id_idx").on(t.userId),
+}));

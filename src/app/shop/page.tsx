@@ -76,8 +76,24 @@ export default function ShopPage() {
   const [buying, setBuying] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string; orderId?: number; orderIds?: number[] } | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<ShopProduct | null>(null);
+  // Acceptance of the Terms of Service, sent with the order. The version shown
+  // is the one published when the page loaded; a 409 from the server means it
+  // changed under us, and the tick is cleared rather than silently reused.
+  const [legalVersion, setLegalVersion] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+
+  const loadLegalVersion = useCallback(async () => {
+    try {
+      const res = await fetch("/api/legal/public", { cache: "no-store" });
+      const data = await res.json().catch(() => null);
+      setLegalVersion(typeof data?.version === "string" ? data.version : "");
+    } catch {
+      setLegalVersion("");
+    }
+  }, []);
 
   const loadShop = useCallback(async () => {
+    void loadLegalVersion();
     try {
       const res = await fetchWithTimeout("/api/shop/products", { cache: "no-store" }, 10_000);
       const data = await res.json().catch(() => null);
@@ -96,7 +112,7 @@ export default function ShopPage() {
     } catch {
       setShopError("The shop could not load — the panel may be restarting. Try again in a moment.");
     } finally { setLoaded(true); }
-  }, []);
+  }, [loadLegalVersion]);
 
   useEffect(() => {
     const t = setTimeout(() => void loadShop(), 0);
@@ -161,6 +177,10 @@ export default function ShopPage() {
       setMessage({ kind: "err", text: "Enter a valid email first — your order details go there." });
       return;
     }
+    if (!acceptedTerms) {
+      setMessage({ kind: "err", text: "Tick the box to accept the Terms of Service and Privacy Policy first." });
+      return;
+    }
     setBuying(true);
     setMessage(null);
     try {
@@ -173,10 +193,16 @@ export default function ShopPage() {
           provider: stripeEnabled ? "stripe" : "manual",
           couponCode: coupon.trim() || undefined,
           items: cart.map((i) => ({ productId: i.product.id, quantity: i.quantity })),
+          acceptedTerms,
+          legalVersion,
         }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
+        if (res.status === 409 && data?.code === "stale") {
+          setAcceptedTerms(false);
+          void loadLegalVersion();
+        }
         setMessage({ kind: "err", text: data?.error || "Could not place order." });
         return;
       }
@@ -312,6 +338,22 @@ export default function ShopPage() {
                     <button onClick={() => void checkCoupon()} className="px-4 py-2.5 bg-[#1f2937] border border-[#374151] rounded-lg text-xs font-medium hover:border-[#6366f1]/30 text-white">Check</button>
                   </div>
                   {couponInfo && <p className={`text-xs ${couponInfo.ok ? "text-[#22c55e]" : "text-[#ef4444]"}`}>{couponInfo.text}</p>}
+                  <label className="flex items-start gap-2.5 rounded-lg border border-[#1f2937] bg-[#0b0f17] px-3 py-2.5 text-[11px] text-[#94a3b8] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={acceptedTerms}
+                      onChange={(e) => setAcceptedTerms(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 accent-[#6366f1] flex-shrink-0"
+                    />
+                    <span>
+                      I agree to the{" "}
+                      <a href="/terms" target="_blank" rel="noreferrer" className="text-[#818cf8] hover:underline">Terms of Service</a>
+                      {" "}and{" "}
+                      <a href="/privacy" target="_blank" rel="noreferrer" className="text-[#818cf8] hover:underline">Privacy Policy</a>
+                      , including the refund policy and the rules on licence keys and digital delivery.
+                      {legalVersion && <span className="block text-[#64748b] mt-1">Accepting <span className="font-mono">v{legalVersion}</span></span>}
+                    </span>
+                  </label>
                   <div className="flex items-center justify-between pt-2 flex-wrap gap-3">
                     <div>
                       <p className="text-sm font-bold text-white">Total: ${(cartTotal / 100).toFixed(2)} {couponInfo?.ok && couponInfo.savings ? <span className="text-[#22c55e] text-xs font-normal"> (savings applied at checkout)</span> : ""}</p>

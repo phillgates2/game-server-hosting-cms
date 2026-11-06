@@ -563,7 +563,7 @@ Two places to configure things, split by who they are for:
 | Where | What |
 |:--|:--|
 | **Settings** *(Administration)* | Eight screens: **Accounts & registration** (self-registration, default server quota, age verification with the Australian 16+ minimum), **Sign-in & sessions** (login attempt limit, session length, IP allowlist), **Retention & backups** (data retention, backup retention, pre-update auto-backup, export/restore), **Automation** (idle auto-stop, weekly fleet digest, scheduled-task announcements), **Host alerts** (CPU/RAM/disk thresholds and mute windows), **Outbound webhook** (with delivery log), **Discord** (webhook, bot, channels, backfill) and the **Public status page** embed codes |
-| **Site Editor** *(✏️ on the public site)* | Panel name, hero text, footer, announcements, navigation links, chat widget, and **custom CSS** |
+| **Site Editor** *(✏️ on the public site)* | Panel name, hero text, footer, announcements, navigation links, chat widget, **custom CSS**, and the **Terms of Service / Privacy Policy** text |
 
 Everything in **Settings** overrides the matching environment variable, so you
 can change it without editing `.env` or restarting the panel.
@@ -700,6 +700,77 @@ sudo ufw allow 50000:50100/tcp
 curl -T world.zip ftp://ftp.example.com:2121/survival-12/world.zip --user 'alice:password'
 lftp -u alice,password -e 'set ftp:ssl-allow true; put modpack.zip -o /survival-12/modpack.zip' ftp.example.com -p 2121
 ```
+
+</details>
+
+---
+
+## 📜 Terms of Service & Privacy Policy
+
+A deployment that takes money and holds other people's data needs both from the
+day it opens, so the panel ships one of each and publishes them itself:
+
+| Page | What it covers |
+|:--|:--|
+| `/terms` | Accounts (16+), acceptable use, your content, orders and delivery, refunds, licence keys, liability, and the governing law |
+| `/privacy` | Exactly what is stored — account fields, audit log, metrics, orders, forum posts — why, the third parties it can talk to, retention, and how to get your data back or deleted |
+
+Both are **stored settings, not code**: edit them in **Site Editor → 📜 Legal
+pages** and the change is live immediately, with no deploy and no restart.
+
+<details>
+<summary><b>What the shipped text assumes, and what you should change</b></summary>
+
+<br>
+
+The defaults are written to be true of *this software* — the bcrypt hashes, the
+`gsm_token` cookie, the Stripe and Discord integrations — and deliberately make
+no promises on your behalf. Three details are yours, and the pages say so
+plainly until you fill them in:
+
+| Field | Effect |
+|:--|:--|
+| **Operator name** | Who "we" is. Falls back to the site name |
+| **Contact email** | Support, privacy requests and complaints. Left empty, the pages print ***(contact address not configured)*** instead of a link that goes nowhere |
+| **Governing law** | Used in the disputes section. Defaults to Queensland, Australia |
+
+The terms keep the Australian Consumer Law floor, the 16+ account age and a
+plain "no uptime guarantee". The privacy policy names every subprocessor the
+panel *can* be configured to use — Stripe, SMTP, Discord, node machines,
+outbound webhooks — and says which retention setting governs each record type.
+Delete what does not apply to you. Neither document is legal advice.
+
+Formatting is a small markdown subset — `#`/`##`, `-` bullets, `1.` lists,
+`**bold**`, `[label](https://…)` — and raw HTML is displayed as text, never
+executed. Placeholders: `{{panel}}`, `{{operator}}`, `{{contact}}`,
+`{{contact_link}}`, `{{jurisdiction}}`, `{{updated}}`, `{{year}}`.
+
+</details>
+
+<details>
+<summary><b>How acceptance is recorded (and why the version matters)</b></summary>
+
+<br>
+
+Registration and store checkout both require a tick, and both send back the
+version they displayed. That version is a fingerprint of the two **rendered**
+documents plus their date, so:
+
+- **Changing one word publishes a new version.** Every acceptance already on
+  record still names the exact text that person agreed to — nothing is
+  rewritten when you edit.
+- **A form left open across a change is refused (409),** not silently accepted
+  against text the reader never saw. The form re-reads the version and asks for
+  a fresh tick.
+- **A panel that cannot read its settings does not block signups.** If no
+  version can be resolved, the check is skipped rather than failed closed —
+  a database hiccup must not close the shop.
+
+Each acceptance is written to `legal_acceptances` with the version, the
+surface (`register` or `checkout`), the email or user, the order reference, the
+IP address and the time. **Site Editor → Legal pages** shows how many people
+accepted each published version, and **every save is written to the audit log**
+(`legal.update`).
 
 </details>
 
