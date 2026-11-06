@@ -37,6 +37,14 @@ request. So:
 - **Installs older than this release get the helper from the updater itself** —
   `install.sh` and `update.sh` both render the helper and validate the sudoers
   file with `visudo -cf` before installing it.
+- **The updater says when the button has just become available.** An install
+  that has never had the helper now prints *"Panel update helper installed —
+  this panel can update itself from the browser"* with where to look, instead of
+  the same "refreshed" line a routine update prints. If it cannot install one,
+  it says which part failed and prints the exact command to retry. Both
+  installers also refuse to install a helper that does not point at this
+  install — it runs as root, so a bad render fails closed rather than pointing
+  sudo at some other script.
 
 
 ### 🧭 A panel and a site that say what is actually wrong

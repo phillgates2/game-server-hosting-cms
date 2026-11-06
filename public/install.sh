@@ -1345,6 +1345,20 @@ install_self_update_helper() {
   fi
   sed "s|@INSTALL_DIR@|$(sed_replacement "$INSTALL_DIR")|g" "$SELF_UPDATE_TEMPLATE" > "$new_wrapper" \
     || { rm -f "$new_wrapper"; return 1; }
+
+  # Fail closed: this file runs as root through sudo, so a render that did not
+  # land on this install must never be installed.
+  if ! grep -qF "UPDATER='$INSTALL_DIR/public/update.sh'" "$new_wrapper"; then
+    warn "Rendered update helper does not point at $INSTALL_DIR — refusing to install it"
+    rm -f "$new_wrapper"
+    return 1
+  fi
+  if ! bash -n "$new_wrapper" > /dev/null 2>&1; then
+    warn "Rendered update helper is not valid shell — refusing to install it"
+    rm -f "$new_wrapper"
+    return 1
+  fi
+
   chmod 0755 "$new_wrapper" && chown root:root "$new_wrapper" \
     || { rm -f "$new_wrapper"; return 1; }
   mv -f "$new_wrapper" "$SELF_UPDATE_WRAPPER" || { rm -f "$new_wrapper"; return 1; }
