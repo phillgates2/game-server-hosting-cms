@@ -33,6 +33,13 @@ export default function LoginForm({ onLogin }: Props) {
   // "Sign in with Discord" is only shown when an OAuth app is configured.
   const [discordOAuth, setDiscordOAuth] = useState(false);
 
+  // Terms of Service acceptance. The version fetched with the form is the one
+  // the reader is agreeing to; if the operator republishes the documents while
+  // the form is open the server answers 409 and the checkbox is reset, so a
+  // consent is never recorded against text the person was not shown.
+  const [legalVersion, setLegalVersion] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+
   // Read the URL once (reset tokens, OAuth outcomes, OAuth availability).
   // Deferred like the rest of the panel's mount-time reads: the lint rule
   // rightly rejects synchronous setState straight inside an effect.
@@ -72,6 +79,14 @@ export default function LoginForm({ onLogin }: Props) {
       .then((d) => setDiscordOAuth(Boolean(d.enabled)))
       .catch(() => setDiscordOAuth(false));
 
+    // The published version of the terms/privacy documents. Failure is not
+    // fatal: the server skips the acceptance check when it cannot resolve a
+    // version either, so a settings-table problem cannot block signups.
+    fetch("/api/legal/public", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { version: "" }))
+      .then((d) => setLegalVersion(typeof d?.version === "string" ? d.version : ""))
+      .catch(() => setLegalVersion(""));
+
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
@@ -85,7 +100,7 @@ export default function LoginForm({ onLogin }: Props) {
     const body =
       mode === "login"
         ? { username: form.username, password: form.password, ...(twoFactorCode ? { twoFactorCode } : {}) }
-        : { ...form };
+        : { ...form, acceptedTerms, legalVersion };
 
     try {
       const res = await fetch(endpoint, {
@@ -98,6 +113,15 @@ export default function LoginForm({ onLogin }: Props) {
         if (data.twoFactorRequired) {
           setTwoFactorRequired(true);
           setTwoFactorCode("");
+        }
+        // The terms changed under the open form: re-read them, and require a
+        // fresh tick against the new version.
+        if (res.status === 409 && data.code === "stale") {
+          setAcceptedTerms(false);
+          fetch("/api/legal/public", { cache: "no-store" })
+            .then((r) => (r.ok ? r.json() : { version: "" }))
+            .then((d) => setLegalVersion(typeof d?.version === "string" ? d.version : ""))
+            .catch(() => {});
         }
         setError(data.error || "Authentication failed");
       } else {
@@ -246,6 +270,32 @@ export default function LoginForm({ onLogin }: Props) {
                   <p className="text-[10px] text-text-muted mt-1">
                     Australian law (Online Safety Amendment Act 2024) requires you to be at least 16 to hold an account.
                   </p>
+                </div>
+              )}
+
+              {mode === "register" && (
+                <div className="rounded-lg border border-border bg-bg-secondary p-3">
+                  <label className="flex items-start gap-2.5 text-xs text-text-secondary cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={acceptedTerms}
+                      onChange={(e) => setAcceptedTerms(e.target.checked)}
+                      required
+                      className="mt-0.5 h-4 w-4 accent-[var(--color-accent)] flex-shrink-0"
+                    />
+                    <span>
+                      I am at least 16, and I agree to the{" "}
+                      <a href="/terms" target="_blank" rel="noreferrer" className="text-accent hover:underline">Terms of Service</a>
+                      {" "}and{" "}
+                      <a href="/privacy" target="_blank" rel="noreferrer" className="text-accent hover:underline">Privacy Policy</a>.
+                    </span>
+                  </label>
+                  {legalVersion && (
+                    <p className="text-[10px] text-text-muted mt-1.5 pl-6">
+                      You are accepting{" "}
+                      <span className="font-mono">v{legalVersion}</span>. The version you accept, and when, is recorded.
+                    </p>
+                  )}
                 </div>
               )}
 

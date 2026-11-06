@@ -11,6 +11,8 @@ import {
 } from "@/lib/auth";
 import { apiError } from "@/lib/api-error";
 import { eq, or, sql } from "drizzle-orm";
+import { checkLegalAcceptance } from "@/lib/legal";
+import { currentLegalVersion, recordLegalAcceptance } from "@/lib/legal-store";
 
 /**
  * Upgrades from before age verification exist have no date_of_birth column.
@@ -73,9 +75,32 @@ export async function POST(req: NextRequest) {
     }
 
     const { username, email, password, dateOfBirth } = (body ?? {}) as Record<string, unknown>;
+    const { acceptedTerms, legalVersion: shownVersion } = (body ?? {}) as Record<string, unknown>;
 
     if (typeof username !== "string" || typeof email !== "string" || typeof password !== "string") {
       return NextResponse.json({ error: "All fields required" }, { status: 400 });
+    }
+
+    // ── Terms of Service acceptance ─────────────────────────────────────────
+    // The form agrees to the version it displayed. If the operator republished
+    // the terms while the form was open, the acceptance is refused rather than
+    // recorded against text the person never read (409, so the form can say
+    // exactly that). A panel whose settings table cannot be read skips the
+    // check instead of refusing every signup — see currentLegalVersion().
+    const legalVersionNow = await currentLegalVersion();
+    if (legalVersionNow) {
+      const legal = checkLegalAcceptance({
+        accepted: acceptedTerms,
+        shownVersion,
+        currentVersion: legalVersionNow,
+      });
+      if (!legal.ok) {
+        if (legal.failure === "stale") recordFailedLogin(throttleKey);
+        return NextResponse.json(
+          { error: legal.error, code: legal.failure },
+          { status: legal.failure === "stale" ? 409 : 400 }
+        );
+      }
     }
 
     // ── Age verification ────────────────────────────────────────────────────
@@ -172,6 +197,22 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Username or email already exists" }, { status: 409 });
       }
       throw e;
+    }
+
+    // The consent record is evidence, not decoration: it names the exact
+    // version accepted, from which address, at what time. Written before the
+    // welcome email and after the user exists, and never able to fail a signup.
+    if (legalVersionNow) {
+      await recordLegalAcceptance({
+        userId: created.id,
+        surface: "register",
+        version: legalVersionNow,
+        documents: ["terms", "privacy"],
+        email: mail,
+        reference: String(created.id),
+        ipAddress: ip,
+        userAgent: req.headers.get("user-agent"),
+      });
     }
 
     // Best-effort welcome email. SMTP may not be configured and a mail

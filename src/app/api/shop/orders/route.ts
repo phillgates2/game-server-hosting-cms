@@ -7,6 +7,8 @@ import { ensureShopTables, isValidOrderEmail, normalizeCouponCode, couponUsable,
 import { checkRateLimit, type RateLimitEntry } from "@/lib/licensing";
 import { clientIpForRecord } from "@/lib/ip-allowlist";
 import { stripeEnabled, createStripeCheckoutSession } from "@/lib/shop-stripe";
+import { checkLegalAcceptance } from "@/lib/legal";
+import { currentLegalVersion, recordLegalAcceptance } from "@/lib/legal-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,6 +72,31 @@ export async function POST(req: NextRequest) {
 
   if (!isValidOrderEmail(email)) {
     return NextResponse.json({ error: "Enter a valid email — your key is delivered to it." }, { status: 400 });
+  }
+
+  // ── Terms of Service acceptance ───────────────────────────────────────────
+  // Checked before any row is created, so a refused checkout leaves no
+  // half-finished order and no decremented stock behind. The 409 for a stale
+  // version is distinct from the 400 for an unticked box: one means "re-read
+  // and try again", the other "you did not agree".
+  let legalVersionNow: string | null = null;
+  try {
+    legalVersionNow = await currentLegalVersion();
+  } catch {
+    legalVersionNow = null;
+  }
+  if (legalVersionNow) {
+    const legal = checkLegalAcceptance({
+      accepted: b.acceptedTerms,
+      shownVersion: b.legalVersion,
+      currentVersion: legalVersionNow,
+    });
+    if (!legal.ok) {
+      return NextResponse.json(
+        { error: legal.error, code: legal.failure },
+        { status: legal.failure === "stale" ? 409 : 400 }
+      );
+    }
   }
 
   try {
@@ -194,6 +221,25 @@ export async function POST(req: NextRequest) {
 
       if (product.stockQuantity !== null && product.stockQuantity !== undefined) {
         await db.update(shopProducts).set({ stockQuantity: product.stockQuantity - qty }).where(eq(shopProducts.id, product.id));
+      }
+    }
+
+    // The consent is attached to every order it covers (one per cart line), so
+    // an order record can always answer "what did this buyer agree to?" without
+    // a join across a cart that no longer exists. Best-effort: an unwritable
+    // evidence row must not lose a sale that is otherwise complete.
+    if (legalVersionNow) {
+      for (const created of createdOrders) {
+        await recordLegalAcceptance({
+          userId: null,
+          surface: "checkout",
+          version: legalVersionNow,
+          documents: ["terms", "privacy"],
+          email,
+          reference: String(created.id),
+          ipAddress: ip,
+          userAgent: req.headers.get("user-agent"),
+        });
       }
     }
 

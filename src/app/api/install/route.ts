@@ -470,6 +470,24 @@ export async function POST(req: NextRequest) {
         updated_at TIMESTAMP DEFAULT NOW() NOT NULL
       );
 
+      -- Terms of Service / Privacy Policy acceptances.
+      -- Evidence of consent: which published version, from where, when. The
+      -- user reference is ON DELETE SET NULL because the record outlives the
+      -- account (it also evidences a purchase).
+      CREATE TABLE IF NOT EXISTS legal_acceptances (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        surface VARCHAR(16) NOT NULL,
+        version VARCHAR(64) NOT NULL,
+        documents TEXT NOT NULL,
+        email VARCHAR(254),
+        reference VARCHAR(64),
+        ip_address VARCHAR(45),
+        user_agent VARCHAR(256),
+        accepted_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS legal_acceptances_user_id_idx ON legal_acceptances (user_id);
+
       -- Player-count samples (idle + heatmap history)
       CREATE TABLE IF NOT EXISTS player_samples (
         id SERIAL PRIMARY KEY,

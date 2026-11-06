@@ -4564,6 +4564,127 @@ console.log("\nPANELUPDATE self-update rails");
   );
 }
 
+// ── LGL1 rails: Terms of Service & Privacy Policy ──────────────────────────
+console.log("\nLGL1 legal pages: stored, versioned, and safe to render");
+{
+  const fs = require("node:fs") as typeof import("node:fs");
+  const read = (p: string) => fs.readFileSync(new URL(p, import.meta.url), "utf8") as string;
+
+  const legal = read("../src/lib/legal.ts");
+  const view = read("../src/lib/legal-view.ts");
+  const documents = read("../src/lib/legal-documents.ts");
+  const page = read("../src/components/LegalPage.tsx");
+  const api = read("../src/app/api/legal/route.ts");
+  const publicApi = read("../src/app/api/legal/public/route.ts");
+  const register = read("../src/app/api/auth/register/route.ts");
+  const orders = read("../src/app/api/shop/orders/route.ts");
+  const editor = read("../src/components/LegalEditor.tsx");
+
+  // The documents are operator-editable data, not JSX. If the text ever goes
+  // back into a component, publishing a change needs a deploy again — and a
+  // deploy is exactly what an operator does not have at 2am.
+  check(
+    "the documents are stored settings, not hard-coded page copy",
+    /legal_terms_text/.test(legal) && /legal_privacy_text/.test(legal) && !/<h1/.test(documents)
+  );
+
+  // A page every visitor loads must never render operator-supplied HTML.
+  check(
+    "the legal page renders parsed blocks and never injects HTML",
+    !/dangerouslySetInnerHTML/.test(page) && /blocks/.test(view) && /<Inline/.test(page)
+  );
+
+  // `javascript:` in an editor would otherwise become a live link on a public
+  // page — the one place in this feature where an operator could hurt a reader.
+  check(
+    "links in a policy are scheme-checked, and bad ones stay literal text",
+    /isSafeLegalHref/.test(legal) &&
+      /javascript:/.test(read("../tests/legal.test.ts")) &&
+      /https?:\/\/|mailto:/.test(legal)
+  );
+
+  // The version is what makes an acceptance meaningful; it has to be derived
+  // from the text that was actually shown.
+  check(
+    "the acceptance version is fingerprinted from the rendered documents",
+    /legalVersion\([\s\S]*?built\.terms\.rendered,[\s\S]*?built\.privacy\.rendered[\s\S]*?\)/.test(view)
+  );
+
+  // Registration and checkout are the only two places consent exists; both
+  // must refuse a stale acceptance with 409 rather than record what was not read.
+  check(
+    "registration refuses an unaccepted or stale terms version",
+    /checkLegalAcceptance\(/.test(register) &&
+      /acceptedTerms/.test(register) &&
+      /legal\.failure === "stale" \? 409 : 400/.test(register)
+  );
+  check(
+    "checkout refuses before creating orders or holding stock",
+    /checkLegalAcceptance\(/.test(orders) &&
+      orders.indexOf("checkLegalAcceptance(") < orders.indexOf("ensureShopTables()") &&
+      /legal\.failure === "stale" \? 409 : 400/.test(orders)
+  );
+  check(
+    "both surfaces record which version was accepted, with the address and time",
+    /recordLegalAcceptance\(/.test(register) &&
+      /recordLegalAcceptance\(/.test(orders) &&
+      /userAgent: req\.headers\.get\("user-agent"\)/.test(register) &&
+      /userAgent: req\.headers\.get\("user-agent"\)/.test(orders)
+  );
+
+  // A settings-table failure must not close registration or the shop.
+  check(
+    "an unresolvable version fails open, never closed",
+    /return null;/.test(read("../src/lib/legal-store.ts")) &&
+      /if \(legalVersionNow\) \{/.test(register) &&
+      /if \(legalVersionNow\) \{/.test(orders)
+  );
+
+  // The public endpoint exists only so a form can learn the version; it must
+  // not become a second copy of the documents (nor leak admin data).
+  check(
+    "the public legal endpoint exposes a version and paths, nothing else",
+    /version: legal\.version\.version/.test(publicApi) &&
+      !/legal_terms_text|legal_privacy_text|acceptanceCounts/.test(publicApi)
+  );
+
+  // The editor is admin-only and audited: who changed the terms, and when.
+  check(
+    "the editor requires panel.settings and audits every save",
+    /hasPermission\(auth\.userId, "panel\.settings"/.test(api) &&
+      /action: "legal\.update"/.test(api) &&
+      /buildLegalDocuments|loadLegalDocuments/.test(api)
+  );
+  check(
+    "the editor warns before publishing a new version",
+    /Published/.test(editor) && /acceptanceCounts/.test(editor) && /new version/i.test(editor)
+  );
+
+  // "Undo" must not depend on a backup: blank text means the shipped default.
+  check(
+    "clearing a document restores the shipped text rather than a blank page",
+    /const isDefault = raw === ""/.test(view) && /DEFAULT_LEGAL_TEXTS\[id\]/.test(view)
+  );
+
+  // A hosting business holds other people's data; the shipped policy must name
+  // the consumer-law floor and the subprocessors an operator actually enables.
+  check(
+    "the shipped terms keep the Australian Consumer Law floor and the 16+ floor",
+    /Australian Consumer Law/.test(documents) &&
+      /at least 16/.test(documents) &&
+      /Online Safety Amendment/.test(documents)
+  );
+
+  // The evidence table must exist on a fresh install, and must not take the
+  // consent record with it when an account is deleted.
+  const install = read("../src/app/api/install/route.ts");
+  check(
+    "a fresh install creates legal_acceptances with a SET NULL user reference",
+    /CREATE TABLE IF NOT EXISTS legal_acceptances/.test(install) &&
+      /REFERENCES users\(id\) ON DELETE SET NULL/.test(install)
+  );
+}
+
 console.log(`\n${checks - failures}/${checks} checks passed`);
 if (failures > 0) {
   console.error(`${failures} security check(s) FAILED`);

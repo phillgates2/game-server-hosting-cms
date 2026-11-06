@@ -6,6 +6,7 @@ import { useToast } from "@/components/ToastProvider";
 import { fetchWithTimeout, mutate } from "@/lib/api-client";
 import { parseSiteHash, siteRouteToHash, type SiteRoute } from "@/lib/site-url";
 import PublicShop from "@/components/PublicShop";
+import LegalEditor from "@/components/LegalEditor";
 import {
   MAX_PUBLIC_NAV_LABEL_LENGTH,
   MAX_PUBLIC_NAV_LINKS,
@@ -843,6 +844,8 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
                 </div>
               </div>
 
+              <LegalEditor saving={editorSaving} onNotify={setEditorMsg} />
+
               <div className="sticky bottom-0 z-10 -mx-4 flex flex-col items-start gap-3 border-t border-border bg-bg-primary/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:flex-row sm:items-center sm:gap-4 sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
                 <button type="submit" disabled={editorSaving} className="px-6 py-2.5 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium disabled:opacity-50 w-full sm:w-auto">
                   {editorSaving ? "Saving..." : "💾 Save Changes"}
@@ -1167,6 +1170,8 @@ export default function PublicSite({ user, onLoginClick, onDashboardClick, onLog
           <div className="flex gap-3 sm:gap-4 flex-wrap justify-center">
             {user ? (<><button onClick={onDashboardClick} className="hover:text-text-primary transition-colors">Control Panel</button><button onClick={onLogout} className="hover:text-text-primary transition-colors">Logout</button></>)
               : (<button onClick={onLoginClick} className="hover:text-text-primary transition-colors">Login</button>)}
+            <a href="/terms" className="hover:text-text-primary transition-colors">Terms</a>
+            <a href="/privacy" className="hover:text-text-primary transition-colors">Privacy</a>
             {navLinks.map((link, index) => {
               const target = publicNavTabForHref(link.href);
               const key = `footer-${link.label}-${link.href}-${index}`;
