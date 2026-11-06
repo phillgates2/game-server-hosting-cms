@@ -790,7 +790,8 @@ optional argument (`--no-backup`), so the panel can never point the updater at
 another directory, branch or repository. If the helper is missing, the tab says
 so and shows the command to run instead. `install.sh` and every update install
 it; one `sudo bash public/update.sh` on an older install is enough to enable the
-button.
+button — the updater prints *Panel update helper installed* when it has just done
+so, and the command to retry when it could not.
 
 ```bash
 # From the panel: Administration → Updates → Update panel now

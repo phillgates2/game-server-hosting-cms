@@ -4434,6 +4434,48 @@ console.log("\nPANELUPDATE self-update rails");
         !/NOPASSWD:[^\n]*update\.sh/.test(text)
     )
   );
+  // The operator only learns the button exists from one line of updater output,
+  // so it must say which case they are in — and it must only ever claim the
+  // helper is installed when it actually is.
+  check(
+    "a first-time helper install announces the Updates tab, a refresh does not",
+    /Panel update helper installed — this panel can update itself/.test(updater) &&
+      /HELPER_WAS_PRESENT/.test(updater) &&
+      /Panel update helper refreshed/.test(updater) &&
+      /Look for Administration → Updates once this update has finished/.test(updater)
+  );
+  {
+    const reporter = updater.slice(
+      updater.indexOf("report_self_update_helper() {"),
+      updater.indexOf("report_self_update_helper early")
+    );
+    check(
+      "the helper is only announced inside the success branch",
+      reporter.length > 0 &&
+        reporter.indexOf("Panel update helper installed") >
+          reporter.indexOf("if [[ $status -eq 0 ]]")
+    );
+    check(
+      "a failed helper install names the command that fixes it",
+      /Fix the cause above, then re-run: sudo bash \$INSTALL_DIR\/public\/update\.sh/.test(reporter)
+    );
+  }
+  check(
+    "a missing template is quiet before the pull and reported after it",
+    /return 2/.test(updater) &&
+      /report_self_update_helper early/.test(updater) &&
+      /report_self_update_helper final/.test(updater) &&
+      /\$status -eq 2 && "\$phase" == "early"/.test(updater)
+  );
+  check(
+    "both installers refuse a helper that does not point at this install",
+    [installer, updater].every(
+      (text) =>
+        /grep -qF "UPDATER='\$INSTALL_DIR\/public\/update\.sh'"/.test(text) &&
+        /bash -n "\$new_wrapper"/.test(text)
+    )
+  );
+
   check(
     "a sudoers file that does not validate is never installed",
     [installer, updater].every(

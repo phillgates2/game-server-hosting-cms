@@ -377,19 +377,45 @@ sed_replacement() {
   printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'
 }
 
+# Whether both files already existed. Set before anything is written so the
+# caller can tell a first-time install (the Updates tab appears for the first
+# time) from a routine refresh (nothing changes for the operator).
+HELPER_WAS_PRESENT=false
+
 install_self_update_helper() {
   local new_wrapper="$SELF_UPDATE_WRAPPER.$$.new"
   local new_sudoers="$SELF_UPDATE_SUDOERS.$$.new"
 
+  if [[ -f "$SELF_UPDATE_WRAPPER" && -f "$SELF_UPDATE_SUDOERS" ]]; then
+    HELPER_WAS_PRESENT=true
+  fi
+
   # The template ships in the repository, so the wrapper always matches the
   # version of the panel that is installed. Older checkouts do not have it: the
-  # caller tries again after the code is pulled.
+  # caller tries again after the code is pulled, which is why this is a distinct
+  # status rather than a plain failure.
   if [[ ! -f "$SELF_UPDATE_TEMPLATE" ]]; then
-    warn "Skipping the panel update helper: $SELF_UPDATE_TEMPLATE is missing"
-    return 1
+    log "Panel update helper template not in this checkout yet ($SELF_UPDATE_TEMPLATE)"
+    return 2
   fi
   sed "s|@INSTALL_DIR@|$(sed_replacement "$INSTALL_DIR")|g" "$SELF_UPDATE_TEMPLATE" > "$new_wrapper" \
     || { rm -f "$new_wrapper"; return 1; }
+
+  # Fail closed. This file runs as root through sudo, so a render that did not
+  # land on this install — an unsubstituted placeholder, a broken substitution —
+  # must never be installed: it would point the panel's update button at some
+  # other script.
+  if ! grep -qF "UPDATER='$INSTALL_DIR/public/update.sh'" "$new_wrapper"; then
+    warn "Rendered update helper does not point at $INSTALL_DIR — refusing to install it"
+    rm -f "$new_wrapper"
+    return 1
+  fi
+  if ! bash -n "$new_wrapper" > /dev/null 2>&1; then
+    warn "Rendered update helper is not valid shell — refusing to install it"
+    rm -f "$new_wrapper"
+    return 1
+  fi
+
   chmod 0755 "$new_wrapper" && chown root:root "$new_wrapper" \
     || { rm -f "$new_wrapper"; return 1; }
   mv -f "$new_wrapper" "$SELF_UPDATE_WRAPPER" || { rm -f "$new_wrapper"; return 1; }
@@ -418,11 +444,40 @@ EOF
   return 0
 }
 
-if install_self_update_helper; then
-  log "Panel update helper refreshed ($SELF_UPDATE_WRAPPER)"
-else
-  warn "Could not install the panel update helper — the panel's update button will stay disabled"
-fi
+# Installs the helper and says what it means for the operator. Run twice: before
+# the pull for installs that already have the template, and again after it so an
+# install older than this script picks the helper up from the update it is
+# running. "early" keeps the missing-template case quiet, because the retry is
+# still to come.
+report_self_update_helper() {
+  local phase="${1:-final}"
+  local status=0
+  install_self_update_helper || status=$?
+
+  if [[ $status -eq 0 ]]; then
+    if [[ "$HELPER_WAS_PRESENT" == "true" ]]; then
+      log "Panel update helper refreshed ($SELF_UPDATE_WRAPPER)"
+    else
+      ok "Panel update helper installed — this panel can update itself from the browser"
+      log "  Look for Administration → Updates once this update has finished."
+    fi
+    return 0
+  fi
+
+  # Expected before the pull on an install that predates the template.
+  if [[ $status -eq 2 && "$phase" == "early" ]]; then
+    return 0
+  fi
+
+  if [[ $status -eq 2 ]]; then
+    warn "Panel update helper not installed: $SELF_UPDATE_TEMPLATE is missing from this checkout"
+  else
+    warn "Could not install the panel update helper — the panel's Updates tab will stay disabled"
+  fi
+  warn "Fix the cause above, then re-run: sudo bash $INSTALL_DIR/public/update.sh"
+}
+
+report_self_update_helper early
 
 # Shell-quoted form of the install dir, for use inside `su -c "..."` strings
 # (a custom --install-dir with spaces would otherwise break those commands).
@@ -835,11 +890,7 @@ ok "Updated: $CURRENT_COMMIT → $NEW_COMMIT"
 # The checkout just changed, so the self-update helper is refreshed here as
 # well: an install that is updating for the first time only has the new
 # template after this pull.
-if install_self_update_helper; then
-  log "Panel update helper refreshed ($SELF_UPDATE_WRAPPER)"
-else
-  warn "Panel update helper not available — the panel's update button will stay disabled"
-fi
+report_self_update_helper final
 
 # ── Migrate .env for newer requirements ──────────────────────────────────────
 # As of 1.5.0 JWT_SECRET is mandatory in production (the app refuses to boot
