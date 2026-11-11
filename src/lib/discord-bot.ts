@@ -422,6 +422,23 @@ let client: ClientView | null = null;
 let xpTimer: NodeJS.Timeout | null = null;
 let retryTimer: NodeJS.Timeout | null = null;
 let starting = false;
+let waitingForConfig = false;
+
+/**
+ * Arm one reconnect/configuration check. The status-board REST calls can work
+ * without a gateway connection, so a panel may appear partly operational even
+ * when the chat bot was started before its token was saved. Keep checking the
+ * database so that configuration saved later is picked up without a process
+ * restart.
+ */
+function scheduleRetry(): void {
+  if (retryTimer) return;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    void boot();
+  }, RETRY_DELAY_MS);
+  retryTimer.unref?.();
+}
 
 /** discord.js builders, cached after first load (module-level, not bundled). */
 interface ButtonBuilderLike {
@@ -454,6 +471,7 @@ export function startDiscordBot(): () => void {
 
 export async function stopDiscordBot(): Promise<void> {
   starting = false;
+  waitingForConfig = false;
   if (xpTimer) { clearInterval(xpTimer); xpTimer = null; }
   if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   const c = client;
@@ -462,23 +480,40 @@ export async function stopDiscordBot(): Promise<void> {
   log.info("stopped");
 }
 
+/**
+ * Re-read credentials and replace the gateway connection. Called after the
+ * Discord settings endpoint saves a token or guild ID, so commands become
+ * active immediately (and a replaced token does not leave the old client
+ * running until the panel is restarted).
+ */
+export async function restartDiscordBot(): Promise<void> {
+  await stopDiscordBot();
+  if (process.env.GSM_DISABLE_DISCORD_BOT !== "true") startDiscordBot();
+}
+
 async function boot(): Promise<void> {
   try {
     const { getDiscordSettings } = await import("./discord-settings");
     const cfg = await getDiscordSettings();
     if (!cfg.botToken || !cfg.guildId) {
-      log.info("no bot token / guild configured — idling (configure Settings → Discord to enable commands)");
+      if (!waitingForConfig) {
+        log.info("no bot token / guild configured — waiting for Settings → Discord configuration");
+        waitingForConfig = true;
+      }
       starting = false;
+      scheduleRetry();
       return;
     }
+    waitingForConfig = false;
 
     // discord.js is big and only needed by the gateway; defer the import so
     // the panel boots fast and the next build stays lean.
     const discordMod = (await runtimeImport("discord.js")) as {
-      Client: new (opts: { intents: number[] }) => GatewayClient;
+      Client: new (opts: { intents: number[]; partials: number[] }) => GatewayClient;
       GatewayIntentBits: Record<string, number>;
+      Partials: Record<string, number>;
     };
-    const { Client, GatewayIntentBits } = discordMod;
+    const { Client, GatewayIntentBits, Partials } = discordMod;
     const discordClient = new Client({
       intents: [
         GatewayIntentBits.Guilds,
@@ -487,6 +522,10 @@ async function boot(): Promise<void> {
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.MessageContent,
       ],
+      // DM channels are not cached when the gateway starts. Without this
+      // partial discord.js silently drops DM messageCreate events, which makes
+      // the DM-only !etverify command appear dead while guild commands work.
+      partials: [Partials.Channel],
     });
     client = asClient(discordClient);
     void Client;
@@ -530,15 +569,9 @@ async function boot(): Promise<void> {
     } else {
       log.error(`login failed: ${msg.slice(0, 300)}`);
     }
-    // Self-heal: retry once a minute; a settings save or a fixed intent shows
-    // up without a panel restart. Guarded so only one retry arms.
-    if (!retryTimer) {
-      retryTimer = setTimeout(() => {
-        retryTimer = null;
-        void boot();
-      }, RETRY_DELAY_MS);
-      retryTimer.unref?.();
-    }
+    // Self-heal: retry once a minute; a fixed token or intent takes effect
+    // without a panel restart. Guarded so only one retry arms.
+    scheduleRetry();
   }
 }
 

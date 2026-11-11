@@ -189,6 +189,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Channel updates use Discord's REST API and can succeed while the gateway
+    // client (which receives !commands) is offline. In particular, the bot may
+    // have started before these credentials existed. Reconnect as soon as the
+    // gateway credentials change instead of requiring a panel restart.
+    if (updates.some(({ key }) => key === "discord_bot_token" || key === "discord_guild_id")) {
+      const { restartDiscordBot } = await import("@/lib/discord-bot");
+      await restartDiscordBot();
+    }
+
     return NextResponse.json({ ok: true, updated: updates.length });
   } catch (e: unknown) {
     return apiError(e, "Could not save Discord settings", 500);
