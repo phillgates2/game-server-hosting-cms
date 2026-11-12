@@ -6,6 +6,47 @@ All notable changes to GameServer Manager are documented here.
 
 ## [Unreleased]
 
+### 🔧 The update button starts the updater — or says why it could not
+
+**Administration → Updates → Update panel now** answered *"Update started"* and
+then did nothing: no step, no output, no restart, the same commit afterwards.
+
+The panel started the updater through a shell line that sent its output to
+`/var/lib/gsm-panel-update/spawn.log`. That directory is root's — the updater
+creates it `root:root 0755` — and the panel runs as `gsm`. A shell opens a
+redirect *before* it runs the command, so with the file uncreatable the updater
+was never executed; the launching shell had already backgrounded the job and
+exited 0, and its error went to `/dev/null`. Every install made by `install.sh`
+runs the panel as `gsm`, which can never create that file — the directory is
+missing on a fresh install and root's after the first update — so the button
+did nothing on all of them.
+
+- **Starting the updater no longer depends on a file.** The launch line
+  redirects nothing; the panel opens the log itself and hands it down. The log
+  and a small launch record live in the panel's own log directory
+  (`/var/log/gsm-panel`, or `GSM_UPDATE_LAUNCH_DIR`), then in a private temporary
+  directory, and with nowhere to write at all the updater starts regardless.
+  The panel no longer writes anything into root's state directory.
+- **"Started" means started.** The launcher hands back the process it started,
+  and the panel watches it until the updater reports its first step. If it
+  exits before that — sudo refusing, the fetch failing, files edited on the
+  server — the request answers **500** *"The update did not start: …"* in the
+  updater's own words, and the tab shows that with the updater's output. The
+  previous run's *"updated successfully"* is no longer left on screen as if it
+  described this attempt.
+- **Between the click and the first step the tab says *Starting the update…***
+  and refuses a second click; two requests arriving together cannot both launch.
+- **The restart is never reported as an error.** The request is answered the
+  moment the updater reports, which is before it stops the panel, and the tab
+  shows that answer instead of asking again. When a request does go unanswered,
+  the tab waits and reports what the panel says once it is back — started, came
+  to nothing, finished or failed — rather than guessing.
+- **A failed update publishes its real exit code.** The updater's EXIT trap read
+  `$?` after its own cleanup, so every failure was recorded as `"exitCode": 0`.
+- **Installs that already have the button need one more update from a shell**,
+  because the broken button cannot deliver its own fix: `sudo gsm update`, or
+  `sudo bash /opt/gsm-panel/public/update.sh`. From then on the button works.
+
 ### 📜 Terms of Service and Privacy Policy, with consent that can be proved
 
 A hosting panel that takes money and holds other people's data needs both

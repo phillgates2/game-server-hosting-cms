@@ -7,6 +7,7 @@ import { mutate } from "@/lib/api-client";
 import {
   formatWhen,
   updateProgress,
+  updateStepLabel,
   updateSummary,
   type UpdateState,
   type UpdateTone,
@@ -44,6 +45,11 @@ interface UpdateStatus {
 const POLL_RUNNING_MS = 2_500;
 const POLL_IDLE_MS = 15_000;
 
+/** A whole status, as GET sends it and as POST includes in its answer. */
+function isStatus(data: Partial<UpdateStatus> | null): data is UpdateStatus {
+  return !!data && typeof data === "object" && !!data.panel && !!data.updater && !!data.summary;
+}
+
 const TONE_STYLES: Record<UpdateTone["tone"], string> = {
   none: "border-border bg-bg-secondary/60 text-text-secondary",
   running: "border-accent/40 bg-accent/10 text-accent",
@@ -68,11 +74,20 @@ export default function UpdatesPanel() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
+  // The request that starts an update got no answer at all: see startUpdate.
+  const [unconfirmed, setUnconfirmed] = useState(false);
   const [starting, setStarting] = useState(false);
   const [startedHere, setStartedHere] = useState(false);
+  // The commit the panel was on when this page first heard from it. A different
+  // one later means this page's own code is from before an update.
+  const [commitAtOpen, setCommitAtOpen] = useState<string | null>(null);
   const [noBackup, setNoBackup] = useState(false);
   const [probing, setProbing] = useState(false);
   const logRef = useRef<HTMLPreElement | null>(null);
+
+  // Set while a start request is unanswered: the run that was on screen before
+  // the click, so the next status can tell whether anything came of it.
+  const unansweredRef = useRef<{ startedAt: string | null } | null>(null);
 
   // Read inside `load` (an async callback) without making it a dependency of
   // itself; updated in an effect so render stays pure.
@@ -80,6 +95,19 @@ export default function UpdatesPanel() {
   useEffect(() => {
     runningRef.current = status?.running === true;
   }, [status?.running]);
+
+  // Everything a status from the panel settles, whichever request brought it.
+  const applyStatus = useCallback((data: UpdateStatus) => {
+    setStatus(data);
+    setLoadError(null);
+    setReconnecting(false);
+    setUnconfirmed(false);
+    setCommitAtOpen((seen) => seen ?? data.panel.commit);
+    // Not left to the effect above: the very next request may already fail
+    // because the updater has stopped the panel, and whether that is an error
+    // or the expected restart is decided by this.
+    runningRef.current = data.running === true;
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -93,10 +121,34 @@ export default function UpdatesPanel() {
         return;
       }
       const data = (await res.json()) as UpdateStatus;
-      setStatus(data);
-      setLoadError(null);
-      setReconnecting(false);
-      if (data.state?.status === "success" && runningRef.current) {
+      const wasRunning = runningRef.current;
+      const unanswered = unansweredRef.current;
+      unansweredRef.current = null;
+      applyStatus(data);
+
+      if (unanswered) {
+        // The click was never answered; this is the first word from the panel
+        // since. Say plainly what became of it.
+        const sameRunAsBefore = (data.state?.startedAt ?? null) === unanswered.startedAt;
+        if (data.running) {
+          setStartedHere(true);
+          toast.info("Update started", "The panel is answering again and the update is running.");
+        } else if (sameRunAsBefore) {
+          toast.warning(
+            "The update did not start",
+            "The panel is answering again and reports that no update ran. Try again."
+          );
+        } else if (data.state?.status === "success") {
+          setStartedHere(true);
+          toast.success("Panel updated", "The panel is back on the new version.");
+        } else {
+          const outcome = updateSummary(data.state, data.now);
+          toast.error(outcome.title, outcome.detail);
+        }
+        return;
+      }
+
+      if (data.state?.status === "success" && wasRunning) {
         toast.success("Panel updated", "The panel is back on the new version.");
       }
     } catch {
@@ -105,7 +157,7 @@ export default function UpdatesPanel() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, applyStatus]);
 
   useEffect(() => {
     // Deferred: loading sets state, which must not happen synchronously in an
@@ -143,21 +195,45 @@ export default function UpdatesPanel() {
     });
     if (!ok) return;
 
+    const runBeforeClick = status.state?.startedAt ?? null;
     setStarting(true);
-    const result = await mutate<{ state?: UpdateState; startedAt?: string }>("/api/system/update", {
+    const result = await mutate<Partial<UpdateStatus>>("/api/system/update", {
       method: "POST",
       body: JSON.stringify({ confirm: "update", noBackup }),
     });
     setStarting(false);
 
+    // A started update and one that stopped at once are both answered with the
+    // status as of that moment. Show it rather than asking again: within a
+    // second or two of starting, the updater stops the panel, and a page that
+    // still believed nothing was running would report that as an error.
+    const answered = isStatus(result.data) ? result.data : null;
+    if (answered) applyStatus(answered);
+
     if (!result.ok) {
+      if (result.status === 0) {
+        // No answer at all. The updater can stop the panel while this request
+        // is still open, so silence may well mean "it started". The panel knows
+        // which; keep asking it rather than announcing a failure that might
+        // not be one. `load` reports the outcome once the panel answers.
+        unansweredRef.current = { startedAt: runBeforeClick };
+        setUnconfirmed(true);
+        setReconnecting(true);
+        toast.info(
+          "Waiting for the panel",
+          "It did not answer the request. If the update started, the panel is restarting; this page keeps checking."
+        );
+        void load();
+        return;
+      }
       toast.error("Could not start the update", result.error ?? "Try again in a moment.");
+      if (!answered) void load();
       return;
     }
 
     setStartedHere(true);
     toast.info("Update started", "You can watch the progress here; the panel restarts at the end.");
-    void load();
+    if (!answered) void load();
   }
 
   async function recheck() {
@@ -183,6 +259,8 @@ export default function UpdatesPanel() {
   const progress = status ? updateProgress(status.state) : 0;
   const canUpdate = status?.updater.canUpdate === true && !running;
   const state = status?.state ?? null;
+  const codeChanged =
+    commitAtOpen !== null && !!status?.panel.commit && status.panel.commit !== commitAtOpen;
 
   return (
     <div className="space-y-5">
@@ -236,8 +314,9 @@ export default function UpdatesPanel() {
 
         {reconnecting && (
           <div role="status" className="mb-4 rounded-xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm text-accent">
-            The panel is restarting to finish the update. This page will reconnect
-            by itself — nothing needs to be clicked.
+            {unconfirmed
+              ? "The panel did not answer the request to start the update. If the update started, the panel is restarting. This page keeps checking and will show what happened — nothing needs to be clicked."
+              : "The panel is restarting to finish the update. This page will reconnect by itself — nothing needs to be clicked."}
           </div>
         )}
 
@@ -245,15 +324,22 @@ export default function UpdatesPanel() {
           <div className={`rounded-xl border px-4 py-3 text-sm ${TONE_STYLES[tone]}`}>
             <p className="font-medium">{summary.title}</p>
             {summary.detail && <p className="mt-1 text-xs opacity-90">{summary.detail}</p>}
+            {state?.status === "failed" && state.phase === "launch" && status && (
+              <p className="mt-2 text-xs opacity-90">
+                The updater stopped before its first step, so the panel was never
+                stopped and is still running the version shown above. Whatever the
+                updater printed is below; to watch it first-hand, run{" "}
+                <code className="font-mono text-[11px]">sudo bash {status.updater.path}</code>{" "}
+                from a shell.
+              </p>
+            )}
           </div>
         )}
 
         {running && (
           <div className="mt-4">
             <div className="mb-1 flex items-center justify-between text-[11px] text-text-muted">
-              <span>
-                Step {state?.step ?? 0}/{state?.totalSteps ?? 7}: {state?.message || state?.phase || "starting"}
-              </span>
+              <span>{state ? updateStepLabel(state) : "Starting"}</span>
               <span>{progress}%</span>
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-bg-tertiary" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
@@ -293,7 +379,7 @@ export default function UpdatesPanel() {
           </label>
         </div>
 
-        {startedHere && tone === "ok" && (
+        {((startedHere && tone === "ok") || codeChanged) && !running && (
           <button
             type="button"
             onClick={() => window.location.reload()}
@@ -343,7 +429,9 @@ export default function UpdatesPanel() {
         <pre ref={logRef} className="mt-3 max-h-80 overflow-auto rounded-xl border border-border bg-bg-secondary/70 p-3 text-[11px] leading-relaxed text-text-secondary">
           {status?.logTail
             ? status.logTail
-            : "No update has been run from the panel yet. The log appears here as soon as one starts."}
+            : state
+              ? "The updater has not printed anything."
+              : "No update has been run from the panel yet. The log appears here as soon as one starts."}
         </pre>
       </section>
     </div>

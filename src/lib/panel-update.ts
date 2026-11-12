@@ -13,8 +13,14 @@
  *     child process handle surviving that. Reading a file also means progress
  *     survives the restart, so the first page load afterwards can say what
  *     happened.
+ *   - The updater only starts publishing once it is about to change something.
+ *     Before that — sudo, the fetch, the pre-flight checks — the panel has only
+ *     its own account of what it launched: a launch record and the launched
+ *     process's output, kept where the panel's user can write. `resolveUpdateStatus`
+ *     decides which of the two accounts is the truth at any moment.
  *
- * Parsing and the command construction below are pure and unit-tested.
+ * Parsing, the status decision and the command construction below are pure and
+ * unit-tested.
  */
 
 /** Where the updater writes its progress (readable by the panel's user). */
@@ -26,11 +32,25 @@ export const TOTAL_UPDATE_STEPS = 7;
 /** A run that has not written progress for this long is abandoned, not running. */
 export const UPDATE_STALE_MS = 45 * 60 * 1000;
 /**
- * Output that happened before the updater took over — a sudo refusal, a missing
- * helper. It is kept separately because the updater truncates its own log when
- * it starts.
+ * Where the panel keeps its own account of an update it started: the output of
+ * the process it launched (a sudo refusal, a failed fetch, a pre-flight check
+ * that said no) and a note of when it launched it.
+ *
+ * Deliberately NOT the updater's state directory. That one belongs to root: the
+ * panel can read it and nothing else. The button first redirected the launch
+ * output into it, the shell could not create the file, and a failed redirect
+ * means the command is never executed — so the button reported "started" and
+ * nothing ran. The panel's log directory is created by the installer and owned
+ * by the panel's user.
  */
-export const DEFAULT_UPDATE_SPAWN_LOG = "/var/lib/gsm-panel-update/spawn.log";
+export const DEFAULT_UPDATE_LAUNCH_DIR = "/var/log/gsm-panel";
+export const UPDATE_LAUNCH_LOG_NAME = "panel-update-launch.log";
+export const UPDATE_LAUNCH_RECORD_NAME = "panel-update-launch.json";
+/**
+ * How long a launch whose process cannot be checked may stay silent before it
+ * is called failed. Generous: the fetch happens before the first progress.
+ */
+export const UPDATE_LAUNCH_GRACE_MS = 2 * 60 * 1000;
 /** Keep log tails small enough to render and to stream on every poll. */
 export const UPDATE_LOG_TAIL_BYTES = 12_000;
 
@@ -49,6 +69,28 @@ export interface UpdateState {
   fromCommit: string | null;
   toCommit: string | null;
   exitCode: number | null;
+  error: string | null;
+}
+
+/**
+ * The panel's note of an update it launched. Written by the panel, for the
+ * panel: the updater never reads it.
+ */
+export interface UpdateLaunch {
+  /** When the panel launched the updater. */
+  launchedAt: string;
+  /** The detached updater process, when the launcher reported one. */
+  pid: number | null;
+  /**
+   * That process's kernel start time (clock ticks since boot). A process id is
+   * reused eventually; the pair is not, so a later stranger with the same id
+   * is not mistaken for the updater.
+   */
+  startTime: string | null;
+  noBackup: boolean;
+  /** Whether the launched process's output was captured beside this record. */
+  logged: boolean;
+  /** Why the launch failed, when the panel itself knows (it could not run the launcher). */
   error: string | null;
 }
 
@@ -112,6 +154,37 @@ export function parseUpdateState(raw: unknown): UpdateState | null {
   };
 }
 
+/** Linux never hands out a process id above this (PID_MAX_LIMIT). */
+const MAX_PROCESS_ID = 4_194_304;
+
+/** Parse the panel's launch record. Malformed is `null`, as for the state file. */
+export function parseUpdateLaunch(raw: unknown): UpdateLaunch | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const input = raw as Record<string, unknown>;
+
+  const launchedAt = isoDate(input.launchedAt);
+  if (!launchedAt) return null;
+
+  // The id is only ever probed with signal 0, but 0, 1 and negative ids mean
+  // "a whole group" or "init" to kill(2), which is never what was launched.
+  const pidRaw = input.pid;
+  const pid =
+    typeof pidRaw === "number" && Number.isInteger(pidRaw) && pidRaw > 1 && pidRaw <= MAX_PROCESS_ID
+      ? pidRaw
+      : null;
+  const startRaw = input.startTime;
+  const startTime = typeof startRaw === "string" && /^\d{1,24}$/.test(startRaw) ? startRaw : null;
+
+  return {
+    launchedAt,
+    pid,
+    startTime,
+    noBackup: input.noBackup === true,
+    logged: input.logged === true,
+    error: text(input.error, 300) || null,
+  };
+}
+
 /** True when the updater is still working: running, and recently updated. */
 export function updateIsRunning(
   state: UpdateState | null,
@@ -144,6 +217,15 @@ export function formatDuration(ms: number): string {
   return `${minutes}m ${String(rest).padStart(2, "0")}s`;
 }
 
+/**
+ * "Step 3/7: Installing dependencies" — or just what is happening, before the
+ * first step: there is no step number to show yet, and "Step 0/7" reads as stuck.
+ */
+export function updateStepLabel(state: UpdateState): string {
+  const what = state.message || state.phase;
+  return state.step > 0 ? `Step ${state.step}/${state.totalSteps}: ${what}` : what;
+}
+
 /** The one sentence the Updates panel shows at the top. */
 export function updateSummary(state: UpdateState | null, nowMs: number): UpdateTone {
   if (!state) {
@@ -162,8 +244,8 @@ export function updateSummary(state: UpdateState | null, nowMs: number): UpdateT
   if (updateIsRunning(state, nowMs)) {
     return {
       tone: "running",
-      title: "Updating the panel…",
-      detail: `Step ${state.step}/${state.totalSteps}: ${state.message || state.phase}. The panel restarts at the end, so this page will reconnect.`,
+      title: state.phase === "starting" ? "Starting the update…" : "Updating the panel…",
+      detail: `${updateStepLabel(state)}. The panel restarts at the end, so this page will reconnect.`,
     };
   }
 
@@ -184,6 +266,22 @@ export function updateSummary(state: UpdateState | null, nowMs: number): UpdateT
           ? `${state.fromCommit} → ${state.toCommit}`
           : null,
         duration ? `took ${duration}` : null,
+        state.finishedAt ? formatWhen(state.finishedAt, nowMs) : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    };
+  }
+
+  // The updater stopped before its first step: the panel was never stopped and
+  // is still running the version it was. Say that, rather than "failed", which
+  // reads as "half-applied".
+  if (state.phase === "launch") {
+    return {
+      tone: "failed",
+      title: "The update did not start",
+      detail: [
+        state.error || state.message,
         state.finishedAt ? formatWhen(state.finishedAt, nowMs) : null,
       ]
         .filter(Boolean)
@@ -261,24 +359,30 @@ export function selfUpdateCommand(options: {
 /**
  * Wrap a command so it survives the panel restart it causes.
  *
- * PM2 restarts the panel, and anything still parented to it dies with it. The
- * updater therefore runs under `setsid nohup … &` from a shell that exits
- * immediately: it is reparented away from the panel before the restart can
- * reach it.
+ * PM2 stops the panel by killing its whole process tree, so anything still
+ * parented to the panel dies with it. The updater therefore runs under
+ * `setsid nohup … &` from a shell that exits immediately: it is reparented away
+ * from the panel before the restart can reach it.
+ *
+ * The line redirects no output, on purpose. A shell performs a redirect before
+ * it executes the command, and when the redirect fails the command never runs
+ * — while the launching shell, having backgrounded it, still exits 0. That is
+ * how the button once reported "started" without starting anything. The caller
+ * passes an already-open log (or nothing at all) as this shell's stdout and
+ * stderr instead, so starting the updater cannot depend on a file.
+ *
+ * File descriptor 3 carries one line back: the process id of the detached
+ * command, which is what lets the panel tell "still starting" from "exited
+ * without doing anything". The command itself gets that descriptor closed, so
+ * the caller's read ends the moment this shell exits.
  */
-export function detachedUpdateCommand(
-  command: UpdateCommand,
-  logPath: string
-): { file: string; args: string[] } {
+export function detachedUpdateCommand(command: UpdateCommand): { file: string; args: string[] } {
   const line = [
     "setsid",
     "nohup",
     [command.file, ...command.args].map(shellQuote).join(" "),
-    // Truncate: this file only describes the current attempt.
-    ">",
-    shellQuote(logPath),
-    "2>&1",
-    "< /dev/null &",
+    "< /dev/null 3>&- &",
+    'echo "$!" >&3',
   ].join(" ");
 
   return { file: "/bin/bash", args: ["-c", line] };
@@ -332,35 +436,52 @@ export function readInstallInfo(text: string | null): {
   };
 }
 
-/** The last line of output that says something, for a launch failure. */
-export function lastMeaningfulLine(text: string, max = 300): string {
-  const lines = (text ?? "")
+/** The lines of output that say something. */
+function meaningfulLines(text: string): string[] {
+  return (text ?? "")
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean);
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    const line = lines[i];
-    // Progress noise from the updater's own banner is not an explanation.
-    if (/^[-━=─\s]+$/.test(line)) continue;
-    return line.slice(0, max);
-  }
-  return "";
+    // Rules and box edges from the updater's own banner are not an explanation.
+    .filter((line) => line !== "" && !/^[-=\s\u2500-\u257f]+$/.test(line));
 }
 
+/** How the updater prefixes its lines: log, ok, warn and err in public/update.sh. */
+const OUTPUT_MARK = /^\[(?:GSM|✓|!|✗)\]\s*/;
+const ERROR_MARK = /^\[✗\]\s*/;
+
 /**
- * When the updater never wrote a state file but something was printed, the
- * attempt still failed — say so with the output, instead of pretending nothing
- * happened.
+ * Why a launch stopped, in the updater's own words.
+ *
+ * The updater marks what went wrong with "[✗]", and often says it in two
+ * lines — what is wrong, then what to do about it — with detail in between:
+ *
+ *   [✗] Local tracked code changes would be overwritten:
+ *    M README.md
+ *   [✗] Commit or back up those changes, then run the updater again.
+ *
+ * The last line alone is advice without a problem, so the marked lines are
+ * read together. Output with no such line — sudo's refusal, the helper's — is
+ * somebody else's, and there the last line is the message.
  */
-export function stateFromLaunchFailure(spawnLog: string): UpdateState | null {
-  const line = lastMeaningfulLine(spawnLog);
-  if (!line) return null;
+export function launchFailureReason(launchLog: string, max = 300): string {
+  const lines = meaningfulLines(launchLog);
+  const marked = lines
+    .filter((line) => ERROR_MARK.test(line))
+    .map((line) => line.replace(ERROR_MARK, "").trim())
+    .filter(Boolean)
+    .slice(-3);
+  if (marked.length > 0) return marked.join(" ").slice(0, max);
+  return lines.length > 0 ? lines[lines.length - 1].replace(OUTPUT_MARK, "").slice(0, max) : "";
+}
+
+/** What a launch that printed nothing is reported with. */
+export const UPDATE_SILENT_LAUNCH_ERROR =
+  "The updater exited without printing anything. Run it from a shell to see why.";
+
+function emptyState(): Omit<UpdateState, "status" | "phase" | "message"> {
   return {
-    status: "failed",
-    phase: "launch",
     step: 0,
     totalSteps: TOTAL_UPDATE_STEPS,
-    message: "The updater did not start",
     startedAt: null,
     updatedAt: null,
     finishedAt: null,
@@ -368,6 +489,150 @@ export function stateFromLaunchFailure(spawnLog: string): UpdateState | null {
     fromCommit: null,
     toCommit: null,
     exitCode: null,
-    error: line,
+    error: null,
+  };
+}
+
+/**
+ * The seconds between the click and the updater's first published step: sudo,
+ * the fetch, the pre-flight checks. Something honest to show, and the reason a
+ * second click is refused.
+ */
+export function launchStartingState(launch: UpdateLaunch): UpdateState {
+  return {
+    ...emptyState(),
+    status: "running",
+    phase: "starting",
+    message: "Fetching the latest code and checking the installation",
+    startedAt: launch.launchedAt,
+    // Deliberately the launch time, not "now": a launch that hangs here for
+    // longer than UPDATE_STALE_MS is reported as stale like any other run.
+    updatedAt: launch.launchedAt,
+  };
+}
+
+/**
+ * The launched process is gone and the updater never published a step. The
+ * attempt failed — say so with what it printed, instead of showing whatever the
+ * previous run left behind, or nothing.
+ */
+export function launchFailureState(launch: UpdateLaunch, launchLog: string): UpdateState {
+  return {
+    ...emptyState(),
+    status: "failed",
+    phase: "launch",
+    message: "The updater stopped before its first step",
+    startedAt: launch.launchedAt,
+    updatedAt: launch.launchedAt,
+    finishedAt: launch.launchedAt,
+    error: launch.error || launchFailureReason(launchLog) || UPDATE_SILENT_LAUNCH_ERROR,
+  };
+}
+
+function latestTimestamp(state: UpdateState): number {
+  const times = [state.startedAt, state.updatedAt, state.finishedAt]
+    .map((value) => Date.parse(value ?? ""))
+    .filter((ms) => !Number.isNaN(ms));
+  return times.length > 0 ? Math.max(...times) : Number.NaN;
+}
+
+/** Is the state's newest stamp at or after `sinceMs`? */
+function stampedSince(state: UpdateState | null, sinceMs: number): boolean {
+  if (!state || Number.isNaN(sinceMs)) return false;
+  const latest = latestTimestamp(state);
+  return !Number.isNaN(latest) && latest >= sinceMs;
+}
+
+/**
+ * Did the updater write this state after the panel launched it?
+ *
+ * The updater stamps whole seconds, rounded down. A stamp in the launch's own
+ * second is therefore ambiguous: written just after the launch, or just before
+ * it by the run that came before. Only a stamp in a later second proves "after"
+ * — and taking the earlier run's result for this one is the worse mistake: it
+ * would show a stale verdict and leave the button free to start a second
+ * updater on top of the first. A run that publishes within its first second is
+ * not lost by this: while it is going, `resolveUpdateStatus` shows it because
+ * it is running, and its next stamp is in a later second.
+ *
+ * Any of the three timestamps counts — a run keeps touching `updatedAt`, so one
+ * that is still going is recognised even if the clock was stepped at its start.
+ */
+export function stateIsFromLaunch(state: UpdateState | null, launch: UpdateLaunch): boolean {
+  return stampedSince(state, Math.ceil(Date.parse(launch.launchedAt) / 1000) * 1000);
+}
+
+export interface ResolvedUpdateStatus {
+  /** What the Updates tab should show. */
+  state: UpdateState | null;
+  /** The output that explains `state`. */
+  logTail: string;
+  /** Whose account `state` is: the updater's own file, or the panel's launch record. */
+  source: "updater" | "launch";
+}
+
+/**
+ * Decide what is true about the panel's update, from two accounts of it.
+ *
+ * The updater's state file is the authority once the updater has written to it
+ * — it survives the restart and it is written by the process doing the work.
+ * But the updater publishes nothing until it is about to change something, and
+ * a launch can end before that: sudo refuses, the fetch fails, a pre-flight
+ * check says no. Looking at the state file alone, such an attempt is invisible:
+ * the tab keeps showing the previous run's result (or "never run") beside a
+ * button that apparently does nothing. So until the updater has published a
+ * state newer than the launch, the panel's own launch record speaks:
+ *
+ *   - the launched process is still there  → "starting"
+ *   - it is gone                           → the launch failed, with its output
+ */
+export function resolveUpdateStatus(input: {
+  /** The updater's published state, if any. */
+  stored: UpdateState | null;
+  /** The panel's record of the last update it launched, if any. */
+  launch: UpdateLaunch | null;
+  /** Whether the launched process still exists; null when that cannot be told. */
+  launchAlive: boolean | null;
+  /** Tail of the updater's stable log. */
+  updaterLog: string;
+  /** Tail of the launched process's output. */
+  launchLog: string;
+  nowMs: number;
+}): ResolvedUpdateStatus {
+  const { stored, launch, updaterLog, launchLog, nowMs } = input;
+
+  const fromUpdater = (ownLaunch: boolean): ResolvedUpdateStatus => ({
+    state: stored,
+    // The updater's log starts at its first step. If it could not be written
+    // or read, the launch output is the same text and better than nothing —
+    // but only when it is the output of this very run.
+    logTail: updaterLog.trim() ? updaterLog : ownLaunch ? launchLog : "",
+    source: "updater",
+  });
+
+  if (!launch) return fromUpdater(false);
+
+  // The updater has taken over.
+  if (stateIsFromLaunch(stored, launch)) return fromUpdater(true);
+
+  const launchedMs = Date.parse(launch.launchedAt);
+
+  // A run is demonstrably in progress. Never report "not running" over a live
+  // updater: that is how a second one gets started on top of it. It is this
+  // launch's own run in its first second — stamped in the launch's second, so
+  // not yet provably newer — or one started some other way; only the first may
+  // borrow the launch output while the updater's log is still empty.
+  if (updateIsRunning(stored, nowMs)) {
+    return fromUpdater(stampedSince(stored, Math.floor(launchedMs / 1000) * 1000));
+  }
+
+  const alive = launch.error
+    ? false
+    : (input.launchAlive ?? nowMs - launchedMs <= UPDATE_LAUNCH_GRACE_MS);
+
+  return {
+    state: alive ? launchStartingState(launch) : launchFailureState(launch, launchLog),
+    logTail: launchLog,
+    source: "launch",
   };
 }

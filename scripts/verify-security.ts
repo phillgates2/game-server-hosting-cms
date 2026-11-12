@@ -4506,9 +4506,35 @@ console.log("\nPANELUPDATE self-update rails");
       !/--install-dir|--branch|--rollback|[;&|`$]/.test([cmd.file, ...cmd.args].join(" "))
     )
   );
+  const launchLine = detachedUpdateCommand(asUser).args[1];
   check(
     "the updater is started detached, so the restart cannot orphan it",
-    /^setsid nohup /.test(detachedUpdateCommand(asUser, "/tmp/x.log").args[1])
+    /^setsid nohup /.test(launchLine)
+  );
+  // A shell performs a redirect before it runs the command. The button used to
+  // send the launch output to a file in root's state directory: the panel's
+  // user could not create it, the updater was never executed, and the request
+  // still answered "started".
+  check(
+    "starting the updater does not depend on any file being writable",
+    // `3>&-` and `>&3` close or duplicate an open descriptor; any other `>`
+    // would name a file.
+    !/>(?!&)/.test(launchLine) &&
+      !/spawn\.log/.test(route) &&
+      !/spawn\.log|gsm-panel-update\//.test(repoFile("../src/lib/panel-update-fs.ts"))
+  );
+  check(
+    "the launcher reports the process it started, and the route waits to see it survive",
+    /echo "\$!" >&3$/.test(launchLine) &&
+      /await waitForLaunchToSettle\(launch, LAUNCH_SETTLE_MS, \{/.test(route)
+  );
+  // The updater stops the panel a few steps after it first reports. A request
+  // still waiting then is cut off, and the operator is told "could not reach
+  // the server" about an update that is running.
+  check(
+    "the route answers as soon as the updater reports, before the updater can stop the panel",
+    /published: \(\) => updaterHasPublished\(env, launch\)/.test(route) &&
+      /return stateIsFromLaunch\(stored, launch\) \|\| updateIsRunning\(stored, Date\.now\(\)\);/.test(route)
   );
 
   // The route must be gated, confirmed, and single-flight.
@@ -4532,6 +4558,20 @@ console.log("\nPANELUPDATE self-update rails");
     "starting an update is written to the audit log",
     /action: "panel\.update\.start"/.test(route)
   );
+  check(
+    "a launch that went nowhere is an error, not a success",
+    /status\.state\?\.status === "failed" && status\.state\.phase === "launch"/.test(route) &&
+      /\{ status: 500 \}/.test(route)
+  );
+  check(
+    "the audit entry is written before the panel can be stopped",
+    route.indexOf('action: "panel.update.start"') > 0 &&
+      route.indexOf('action: "panel.update.start"') < route.indexOf("await waitForLaunchToSettle(")
+  );
+  check(
+    "two requests arriving together cannot both start an updater",
+    /if \(launchInFlight\) \{/.test(route) && /launchInFlight = false;/.test(route)
+  );
 
   // Progress publishing: the panel cannot watch the process, so the updater
   // writes a state file the panel reads after the restart.
@@ -4548,6 +4588,11 @@ console.log("\nPANELUPDATE self-update rails");
       /STATE_STATUS="success"/.test(updater) &&
       /STATE_STATUS="failed"/.test(updater) &&
       /PANEL_OK/.test(updater)
+  );
+  check(
+    "the published exit code is the updater's, not the trap's cleanup",
+    /trap 'STATE_TRAP_CODE=\$\?; /.test(updater) &&
+      /local code=\$\{STATE_TRAP_CODE:-\$\?\}/.test(updater)
   );
   check(
     "a rollback never publishes a half-finished update",

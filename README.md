@@ -864,6 +864,20 @@ it; one `sudo bash public/update.sh` on an older install is enough to enable the
 button — the updater prints *Panel update helper installed* when it has just done
 so, and the command to retry when it could not.
 
+The button reports what actually happened. Between the click and the updater's
+first step the tab shows *Starting the update…*. If the updater stops before
+that step — sudo refuses, the fetch fails, tracked files were edited on the
+server — the tab says *The update did not start*, with the updater's reason and
+its output, and the panel keeps running the version it was on. The output of a
+run started from the panel is also kept in
+`/var/log/gsm-panel/panel-update-launch.log`.
+
+> [!NOTE]
+> Early versions of the button answered *Update started* without starting
+> anything. The button cannot deliver its own fix, so an install that has that
+> version needs one update from a shell — `sudo gsm update` — and works from the
+> browser after that.
+
 ```bash
 # From the panel: Administration → Updates → Update panel now
 
