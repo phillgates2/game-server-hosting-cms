@@ -252,7 +252,9 @@ DRIZZLE_UPDATE_CONFIG="$INSTALL_DIR/drizzle.update.json"
 # an update actually begins, so argument errors, `--rollback` and the sudo
 # re-exec below leave no misleading "running" state behind.
 state_finish() { return 0; }
-trap 'rm -rf -- "$WORK_DIR"; rm -f -- "$DRIZZLE_UPDATE_CONFIG"; state_finish || true' EXIT
+# $? is read first: once the cleanup below has run it is rm's status, and the
+# panel would be told that a failed update exited with code 0.
+trap 'STATE_TRAP_CODE=$?; rm -rf -- "$WORK_DIR"; rm -f -- "$DRIZZLE_UPDATE_CONFIG"; state_finish || true' EXIT
 
 LOG_DIR="/var/log/gsm-update"
 install -d -o root -g root -m 700 "$LOG_DIR" \
@@ -340,7 +342,8 @@ state_begin() {
 }
 
 state_finish() {
-  local code=$?
+  # The exit code the EXIT trap saved; $? only when called directly.
+  local code=${STATE_TRAP_CODE:-$?}
   [[ -n "$STATE_STARTED" ]] || return 0
   [[ "$STATE_DONE" == "true" ]] && return 0
   STATE_EXIT_CODE="$code"

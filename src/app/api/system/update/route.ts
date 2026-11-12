@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawn } from "node:child_process";
 import { db } from "@/db";
 import { auditLog } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
@@ -7,27 +6,29 @@ import { hasPermission } from "@/lib/permissions";
 import { apiError } from "@/lib/api-error";
 import { clientIpForRecord } from "@/lib/ip-allowlist";
 import {
-  detachedUpdateCommand,
+  resolveUpdateStatus,
   selfUpdateCommand,
-  stateFromLaunchFailure,
+  stateIsFromLaunch,
   updateAvailability,
   updateIsRunning,
   updateProgress,
   updateSummary,
-  type UpdateState,
+  type UpdateLaunch,
 } from "@/lib/panel-update";
 import {
   canRunViaSudo,
   fileExists,
   readGitRefs,
   readInstallInfoFile,
+  readLaunchAccount,
   readPackageVersion,
   readUpdateLogTail,
   readUpdateState,
-  seedUpdateState,
   selfUpdateWrapperPath,
+  startDetachedUpdate,
   updatePaths,
   updaterPathFor,
+  waitForLaunchToSettle,
 } from "@/lib/panel-update-fs";
 
 export const runtime = "nodejs";
@@ -45,7 +46,32 @@ export const dynamic = "force-dynamic";
  * the script with fixed arguments (or a fixed argument-checking wrapper via
  * sudo) and reads the state file the script publishes. No request field ever
  * reaches a shell.
+ *
+ * Two accounts of an update exist, and `resolveUpdateStatus` picks between
+ * them. The updater's state file is root's, and the panel only reads it. Until
+ * the updater has written to it, the panel goes by its own launch record: which
+ * process it started, and what that process printed.
  */
+
+/**
+ * The longest POST watches the process it launched before answering.
+ *
+ * What stops an update outright — sudo refusing, the helper rejecting its
+ * arguments, a missing updater — ends the process within a few hundred
+ * milliseconds, and a refusal after the fetch (local changes, a branch that
+ * cannot be fast-forwarded) usually within a couple of seconds. Watching for
+ * that turns "Update started" followed by nothing into an error the operator
+ * can read. The wait ends early the moment the updater reports its first step,
+ * so a healthy launch is answered well before the updater stops the panel.
+ */
+const LAUNCH_SETTLE_MS = 4_000;
+
+/**
+ * True from "nothing is running" until the launch record exists. The checks in
+ * between are asynchronous, so without this two requests arriving together
+ * would both pass them and start two updaters on the same checkout.
+ */
+let launchInFlight = false;
 
 interface Environment {
   installDir: string;
@@ -53,7 +79,6 @@ interface Environment {
   wrapperPath: string;
   statePath: string;
   logPath: string;
-  spawnLogPath: string;
   isRoot: boolean;
   updaterPresent: boolean;
   wrapperPresent: boolean;
@@ -62,7 +87,7 @@ interface Environment {
 
 async function inspectEnvironment(): Promise<Environment> {
   const installDir = process.cwd();
-  const { statePath, logPath, spawnLogPath } = updatePaths();
+  const { statePath, logPath } = updatePaths();
   const wrapperPath = selfUpdateWrapperPath();
   const updaterPath = updaterPathFor(installDir);
   const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
@@ -81,7 +106,6 @@ async function inspectEnvironment(): Promise<Environment> {
     wrapperPath,
     statePath,
     logPath,
-    spawnLogPath,
     isRoot,
     updaterPresent,
     wrapperPresent,
@@ -99,19 +123,23 @@ async function authorise(req: NextRequest) {
 }
 
 async function statusPayload(env: Environment, nowMs: number) {
-  const [storedState, updateLog, spawnLog, installInfo, version, git] = await Promise.all([
+  const [storedState, updaterLog, launched, installInfo, version, git] = await Promise.all([
     readUpdateState(env.statePath),
     readUpdateLogTail(env.logPath),
-    readUpdateLogTail(env.spawnLogPath, 4_000),
+    readLaunchAccount(),
     readInstallInfoFile(env.installDir),
     readPackageVersion(env.installDir),
     readGitRefs(env.installDir),
   ]);
 
-  // The updater truncates its own log when it starts, so anything left in the
-  // spawn log means it never got that far. Show that instead of "never run".
-  const state = storedState ?? stateFromLaunchFailure(spawnLog);
-  const logTail = updateLog.trim() ? updateLog : spawnLog;
+  const { state, logTail } = resolveUpdateStatus({
+    stored: storedState,
+    launch: launched.launch,
+    launchAlive: launched.launchAlive,
+    updaterLog,
+    launchLog: launched.launchLog,
+    nowMs,
+  });
 
   const availability = updateAvailability({
     updaterPresent: env.updaterPresent,
@@ -147,7 +175,7 @@ async function statusPayload(env: Environment, nowMs: number) {
         : null,
     },
     state,
-    running: updateIsRunning(storedState, nowMs),
+    running: updateIsRunning(state, nowMs),
     progress: updateProgress(state),
     summary: updateSummary(state, nowMs),
     logTail,
@@ -166,6 +194,38 @@ export async function GET(req: NextRequest) {
   }
 }
 
+/** Start the updater with the one fixed command this install is allowed. */
+async function launchUpdater(env: Environment, noBackup: boolean): Promise<UpdateLaunch> {
+  const { launch, launcherError } = await startDetachedUpdate({
+    command: selfUpdateCommand({
+      isRoot: env.isRoot,
+      updaterPath: env.updaterPath,
+      wrapperPath: env.wrapperPath,
+      noBackup,
+    }),
+    cwd: env.installDir,
+    env: {
+      ...process.env,
+      GSM_UPDATE_STATE_FILE: env.statePath,
+      GSM_UPDATE_LOG_FILE: env.logPath,
+    },
+    noBackup,
+  });
+  if (launcherError) {
+    console.error("[panel-update] could not run the update launcher:", launcherError);
+  }
+  return launch;
+}
+
+/** Has the updater this request launched reported its first step yet? */
+async function updaterHasPublished(env: Environment, launch: UpdateLaunch): Promise<boolean> {
+  const stored = await readUpdateState(env.statePath);
+  // Nothing was running when this launch was made (POST checked), so a state
+  // that is running now is this run's — also in its first second, when its
+  // timestamp cannot yet prove it.
+  return stateIsFromLaunch(stored, launch) || updateIsRunning(stored, Date.now());
+}
+
 /**
  * POST /api/system/update
  *
@@ -175,6 +235,11 @@ export async function GET(req: NextRequest) {
  * accidental double-click (or a stray retry) is not something the operator can
  * undo, and a bare empty POST from a script should not start an update by
  * itself.
+ *
+ * `ok: true` means the updater is running, not merely that it was asked to. If
+ * it stops at once the answer is a 500 carrying its last line of output; if it
+ * stops later, but still before its first step, GET reports the same verdict.
+ * Either way it stays there until the next attempt.
  */
 export async function POST(req: NextRequest) {
   const allowed = await authorise(req);
@@ -216,107 +281,67 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: availability.reason }, { status: 409 });
     }
 
-    // One update at a time. The state file is the source of truth because it
-    // survives a restart; an abandoned run is reported as stale rather than
-    // blocking the button forever.
-    const existing = await readUpdateState(env.statePath);
-    if (updateIsRunning(existing, Date.now())) {
-      return NextResponse.json(
-        {
-          error: "An update is already running. Watch its progress here; the panel restarts when it finishes.",
-          state: existing,
-        },
-        { status: 409 }
-      );
+    const alreadyRunning =
+      "An update is already running. Watch its progress here; the panel restarts when it finishes.";
+
+    if (launchInFlight) {
+      return NextResponse.json({ error: alreadyRunning }, { status: 409 });
     }
-
-    const command = selfUpdateCommand({
-      isRoot: env.isRoot,
-      updaterPath: env.updaterPath,
-      wrapperPath: env.wrapperPath,
-      noBackup,
-    });
-    const spawnPlan = detachedUpdateCommand(command, env.spawnLogPath);
-
-    // A "starting" state so the panel has something honest to show in the
-    // seconds before the script writes its first phase — and so a second click
-    // is refused even if the script dies immediately.
-    const startedAt = new Date().toISOString();
-    const optimistic: UpdateState = {
-      status: "running",
-      phase: "starting",
-      step: 0,
-      totalSteps: 7,
-      message: "Starting the updater…",
-      startedAt,
-      updatedAt: startedAt,
-      finishedAt: null,
-      branch: null,
-      fromCommit: null,
-      toCommit: null,
-      exitCode: null,
-      error: null,
-    };
-
-    await seedUpdateState(env.statePath, optimistic);
-
+    launchInFlight = true;
+    let launch: UpdateLaunch;
     try {
-      const child = spawn(/*turbopackIgnore: true*/ spawnPlan.file, spawnPlan.args, {
-        detached: true,
-        stdio: "ignore",
-        cwd: env.installDir,
-        env: {
-          ...process.env,
-          GSM_UPDATE_STATE_FILE: env.statePath,
-          GSM_UPDATE_LOG_FILE: env.logPath,
-        },
-      });
-      // A detached child reports trouble asynchronously; without a listener an
-      // ENOENT would surface as an uncaught exception and take the panel down.
-      child.on("error", (error: Error) => {
-        console.error("[panel-update] could not start the updater:", error.message);
-        void seedUpdateState(env.statePath, {
-          ...optimistic,
-          status: "failed",
-          error: "Could not start the updater. Check the panel's logs.",
-          finishedAt: new Date().toISOString(),
-        });
-      });
-      child.unref();
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Could not start the updater.";
-      await seedUpdateState(env.statePath, {
-        ...optimistic,
-        status: "failed",
-        error: message,
-        finishedAt: new Date().toISOString(),
-      });
-      return NextResponse.json({ error: message }, { status: 500 });
+      // One update at a time. The updater's state file is the source of truth
+      // once it exists, because it survives a restart; before that, the launch
+      // record is. An abandoned run is reported as stale rather than blocking
+      // the button forever.
+      const existing = (await statusPayload(env, Date.now())).state;
+      if (updateIsRunning(existing, Date.now())) {
+        return NextResponse.json({ error: alreadyRunning, state: existing }, { status: 409 });
+      }
+
+      launch = await launchUpdater(env, noBackup);
+    } finally {
+      launchInFlight = false;
     }
 
+    // Recorded before watching the launch, not after: once the updater has
+    // reported its first step the panel can be stopped at any moment, and who
+    // asked for the update must not be lost with it. It records the request —
+    // how the run ends is the Updates tab's to say.
     try {
       await db.insert(auditLog).values({
         userId: auth.userId || null,
         action: "panel.update.start",
         entityType: "panel",
         entityId: null,
-        details: { noBackup, command: env.isRoot ? "updater" : "wrapper", startedAt },
+        details: {
+          noBackup,
+          command: env.isRoot ? "updater" : "wrapper",
+          startedAt: launch.launchedAt,
+          launched: launch.error === null,
+        },
         ipAddress: clientIpForRecord(req.headers),
       });
     } catch {
       /* best effort: the update is already running */
     }
 
-    const status = await statusPayload(env, Date.now());
-    return NextResponse.json({
-      ok: true,
-      startedAt,
-      // The freshly written file may not be visible yet; prefer what we know.
-      ...status,
-      state: status.state ?? optimistic,
-      running: true,
-      summary: updateSummary(status.state ?? optimistic, Date.now()),
+    await waitForLaunchToSettle(launch, LAUNCH_SETTLE_MS, {
+      published: () => updaterHasPublished(env, launch),
     });
+    const status = await statusPayload(env, Date.now());
+    const failed = status.state?.status === "failed" && status.state.phase === "launch";
+
+    if (failed) {
+      const reason = status.state?.error ?? "the updater exited at once.";
+      console.warn("[panel-update] the updater stopped before its first step:", reason);
+      return NextResponse.json(
+        { error: `The update did not start: ${reason}`, ...status },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ ok: true, startedAt: launch.launchedAt, ...status });
   } catch (e: unknown) {
     return apiError(e, "Could not start the update", 500);
   }
