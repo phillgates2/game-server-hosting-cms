@@ -262,6 +262,21 @@ console.log("\nH2/H3 auth enforcement wiring");
   const discord = read("../src/lib/discord.ts");
   check("webhook URLs are validated against a Discord host allowlist", /WEBHOOK_URL_RE/.test(discord));
   check("webhook requests have a timeout", /AbortSignal\.timeout/.test(discord));
+  // 10015 "Unknown Webhook" is what a deleted webhook answers forever. Passing
+  // the raw body through left the panel mute with no explanation and no repair.
+  const discordErrors = read("../src/lib/discord-errors.ts");
+  check(
+    "the deleted-webhook error code is recognised",
+    /UNKNOWN_WEBHOOK:\s*10015/.test(discordErrors) && /classifyDiscordFailure/.test(discordErrors)
+  );
+  check(
+    "a deleted message is not mistaken for a deleted webhook",
+    /UNKNOWN_MESSAGE:\s*10008/.test(discordErrors) && /message-gone/.test(discordErrors)
+  );
+  check(
+    "webhook delivery reports the failure instead of swallowing it",
+    /classifyDiscordFailure\(/.test(discord)
+  );
   const processRoute = read("../src/app/api/servers/[id]/process/route.ts");
   check("a crashed server triggers a Discord notification", /notifyServerCrashed/.test(processRoute));
 
@@ -519,6 +534,15 @@ console.log("\nH2/H3 auth enforcement wiring");
   check(
     "discord backfill supports a dry run",
     /dryRun/.test(backfill)
+  );
+  check(
+    "a deleted webhook is verified and repaired, not trusted forever",
+    /webhookExists\(/.test(backfill) && /provisionWebhookInChannel\(/.test(backfill)
+  );
+  check(
+    "a webhook the panel did not create is never replaced blind",
+    /verify-webhook/.test(read("../src/lib/discord-backfill.ts")) &&
+      /repairForGoneWebhook\(/.test(read("../src/lib/discord-backfill.ts"))
   );
 
   const siteSettings = read("../src/app/api/site-settings/route.ts");

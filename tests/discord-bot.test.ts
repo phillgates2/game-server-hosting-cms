@@ -203,3 +203,132 @@ describe("verifyBot", () => {
     );
   });
 });
+
+/**
+ * `10015 Unknown Webhook` — the failure behind "the bot stopped posting".
+ *
+ * Discord deletes a webhook with its channel, and the stored URL then answers
+ * 404/10015 on every send. Delivery never throws, so the panel stayed mute in
+ * both senses. These cover the two halves of the repair: recognising the loss,
+ * and re-creating a webhook inside the channel that survived.
+ */
+describe("webhook health (10015 Unknown Webhook)", () => {
+  const HOOK_ID = "123456789012345678";
+  const HOOK = `https://discord.com/api/webhooks/${HOOK_ID}/tok`;
+
+  /** Point fetch at a stub that answers only the webhook's own URL. */
+  async function withWebhookStub(
+    reply: () => { status: number; json?: unknown; text?: string },
+    fn: () => Promise<void>
+  ) {
+    const { createServer } = await import("node:http");
+    const srv = createServer((req, res) => {
+      req.on("data", () => {});
+      req.on("end", () => {
+        const out = reply();
+        res.writeHead(out.status, { "content-type": "application/json" });
+        res.end(out.json !== undefined ? JSON.stringify(out.json) : (out.text ?? ""));
+      });
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
+    const port = (srv.address() as { port: number }).port;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((url: string, init: RequestInit) =>
+      realFetch(`http://127.0.0.1:${port}/webhooks/${String(url).split("/webhooks/")[1] ?? ""}`, init)) as typeof fetch;
+    try {
+      await fn();
+    } finally {
+      globalThis.fetch = realFetch;
+      await new Promise<void>((r) => srv.close(() => r()));
+    }
+  }
+
+  test("a live webhook verifies without a bot token", async () => {
+    const { webhookExists } = await import("../src/lib/discord");
+    await withWebhookStub(
+      () => ({ status: 200, json: { id: HOOK_ID, name: "GameServer Manager" } }),
+      async () => assert.deepEqual(await webhookExists(HOOK), { exists: true })
+    );
+  });
+
+  test("10015 is reported as a definite loss", async () => {
+    const { webhookExists } = await import("../src/lib/discord");
+    await withWebhookStub(
+      () => ({ status: 404, json: { message: "Unknown Webhook", code: 10015 } }),
+      async () => assert.deepEqual(await webhookExists(HOOK), { exists: false })
+    );
+  });
+
+  test("a 429 or a broken network is 'unknown', never 'gone'", async () => {
+    // Replacing a webhook on a transient failure would redirect a server's
+    // notifications on the strength of one bad minute.
+    const { webhookExists } = await import("../src/lib/discord");
+    await withWebhookStub(
+      () => ({ status: 429, json: { message: "You are being rate limited.", retry_after: 5 } }),
+      async () => {
+        const res = await webhookExists(HOOK);
+        assert.equal(res.exists, false);
+        assert.equal(res.unknown, true);
+        assert.match(String(res.error), /Rate limited/);
+      }
+    );
+  });
+
+  test("a notification to a dead webhook says so, with the code", async () => {
+    const { notifyServerStarted } = await import("../src/lib/discord");
+    await withWebhookStub(
+      () => ({ status: 404, json: { message: "Unknown Webhook", code: 10015 } }),
+      async () => {
+        const res = await notifyServerStarted(HOOK, "S", "G", null, null, 27015);
+        assert.equal(res.success, false);
+        assert.equal(res.gone, true, "callers must be able to tell permanent from transient");
+        assert.equal(res.code, 10015);
+        assert.match(String(res.error), /Create missing channels/);
+      }
+    );
+  });
+
+  test("a fresh webhook is created inside the surviving channel", async () => {
+    // Repair keeps the operator's channel: its history, pins and permissions
+    // stay, unlike re-provisioning the whole channel.
+    const { provisionWebhookInChannel } = await import("../src/lib/discord");
+    await withStubDiscord(
+      ({ method, url }) => {
+        if (method === "POST" && url === `/channels/${HOOK_ID}/webhooks`) {
+          return { status: 200, json: { id: "999", token: "fresh" } };
+        }
+        return { status: 404, text: "" };
+      },
+      async (calls) => {
+        const res = await provisionWebhookInChannel(CFG, HOOK_ID);
+        assert.equal(res.ok, true);
+        assert.equal(res.ok && res.webhookUrl, "https://discord.com/api/webhooks/999/fresh");
+        assert.deepEqual(calls, [`POST /channels/${HOOK_ID}/webhooks`]);
+      }
+    );
+  });
+
+  test("a refused repair reports Discord's reason", async () => {
+    const { provisionWebhookInChannel } = await import("../src/lib/discord");
+    await withStubDiscord(
+      () => ({ status: 403, text: "missing perms" }),
+      async () => {
+        const res = await provisionWebhookInChannel(CFG, HOOK_ID);
+        assert.equal(res.ok, false);
+        assert.match(String(res.ok === false && res.error), /Manage Webhooks/);
+      }
+    );
+  });
+
+  test("a junk channel id is refused before any request", async () => {
+    const { provisionWebhookInChannel } = await import("../src/lib/discord");
+    await withStubDiscord(
+      () => ({ status: 200, json: { id: "1", token: "t" } }),
+      async (calls) => {
+        const res = await provisionWebhookInChannel(CFG, "../../channels");
+        assert.equal(res.ok, false);
+        assert.equal(calls.length, 0);
+      }
+    );
+  });
+});

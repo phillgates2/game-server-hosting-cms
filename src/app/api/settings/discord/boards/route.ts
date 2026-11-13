@@ -223,7 +223,14 @@ export async function POST(req: NextRequest) {
           updatedAt: new Date(),
         })
         .where(eq(gameServers.id, serverId));
-      return NextResponse.json({ ok: result.ok, error: result.error ?? undefined, servers: await listBoards() });
+      return NextResponse.json({
+        ok: result.ok,
+        error: result.error ?? undefined,
+        // Nothing can be posted to a deleted webhook, so say it once, clearly,
+        // instead of re-disabling the board on the next tick with a 404.
+        gone: result.gone ?? undefined,
+        servers: await listBoards(),
+      });
     }
 
     // refresh — only meaningful when the board is on; refresh anyway so the
@@ -238,7 +245,12 @@ export async function POST(req: NextRequest) {
         updatedAt: new Date(),
       })
       .where(eq(gameServers.id, serverId));
-    return NextResponse.json({ ok: result.ok, error: result.error ?? undefined, servers: await listBoards() });
+    return NextResponse.json({
+      ok: result.ok,
+      error: result.error ?? undefined,
+      gone: result.gone ?? undefined,
+      servers: await listBoards(),
+    });
   } catch (e: unknown) {
     return apiError(e, "Status board update failed", 500);
   }

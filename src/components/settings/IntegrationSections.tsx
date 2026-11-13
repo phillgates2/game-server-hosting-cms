@@ -453,7 +453,7 @@ export function PublicStatusBlock() {
 interface BackfillResult {
   serverId: number;
   serverName: string;
-  status: "created" | "recreated" | "ok" | "skipped" | "failed";
+  status: "created" | "recreated" | "repaired" | "ok" | "skipped" | "failed";
   channelName?: string;
   detail?: string;
 }
@@ -464,6 +464,7 @@ interface BackfillResponse {
   scanned: number;
   created: number;
   recreated: number;
+  repaired: number;
   alreadyOk: number;
   skipped: number;
   failed: number;
@@ -511,6 +512,7 @@ export function DiscordBackfillBlock() {
       const parts = [
         data.created && `${data.created} created`,
         data.recreated && `${data.recreated} re-created`,
+        data.repaired && `${data.repaired} webhook${data.repaired === 1 ? "" : "s"} repaired`,
         data.alreadyOk && `${data.alreadyOk} already fine`,
         data.skipped && `${data.skipped} skipped`,
         data.failed && `${data.failed} failed`,
@@ -529,7 +531,7 @@ export function DiscordBackfillBlock() {
     <SectionCard
       icon="📺"
       title="Existing servers"
-      description="New servers get a channel automatically. This gives one to servers that existed before the bot was set up, and re-creates channels deleted in Discord — otherwise their notifications go nowhere. A bot token and server ID are required; a webhook alone cannot create channels."
+      description="New servers get a channel automatically. This gives one to servers that existed before the bot was set up, re-creates channels deleted in Discord, and repairs webhooks deleted inside a channel that still exists — otherwise their notifications go nowhere (Discord reports that as ‘Unknown Webhook’, 10015). A bot token and server ID are required; a webhook alone cannot create channels."
     >
       <div className="space-y-3">
         <div className="flex flex-wrap gap-2">
@@ -581,6 +583,10 @@ export function DiscordBackfillBlock() {
                         ? result.dryRun
                           ? "would re-create"
                           : "re-created"
+                        : entry.status === "repaired"
+                          ? result.dryRun
+                            ? "would repair webhook"
+                            : "webhook repaired"
                         : entry.status === "ok"
                           ? "already has one"
                           : entry.status === "skipped"
