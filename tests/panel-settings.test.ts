@@ -17,6 +17,7 @@ import {
 } from "../src/lib/panel-settings";
 import {
   planForServer,
+  repairForGoneWebhook,
   summarise,
   describeSummary,
   type BackfillOutcome,
@@ -249,17 +250,46 @@ describe("Discord backfill planning", () => {
     assert.deepEqual(plan, { kind: "verify" });
   });
 
-  test("never touches a hand-entered webhook", () => {
-    // The panel does not own that channel; replacing it would silently
-    // redirect someone's notifications.
+  test("checks a hand-entered webhook instead of assuming it works", () => {
+    // The panel does not own that channel, so it must never *replace* the
+    // webhook on the strength of its URL. But "leave it alone" is not the same
+    // as "assume it is fine": Discord takes the webhook with it when the
+    // channel is deleted, and the stored URL then answers `10015 Unknown
+    // Webhook` on every send, silently, forever. So it is verified — read-only
+    // — and only a definite 404 leads to a repair or a report.
     const plan = planForServer({
       id: 3,
       name: "Manual Hook",
       discordWebhook: "https://discord.com/api/webhooks/9/tok",
       discordChannelId: null,
     });
-    assert.equal(plan.kind, "skip");
-    assert.match(String((plan as { reason: string }).reason), /did not create/);
+    assert.deepEqual(plan, { kind: "verify-webhook" });
+  });
+
+  test("a gone webhook in a channel the panel does not know is reported, not guessed at", () => {
+    // Without a channel id the panel cannot re-create the webhook in place, and
+    // it will not invent a new channel for someone else's server.
+    const repair = repairForGoneWebhook({
+      id: 3,
+      name: "Manual Hook",
+      discordWebhook: "https://discord.com/api/webhooks/9/tok",
+      discordChannelId: null,
+    });
+    assert.equal(repair.kind, "report");
+    assert.match(String((repair as { reason: string }).reason), /10015/);
+    assert.match(String((repair as { reason: string }).reason), /paste a new webhook URL/i);
+  });
+
+  test("a gone webhook in a panel-owned channel is re-created in place", () => {
+    // Keeping the operator's channel is the whole point: recreating the channel
+    // would lose its history, pins and permissions.
+    const repair = repairForGoneWebhook({
+      id: 4,
+      name: "Owned Channel",
+      discordWebhook: "https://discord.com/api/webhooks/9/tok",
+      discordChannelId: "555000111",
+    });
+    assert.deepEqual(repair, { kind: "recreate-webhook" });
   });
 });
 
@@ -287,6 +317,18 @@ describe("backfill summary", () => {
     assert.match(text, /1 created/);
     assert.match(text, /1 re-created/);
     assert.match(text, /1 failed/);
+  });
+
+  test("counts repaired webhooks separately from re-created channels", () => {
+    // Re-creating a *webhook* keeps the channel; re-creating a *channel* does
+    // not. Reporting them as the same thing would hide a deleted channel.
+    const s = summarise([
+      { serverId: 1, serverName: "a", status: "repaired" },
+      { serverId: 2, serverName: "b", status: "repaired" },
+    ]);
+    assert.equal(s.repaired, 2);
+    assert.equal(s.recreated, 0);
+    assert.match(describeSummary(s), /2 webhooks repaired/);
   });
 
   test("says so plainly when there was nothing to do", () => {

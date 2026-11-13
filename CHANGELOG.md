@@ -6,6 +6,44 @@ All notable changes to GameServer Manager are documented here.
 
 ## [Unreleased]
 
+### 🔌 "Unknown Webhook" (10015) — the panel says what it means and repairs it
+
+Discord answers a deleted webhook with `{"message": "Unknown Webhook", "code":
+10015}`. The panel passed that through as `Discord API error: 404 - {...}`, which
+names the symptom and nothing else: not that the webhook is *permanently* gone,
+not that Discord deletes a webhook along with its channel, and not that every
+following notification will fail the same way. Nothing ever noticed, because
+webhook delivery is best-effort and never throws — the servers simply went
+quiet.
+
+- **The code is understood now.** A small classifier (`src/lib/discord-errors.ts`)
+  turns Discord's error bodies into one actionable sentence, and 10015 reads:
+  *"This Discord webhook no longer exists (Unknown Webhook, code 10015). It was
+  deleted in Discord — or its whole channel was. Paste a new webhook URL for
+  this server, or run 'Create missing channels'."* The same handling covers a
+  deleted channel (`10003`) and a rotated webhook token (`50027`), which leaves
+  the stored URL just as dead.
+- **"Gone" and "try again" are no longer the same thing.** A deleted board
+  message (`10008 Unknown Message`) is *recoverable* and still re-posts; a
+  deleted webhook is not, and the status board now stops re-posting into it on
+  every tick. Rate limits, bad credentials, refused payloads and 5xx are never
+  mistaken for a dead webhook, so a bad minute cannot get a working webhook
+  replaced.
+- **"Create missing channels" repairs dead webhooks.** It used to skip any
+  server that already had a webhook, and never checked the ones it had created.
+  It now verifies every stored webhook — including hand-entered ones — and,
+  where the panel knows the channel, re-creates the webhook *in place*, keeping
+  the channel's history, pins and permissions. A hand-entered webhook whose
+  channel the panel does not know is reported with the fix rather than
+  silently replaced (replacing it would redirect someone's notifications to a
+  channel they never chose). The preview/dry-run shows all of it without
+  touching Discord.
+- **The check is read-only and cheap.** Webhook tokens authenticate their own
+  `GET`, so verifying a fleet needs no bot token and no extra permissions.
+- **Failures carry their cause.** `sendDiscordWebhook` now reports `gone` and
+  Discord's `code` alongside the message, so a caller (the board loop, the
+  panel toast) can act on the difference instead of matching on error text.
+
 ### 🔧 The update button starts the updater — or says why it could not
 
 **Administration → Updates → Update panel now** answered *"Update started"* and

@@ -1,5 +1,7 @@
 // Discord Webhook Integration for Game Server Notifications
 
+import { classifyDiscordFailure } from "@/lib/discord-errors";
+
 export type ServerStatus = "online" | "offline";
 
 export type WebhookEvent = 
@@ -145,7 +147,7 @@ export function resolveWebhookUrl(serverWebhook?: string | null): string | null 
 export async function sendDiscordWebhook(
   webhookUrl: string,
   payload: WebhookPayload
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; gone?: boolean; code?: number }> {
   if (!isValidWebhookUrl(webhookUrl)) {
     return { success: false, error: "Invalid Discord webhook URL" };
   }
@@ -219,11 +221,17 @@ export async function sendDiscordWebhook(
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      // 429 carries a retry-after; surfacing it makes rate limiting diagnosable.
-      const detail = res.status === 429 ? `rate limited (retry-after: ${res.headers.get("retry-after") ?? "?"}s)` : text.slice(0, 300);
-      const error = `Discord API error: ${res.status} - ${detail}`;
-      console.error(`[discord] ${payload.event} for "${payload.serverName}": ${error}`);
-      return { success: false, error };
+      // Discord answers failures with `{"message": "...", "code": 10015}`. The
+      // raw string ("Discord API error: 404 - {...") tells an operator nothing
+      // about the fix, and a deleted webhook (`10015 Unknown Webhook`) is
+      // permanent: every later notification 404s the same way. Classifying it
+      // here means the panel can say what happened and repair it.
+      const failure = classifyDiscordFailure(res.status, text, res.headers.get("retry-after"));
+      console.error(
+        `[discord] ${payload.event} for "${payload.serverName}": ${failure.error}`,
+        failure.code !== undefined ? { code: failure.code } : undefined
+      );
+      return { success: false, error: failure.error, gone: failure.gone, code: failure.code };
     }
 
     return { success: true };
@@ -482,7 +490,10 @@ async function discordApi(
   cfg: BotConfig,
   path: string,
   init: RequestInit = {}
-): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; error: string; retryAfterMs?: number }> {
+): Promise<
+  | { ok: true; data: Record<string, unknown> }
+  | { ok: false; error: string; retryAfterMs?: number; gone?: boolean; code?: number }
+> {
   try {
     const res = await fetch(`${DISCORD_API}${path}`, {
       ...init,
@@ -499,18 +510,24 @@ async function discordApi(
       // A 429 is the one failure with a deadline attached, and the body — not
       // the header — is where Discord puts it for most routes.
       const waitMs = res.status === 429 ? retryAfterMs(res, text) : undefined;
+      const failure = classifyDiscordFailure(res.status, text, res.headers.get("retry-after"));
       // Map the failures an operator will actually hit onto actionable text,
       // rather than surfacing a bare numeric code.
       let error: string;
       switch (res.status) {
         case 401: error = "Invalid bot token"; break;
         case 403: error = "Bot lacks permission — it needs Manage Channels and Manage Webhooks in that server"; break;
-        case 404: error = "Guild or category not found — check the server (guild) ID and that the bot has been invited"; break;
+        // A 404 is not always the guild: on /channels/... it is a deleted
+        // channel, and on a webhook route it is a deleted webhook (10015). The
+        // classified text says which, so keep it instead of blaming the guild.
+        case 404: error = failure.gone && failure.code === 10015
+          ? failure.error
+          : "Guild or category not found — check the server (guild) ID and that the bot has been invited"; break;
         case 429: error = `Rate limited by Discord (retry-after: ${waitMs !== undefined ? Math.round(waitMs / 1000) : "?"}s)`; break;
-        default:  error = `Discord API ${res.status}: ${text.slice(0, 200)}`;
+        default:  error = `Discord API ${res.status}: ${text.slice(0, 200)}${failure.code !== undefined ? ` (code ${failure.code})` : ""}`;
       }
       console.error(`[discord] ${init.method || "GET"} ${path} failed: ${error}`);
-      return { ok: false, error, retryAfterMs: waitMs };
+      return { ok: false, error, retryAfterMs: waitMs, gone: failure.gone, code: failure.code };
     }
 
     return { ok: true, data: text ? JSON.parse(text) : {} };
@@ -588,6 +605,64 @@ export async function provisionServerChannel(
     channelName: name,
     webhookUrl: `https://discord.com/api/webhooks/${id}/${token}`,
   };
+}
+
+/**
+ * Create a fresh webhook inside a channel that already exists.
+ *
+ * This is the repair for `10015 Unknown Webhook`: the channel is fine, but the
+ * webhook the panel stored in it was deleted (or replaced) in Discord, so every
+ * notification to the old URL 404s. Re-creating the webhook keeps the operator's
+ * channel — and its history, pins and permissions — while restoring delivery.
+ */
+export async function provisionWebhookInChannel(
+  cfg: BotConfig,
+  channelId: string,
+  name = "GameServer Manager"
+): Promise<{ ok: true; webhookUrl: string; id: string } | { ok: false; error: string }> {
+  if (!/^\d{5,25}$/.test(channelId)) return { ok: false, error: "Invalid channel id" };
+  const webhook = await discordApi(cfg, `/channels/${encodeURIComponent(channelId)}/webhooks`, {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+  if (!webhook.ok) return { ok: false, error: webhook.error };
+  const token = String(webhook.data.token ?? "");
+  const id = String(webhook.data.id ?? "");
+  if (!id || !token) return { ok: false, error: "Discord did not return webhook credentials" };
+  return { ok: true, webhookUrl: `https://discord.com/api/webhooks/${id}/${token}`, id };
+}
+
+/**
+ * Whether a webhook URL still exists.
+ *
+ * Discord answers a deleted webhook with `404 {"message":"Unknown Webhook",
+ * "code":10015}` on every route — including the plain GET — so this is the
+ * cheap way to find servers whose notifications have silently stopped. The
+ * webhook token authenticates the read; no bot token is needed.
+ *
+ * A 404 (or 10015) is a definite "gone". Anything else — a proxy, a network
+ * blip, a 429 — is reported as `unknown` so the caller never replaces a webhook
+ * that is probably fine.
+ */
+export async function webhookExists(
+  webhookUrl: string
+): Promise<{ exists: boolean; unknown?: boolean; error?: string }> {
+  if (!isValidWebhookUrl(webhookUrl)) {
+    return { exists: false, unknown: true, error: "Not a Discord webhook URL" };
+  }
+  try {
+    const res = await fetch(webhookUrl.trim(), {
+      method: "GET",
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.ok) return { exists: true };
+    const text = await res.text().catch(() => "");
+    const failure = classifyDiscordFailure(res.status, text, res.headers.get("retry-after"));
+    if (failure.gone) return { exists: false };
+    return { exists: false, unknown: true, error: failure.error };
+  } catch (e: unknown) {
+    return { exists: false, unknown: true, error: e instanceof Error ? e.message : "Network error" };
+  }
 }
 
 /** Delete a channel the panel created, used when its server is deleted. */

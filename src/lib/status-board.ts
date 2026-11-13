@@ -28,6 +28,7 @@ import { db } from "@/db";
 import { gameServers, gameDefinitions } from "@/db/schema";
 import { eq, isNotNull } from "drizzle-orm";
 import { isValidWebhookUrl, statusChannelName, statusChannelLabel } from "@/lib/discord";
+import { classifyDiscordFailure } from "@/lib/discord-errors";
 import { createLogger } from "@/lib/logger";
 import type { PlayerProbe } from "@/lib/players";
 import { getCachedView } from "./status-cache";
@@ -67,7 +68,10 @@ const MAX_HEADING_SYNCS_PER_TICK = 10;
 async function webhookRequest(
   url: string,
   init: RequestInit
-): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; gone?: boolean; error: string; status?: number }> {
+): Promise<
+  | { ok: true; data: Record<string, unknown> }
+  | { ok: false; gone?: boolean; recoverable?: boolean; error: string; status?: number }
+> {
   try {
     const res = await fetch(url, {
       ...init,
@@ -76,14 +80,22 @@ async function webhookRequest(
     });
     const text = await res.text().catch(() => "");
     if (!res.ok) {
-      // 404 on PATCH = message deleted; on POST = webhook deleted (channel gone).
+      // A 404 is ambiguous on its own, and Discord says which loss it is in the
+      // body: `10015 Unknown Webhook` means the webhook (and with it this
+      // board's ability to post anything ever again) is gone, while `10008
+      // Unknown Message` just means the board message was deleted and can be
+      // re-posted. Classifying it keeps "re-post" and "stop trying" apart.
+      const failure = classifyDiscordFailure(res.status, text, res.headers.get("retry-after"));
       return {
         ok: false,
-        gone: res.status === 404,
+        // Only the webhook's own loss is permanent for the board; a deleted
+        // message (10008) is recoverable by posting a new one, and refused
+        // payloads, bad credentials and 5xx say nothing about the webhook
+        // still existing.
+        gone: failure.gone,
+        recoverable: failure.kind === "message-gone",
         status: res.status,
-        error: res.status === 429
-          ? `Rate limited (retry-after: ${res.headers.get("retry-after") ?? "?"}s)`
-          : text.slice(0, 200) || `HTTP ${res.status}`,
+        error: failure.error,
       };
     }
     return { ok: true, data: text ? JSON.parse(text) : {} };
@@ -95,7 +107,7 @@ async function webhookRequest(
 async function postBoardMessage(
   webhookUrl: string,
   view: BoardView
-): Promise<{ ok: boolean; messageId?: string; error?: string; status?: number }> {
+): Promise<{ ok: boolean; messageId?: string; error?: string; status?: number; gone?: boolean }> {
   // Discord webhook POSTs default to wait=false, which answers 204 with NO
   // body — so without ?wait=true there is no message id to remember, and the
   // board can never update itself again. wait=true returns the full message.
@@ -104,7 +116,7 @@ async function postBoardMessage(
     method: "POST",
     body: JSON.stringify(buildStatusBoardPayload(view)),
   });
-  if (!res.ok) return { ok: false, error: res.error, status: res.status };
+  if (!res.ok) return { ok: false, error: res.error, status: res.status, gone: res.gone };
   const id = String(res.data.id ?? "");
   if (!id) {
     return {
@@ -120,14 +132,14 @@ async function editBoardMessage(
   webhookUrl: string,
   messageId: string,
   view: BoardView
-): Promise<{ ok: boolean; gone?: boolean; error?: string }> {
+): Promise<{ ok: boolean; gone?: boolean; recoverable?: boolean; error?: string }> {
   const endpoint = messageEndpoint(webhookUrl, messageId);
   if (!endpoint) return { ok: false, error: "Stored message id is invalid" };
   const res = await webhookRequest(endpoint, {
     method: "PATCH",
     body: JSON.stringify(buildStatusBoardPayload(view)),
   });
-  if (!res.ok) return { ok: false, gone: res.gone, error: res.error };
+  if (!res.ok) return { ok: false, gone: res.gone, recoverable: res.recoverable, error: res.error };
   return { ok: true };
 }
 
@@ -182,6 +194,8 @@ export async function refreshServerBoard(server: ServerForBoard): Promise<{
   ok: boolean;
   messageId?: string | null;
   error?: string | null;
+  /** The webhook behind this board is deleted — nothing can be posted again. */
+  gone?: boolean;
   view?: BoardView;
 }> {
   if (!server.discordWebhook || !isValidWebhookUrl(server.discordWebhook)) {
@@ -202,12 +216,16 @@ export async function refreshServerBoard(server: ServerForBoard): Promise<{
   if (server.discordStatusMessageId) {
     const edit = await editBoardMessage(server.discordWebhook, server.discordStatusMessageId, view);
     if (edit.ok) return { ok: true, messageId: server.discordStatusMessageId, view };
-    if (!edit.gone) return { ok: false, messageId: server.discordStatusMessageId, error: edit.error, view };
-    // Message deleted in Discord — fall through and re-post.
+    if (!edit.gone && !edit.recoverable) {
+      return { ok: false, messageId: server.discordStatusMessageId, error: edit.error, view };
+    }
+    // Message deleted in Discord (10008) — fall through and re-post.
   }
 
   const post = await postBoardMessage(server.discordWebhook, view);
-  return post.ok ? { ok: true, messageId: post.messageId, view } : { ok: false, error: post.error, view };
+  return post.ok
+    ? { ok: true, messageId: post.messageId, view }
+    : { ok: false, error: post.error, gone: post.gone, view };
 }
 
 // ── Channel heading (the 🟢/🔴 in the channel name) ──────────────────────────
@@ -580,8 +598,10 @@ export async function tick(): Promise<void> {
 
         if (!result.ok) {
           log.warn(`status board for "${server.name}" failed`, { error: result.error });
-          // A dead webhook will never come back on its own.
-          if (/webhook|channel|invalid/i.test(result.error ?? "")) {
+          // A dead webhook will never come back on its own. `gone` is Discord's
+          // own verdict (10015 Unknown Webhook); the text match keeps the
+          // warning for a URL the panel never owned.
+          if (result.gone || /webhook|channel|invalid/i.test(result.error ?? "")) {
             await db
               .update(gameServers)
               .set({ discordStatusEnabled: false, discordStatusError: result.error ?? null })

@@ -593,3 +593,84 @@ describe("channel heading (🟢/🔴 in the channel name)", () => {
     }
   });
 });
+
+/**
+ * `10015 Unknown Webhook`: the status board's webhook was deleted in Discord.
+ *
+ * A deleted webhook answers 404 on every route, in the same shape as a deleted
+ * *message* — which the board recovers from by re-posting. Without the error
+ * code the two are indistinguishable, so the board would re-post forever into a
+ * webhook that cannot accept anything, and the panel would never say why.
+ */
+describe("webhook errors (10015 / 10008)", () => {
+  async function withStub(
+    reply: (method: string) => { status: number; json?: unknown },
+    fn: (calls: string[]) => Promise<void>
+  ) {
+    process.env.DATABASE_URL = "postgres://u:p@127.0.0.1:5432/db";
+    const { createServer } = await import("node:http");
+    const calls: string[] = [];
+    const srv = createServer((req, res) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        calls.push(`${req.method} ${req.url}`);
+        const out = reply(req.method || "");
+        res.writeHead(out.status, { "Content-Type": "application/json" });
+        res.end(out.json !== undefined ? JSON.stringify(out.json) : "");
+      });
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
+    const port = (srv.address() as { port: number }).port;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((url: string, init: RequestInit) =>
+      realFetch(`http://127.0.0.1:${port}/${String(url).split("/").slice(-2).join("/")}`, init)) as typeof fetch;
+    try {
+      await fn(calls);
+    } finally {
+      globalThis.fetch = realFetch;
+      await new Promise<void>((r) => srv.close(() => r()));
+    }
+  }
+
+  const SERVER = {
+    id: 9, name: "Deleted Hook", ipv4: null, ipv6: null, port: 27015, queryPort: null,
+    variables: null, config: null, status: "stopped", gameName: "WolfET", gameSlug: "wolfenstein-et",
+    discordWebhook: "https://discord.com/api/webhooks/12345/abc-xyz",
+    discordStatusEnabled: true, discordStatusMessageId: null,
+  };
+
+  test("a deleted webhook is reported as gone, not retried forever", async () => {
+    const { refreshServerBoard } = await import("../src/lib/status-board");
+    await withStub(
+      () => ({ status: 404, json: { message: "Unknown Webhook", code: 10015 } }),
+      async () => {
+        const result = await refreshServerBoard(SERVER);
+        assert.equal(result.ok, false);
+        assert.equal(result.gone, true, "the loop disables the board on this, instead of re-posting each tick");
+        assert.match(String(result.error), /10015/);
+        assert.match(String(result.error), /Create missing channels/, "the error carries the fix");
+      }
+    );
+  });
+
+  test("a deleted board message is re-posted, not written off as gone", async () => {
+    // 10008 is recoverable: post a new message. Treating it as gone would
+    // silently disable a board whose channel is perfectly healthy.
+    const { refreshServerBoard } = await import("../src/lib/status-board");
+    let posts = 0;
+    await withStub(
+      (method) => {
+        if (method === "PATCH") return { status: 404, json: { message: "Unknown Message", code: 10008 } };
+        posts++;
+        return { status: 200, json: { id: "1234567890123456789" } };
+      },
+      async () => {
+        const result = await refreshServerBoard({ ...SERVER, discordStatusMessageId: "123456789012345678" });
+        assert.equal(result.ok, true, `re-post failed: ${result.error}`);
+        assert.equal(posts, 1);
+        assert.equal(result.messageId, "1234567890123456789");
+      }
+    );
+  });
+});

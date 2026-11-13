@@ -133,7 +133,18 @@ export default function DiscordSettings() {
         setBoards(data.servers || []);
         if (data.intervalMinutes) setBoardInterval(data.intervalMinutes);
         if (label === "interval") setBoardMsg({ kind: "ok", text: `✅ Boards will refresh every ${data.intervalMinutes} min` });
-        else if (data.error) setBoardMsg({ kind: "err", text: data.error });
+        // A deleted webhook is a permanent failure: the board would be posted
+        // to nothing, forever. Show Discord's own reason (10015) with the fix
+        // the backfill section offers, rather than just "updated".
+        else if (data.error) {
+          setBoardMsg({
+            kind: "err",
+            text: data.gone
+              ? `❌ ${data.error}`
+              : data.error,
+          });
+          if (data.gone) void loadBoards();
+        }
         else if (body.action === "heading") {
           setBoardMsg({
             kind: data.skipped ? "info" : "ok",
