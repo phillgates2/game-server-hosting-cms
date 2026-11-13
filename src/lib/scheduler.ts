@@ -311,6 +311,7 @@ async function runTask(task: DueTask): Promise<void> {
             installPath,
             gameName: server.gameName || "game",
             steamAppId: String(server.steamAppId),
+            progressServerId: server.id,
           });
         } finally {
           await db
@@ -390,6 +391,7 @@ async function runTask(task: DueTask): Promise<void> {
             installPath,
             gameName: server.gameName || "game",
             steamAppId: String(server.steamAppId),
+            progressServerId: server.id,
           });
         } finally {
           await db

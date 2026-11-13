@@ -5,6 +5,7 @@ import { useToast } from "@/components/ToastProvider";
 import { useConfirm, useConfirmChoice } from "@/components/ConfirmDialog";
 import { groupServersByNode, sortServersForPanel, summarizeServerStatus } from "./serverPanelUtils";
 import MetricsChart from "@/components/MetricsChart";
+import InstallProgressMeter from "@/components/InstallProgressMeter";
 import type { MetricPoint } from "@/lib/metrics-history";
 import { mergePresetVariables } from "@/lib/server-presets";
 import { recommendNodeId, nodeWarnings, nodeLoadLabel, type NodeLoad } from "@/lib/node-health";
@@ -76,6 +77,16 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
   const [form, setForm] = useState({ name: "", gameId: "", nodeId: "", port: "", ipv4: "0.0.0.0", ipv6: "", installPath: "", discordWebhook: "" });
   const [loading, setLoading] = useState(false);
   const [installingId, setInstallingId] = useState<number | null>(null);
+  // Servers with an install/update request in flight from this browser — they
+  // show the live status meter until the request answers.
+  const [progressIds, setProgressIds] = useState<Set<number>>(() => new Set());
+  const trackProgress = useCallback((ids: number[], on: boolean) => {
+    setProgressIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) { if (on) next.add(id); else next.delete(id); }
+      return next;
+    });
+  }, []);
   const [searchQuery, setSearchQuery] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | "running" | "stopped" | "installing" | "install_failed">("all");
@@ -584,6 +595,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
     });
     if (!ok) return;
     setBatchBusy("update");
+    trackProgress(ids, true);
     try {
       const res = await fetch("/api/servers/batch-update", {
         method: "POST",
@@ -603,7 +615,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
       loadData();
     } catch (e) {
       toast.error("Batch update", e instanceof Error ? e.message : "Unknown error");
-    } finally {
+    } finally { trackProgress(ids, false);
       setBatchBusy(null);
     }
   }
@@ -773,6 +785,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
     if (srv?.status === "running") { toast.warning("Stop First", "Stop the server before updating."); return; }
     const ok = await confirm({ title: "Update Server", message: `Download the latest server files for "${srv?.name}"? This uses the game’s downloader and keeps configured version pins. Downloaded files may replace existing configs. A backup is created first (can be turned off in Settings → Panel).`, confirmLabel: "Update" });
     if (!ok) return;
+    trackProgress([id], true);
     try {
       const res = await fetch(`/api/servers/${id}/update`, { method: "POST" });
       const data = await res.json();
@@ -792,7 +805,7 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
         }
       }
       loadData();
-    } catch (e) { toast.error("Error", e instanceof Error ? e.message : "Failed"); }
+    } catch (e) { toast.error("Error", e instanceof Error ? e.message : "Failed"); } finally { trackProgress([id], false); }
   }
 
   async function restoreBackup(id: number) {
@@ -955,8 +968,11 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
     for (const id of ids) {
       try {
         if (action === "install") {
-          const res = await fetch(`/api/servers/${id}/install`, { method: "POST" });
-          if (res.ok) successCount++;
+          trackProgress([id], true);
+          try {
+            const res = await fetch(`/api/servers/${id}/install`, { method: "POST" });
+            if (res.ok) successCount++;
+          } finally { trackProgress([id], false); }
         } else if (action === "backup") {
           const res = await fetch(`/api/servers/${id}/backup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "create" }) });
           if (res.ok) successCount++;
@@ -1705,12 +1721,14 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
                           </div>
                         </div>
                       </div>
+                      {/* Live install / update status meter */}
+                      <InstallProgressMeter serverId={server.id} active={isInstalling || progressIds.has(server.id)} />
                       {/* Action bar */}
                       <div className="px-5 py-3 bg-bg-secondary/50 border-t border-border flex items-center gap-2 flex-wrap">
                         {server.status === "running" ? (<><Btn onClick={() => controlProcess(server.id, "stop")} color="danger" icon="⏹" label="Stop" /><Btn onClick={() => controlProcess(server.id, "restart")} color="warning" icon="🔄" label="Restart" /></>) : (<Btn onClick={() => controlProcess(server.id, "start")} color="success" icon="▶" label="Start" />)}
                         <div className="w-px h-5 bg-border mx-1" />
                         <Btn onClick={() => installServerFiles(server.id)} color="accent" icon="📥" label={isInstalling ? "Installing..." : "Install"} disabled={isInstalling} />
-                        <Btn onClick={() => updateServer(server.id)} color="accent" icon="🔄" label="Update" disabled={isInstalling || server.status !== "stopped"} />
+                        <Btn onClick={() => updateServer(server.id)} color="accent" icon="🔄" label={progressIds.has(server.id) && installingId !== server.id ? "Updating..." : "Update"} disabled={isInstalling || progressIds.has(server.id) || server.status !== "stopped"} />
                         <Btn onClick={() => backupServer(server.id)} color="muted" icon="💾" label="Backup" />
                         <Btn onClick={() => void drillBackup(server.id)} color="muted" icon="🧪" label="Drill" title="Test-restore the newest backup (proves it works; live files untouched)" />
                         <Btn onClick={() => void restoreBackup(server.id)} color="danger" icon="🛡️" label="Restore" title="Replace the server files with the newest verified backup (server must be stopped)" />

@@ -123,6 +123,36 @@ export async function pingNodeAgent(node: NodeEndpoint): Promise<{ hostname?: st
   return nodeRpc(node, "/rpc/ping", {}, { timeoutMs: 8_000 });
 }
 
+/**
+ * Output a running (or just finished) remote install/update has produced
+ * since `offset`, for the live status meter. Returns null when the agent is
+ * too old to have the endpoint (it answers 404), so the caller can stop
+ * asking instead of failing the install over a cosmetic feature.
+ */
+export async function remoteInstallOutput(
+  node: NodeEndpoint,
+  installPath: string,
+  offset: number,
+  opts?: { fetchImpl?: typeof fetch }
+): Promise<{ output: string; offset: number; running: boolean } | null> {
+  try {
+    const data = await nodeRpc<{ output?: string; offset?: number; running?: boolean }>(
+      node,
+      "/rpc/install-progress",
+      { installPath, offset },
+      { timeoutMs: 8_000, fetchImpl: opts?.fetchImpl }
+    );
+    return {
+      output: typeof data.output === "string" ? data.output : "",
+      offset: typeof data.offset === "number" ? data.offset : offset,
+      running: Boolean(data.running),
+    };
+  } catch (e: unknown) {
+    if (e instanceof NodeRpcError && e.status === 404) return null;
+    throw e;
+  }
+}
+
 // ── Remote file operations ──────────────────────────────────────────────────
 
 export interface RemoteFileItem {

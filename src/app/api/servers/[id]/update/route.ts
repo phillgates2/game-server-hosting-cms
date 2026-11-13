@@ -4,6 +4,15 @@ import { gameServers, gameDefinitions, nodes, settings } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { formatUpdateFailure } from "@/lib/server-update-runner";
+import {
+  attachRemoteSource,
+  beginProgress,
+  collapseCarriageReturns,
+  feedProgress,
+  finishProgress,
+  setProgressStage,
+  withProgressHelpers,
+} from "@/lib/install-progress";
 import { and, eq } from "drizzle-orm";
 import { access, constants } from "node:fs/promises";
 
@@ -24,6 +33,12 @@ export async function POST(
   const { id } = await params;
 
   let updateClaimed = false;
+  // Live status meter for this run; closed on every exit after the claim.
+  let progress: { serverId: number; token: number } | null = null;
+  const endProgress = (ok: boolean, error?: string | null) => {
+    if (progress) finishProgress(progress.serverId, progress.token, { ok, error });
+    progress = null;
+  };
   try {
     const [server] = await db
       .select({
@@ -72,6 +87,8 @@ export async function POST(
       .returning({ id: gameServers.id });
     if (!claimed.length) return NextResponse.json({ error: "Server is no longer stopped" }, { status: 409 });
     updateClaimed = true;
+    const progressToken = beginProgress({ serverId: server.id, kind: "update", title: server.gameName || server.name, remote });
+    progress = { serverId: server.id, token: progressToken };
 
     // Safety net: archive the server before the updater overwrites files. On by
     // default ("update_auto_backup" in Settings → Panel). A failed backup
@@ -87,6 +104,7 @@ export async function POST(
 
     let backupName: string | null = null;
     if (autoBackup) {
+      setProgressStage(server.id, progressToken, "backup", "Creating the pre-update backup");
       try {
         if (remote) {
           const { remoteBackupCreate } = await import("@/lib/node-client");
@@ -101,6 +119,7 @@ export async function POST(
         const msg = e instanceof Error ? e.message : String(e);
         await db.update(gameServers).set({ status: "stopped", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
         updateClaimed = false;
+        endProgress(false, `Automatic pre-update backup failed (${msg})`);
         return NextResponse.json(
           {
             error: `Automatic pre-update backup failed (${msg}). The update was aborted and no files were changed. Turn off "Automatic backup before update" in Settings → Panel to update without a backup.`,
@@ -115,17 +134,27 @@ export async function POST(
     const { snapshotInstallPath, diffSnapshots, configFilesChanged, formatUpdateReport } = await import("@/lib/update-diff");
     const pre = remote ? null : await snapshotInstallPath(server.installPath).catch(() => null);
 
+    setProgressStage(server.id, progressToken, "preparing", `Starting the ${server.gameName || "game"} updater`);
     let result: { stdout: string; stderr: string };
     if (remote) {
-      const { nodeRpc } = await import("@/lib/node-client");
+      const { nodeRpc, remoteInstallOutput } = await import("@/lib/node-client");
+      attachRemoteSource(server.id, progressToken, (offset) => remoteInstallOutput(endpoint, server.installPath, offset));
       const response = await nodeRpc<{ ok: boolean; output?: string; exitCode?: number }>(
-        endpoint, "/rpc/install", { installPath: server.installPath, script }, { timeoutMs: 45 * 60_000 }
+        endpoint, "/rpc/install", { installPath: server.installPath, script: withProgressHelpers(script) }, { timeoutMs: 45 * 60_000 }
       );
-      if (!response.ok) throw Object.assign(new Error(`Remote update failed (exit ${response.exitCode ?? "unknown"})`), { stdout: response.output });
-      result = { stdout: response.output || "", stderr: "" };
+      const remoteOutput = collapseCarriageReturns(response.output || "");
+      if (!response.ok) throw Object.assign(new Error(`Remote update failed (exit ${response.exitCode ?? "unknown"})`), { stdout: remoteOutput });
+      result = { stdout: remoteOutput, stderr: "" };
     } else {
-      result = await runUpdateScript({ installPath: server.installPath, script, timeoutMs: 45 * 60_000 });
+      result = await runUpdateScript({
+        installPath: server.installPath,
+        script,
+        timeoutMs: 45 * 60_000,
+        onOutput: (chunk) => feedProgress(server.id, progressToken, chunk),
+      });
     }
+
+    setProgressStage(server.id, progressToken, "finalizing", "Checking which files changed");
 
     await db.update(gameServers).set({ status: "stopped", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
 
@@ -164,6 +193,7 @@ export async function POST(
       /* best-effort */
     }
 
+    endProgress(true);
     const backupNote = backupName ? ` (pre-update backup: ${backupName})` : "";
     const configNote = report && report.configsChanged.length > 0 ? ` — heads-up: ${report.configsChanged.length} config file(s) changed` : "";
     return NextResponse.json({ ok: true, backup: backupName, report, message: `${server.gameName} updated successfully${backupNote}${configNote}`, output: result.stdout.slice(-4000) });
@@ -173,6 +203,7 @@ export async function POST(
     // Keep stderr: the game installers report their real failures there
     // (curl errors, release-resolver errors, missing mod modules).
     const formatted = formatUpdateFailure(err);
+    endProgress(false, formatted.error);
     return NextResponse.json({ error: formatted.error, output: formatted.output, errorOutput: formatted.errorOutput }, { status: 500 });
   }
 }
