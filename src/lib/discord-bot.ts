@@ -22,7 +22,6 @@
  */
 
 import { db } from "@/db";
-import { runtimeImport } from "@/lib/runtime-import";
 import { getCachedView, setCachedView } from "@/lib/status-cache";
 import type { BoardView } from "./status-board-embed";
 import { gameServers, gameDefinitions, discordVerifications } from "@/db/schema";
@@ -418,11 +417,98 @@ function xpNickname(displayName: string, totalXp: number): string {
 
 // ── Gateway loop ──────────────────────────────────────────────────────────────
 
-let client: ClientView | null = null;
-let xpTimer: NodeJS.Timeout | null = null;
-let retryTimer: NodeJS.Timeout | null = null;
-let starting = false;
-let waitingForConfig = false;
+export type DiscordBotState = "stopped" | "unconfigured" | "connecting" | "online" | "error";
+
+export interface DiscordBotStatus {
+  state: DiscordBotState;
+  /** The bot account's tag once the gateway is connected. */
+  tag: string | null;
+  /** Why the last connection attempt failed, in operator terms. */
+  error: string | null;
+  /** When `state` last changed (epoch ms). */
+  since: number;
+  /** Chat commands answered since the gateway connected. */
+  commandsHandled: number;
+  /** When the last chat command was received (epoch ms). */
+  lastCommandAt: number | null;
+}
+
+interface BotRuntime {
+  client: ClientView | null;
+  xpTimer: NodeJS.Timeout | null;
+  retryTimer: NodeJS.Timeout | null;
+  starting: boolean;
+  waitingForConfig: boolean;
+  gatewayModule: GatewayModule | null;
+  status: DiscordBotStatus;
+}
+
+/**
+ * Gateway state lives on globalThis, not in module variables.
+ *
+ * Next bundles this module more than once — the boot hook
+ * (instrumentation) and the API routes each get their own copy, with their
+ * own module-level variables. With plain `let`s, saving the Discord settings
+ * "restarted" a bot the route's copy had never started, while the boot copy
+ * kept its own connection: two gateway clients, every command answered twice,
+ * and a status the settings page could not see. One shared object means one
+ * bot per process, whoever asks.
+ */
+const runtimeHolder = globalThis as unknown as { __gsmDiscordBot?: BotRuntime };
+const bot: BotRuntime = (runtimeHolder.__gsmDiscordBot ??= {
+  client: null,
+  xpTimer: null,
+  retryTimer: null,
+  starting: false,
+  waitingForConfig: false,
+  gatewayModule: null,
+  status: { state: "stopped", tag: null, error: null, since: Date.now(), commandsHandled: 0, lastCommandAt: null },
+});
+
+function setStatus(state: DiscordBotState, extra: { tag?: string | null; error?: string | null } = {}): void {
+  const prev = bot.status;
+  bot.status = {
+    state,
+    tag: extra.tag !== undefined ? extra.tag : state === "online" ? prev.tag : null,
+    error: extra.error ?? null,
+    since: Date.now(),
+    commandsHandled: state === "online" ? prev.commandsHandled : 0,
+    lastCommandAt: state === "online" ? prev.lastCommandAt : null,
+  };
+}
+
+/** Live gateway status for Settings → Discord (never includes the token). */
+export function getDiscordBotStatus(): DiscordBotStatus {
+  return { ...bot.status };
+}
+
+/**
+ * Turn a gateway/login failure into something an operator can act on.
+ * Exported for tests.
+ */
+export function describeBotLoginError(message: string): string {
+  const msg = message.slice(0, 300);
+  if (/disallowed intents|privileged intent/i.test(msg)) {
+    return (
+      "Discord refused the connection because the privileged intents are off. In the Discord Developer Portal → " +
+      "your application → Bot → Privileged Gateway Intents, enable \"Server Members Intent\" and " +
+      "\"Message Content Intent\", then save. The bot retries every minute."
+    );
+  }
+  if (/invalid token|TokenInvalid|401|Unauthorized/i.test(msg)) {
+    return "Discord rejected the bot token. Reset the token in the Developer Portal → Bot and paste the new one here.";
+  }
+  if (/Cannot find (module|package)|MODULE_NOT_FOUND|too dynamic/i.test(msg)) {
+    return (
+      "The discord.js package could not be loaded, so the chat bot cannot start. Run `npm ci` in the panel " +
+      `directory and restart the panel. (${msg})`
+    );
+  }
+  if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|fetch failed|network/i.test(msg)) {
+    return `The panel could not reach Discord (${msg}). Check the host's outbound internet/DNS; the bot retries every minute.`;
+  }
+  return `Login failed: ${msg}`;
+}
 
 /**
  * Arm one reconnect/configuration check. The status-board REST calls can work
@@ -432,12 +518,12 @@ let waitingForConfig = false;
  * restart.
  */
 function scheduleRetry(): void {
-  if (retryTimer) return;
-  retryTimer = setTimeout(() => {
-    retryTimer = null;
+  if (bot.retryTimer) return;
+  bot.retryTimer = setTimeout(() => {
+    bot.retryTimer = null;
     void boot();
   }, RETRY_DELAY_MS);
-  retryTimer.unref?.();
+  bot.retryTimer.unref?.();
 }
 
 /** discord.js builders, cached after first load (module-level, not bundled). */
@@ -453,30 +539,45 @@ interface GatewayModule {
   ButtonStyle: { Primary: number; Secondary: number };
 }
 
-let gatewayModule: GatewayModule | null = null;
+/**
+ * Load discord.js.
+ *
+ * The specifier MUST be a string literal. discord.js is listed in
+ * `serverExternalPackages`, so the bundler leaves a literal import alone and
+ * Node resolves it from node_modules at runtime. The previous
+ * variable-specifier import helper was meant to achieve the same thing, but
+ * Turbopack compiles a non-literal import into a stub that always rejects
+ * with "Cannot find module as expression is too dynamic" — in a production
+ * build the bot could never load its gateway library, so it never logged in
+ * and no command was ever answered.
+ */
+async function loadDiscordJs(): Promise<unknown> {
+  return import("discord.js");
+}
 
 async function getGatewayModule(): Promise<GatewayModule> {
-  if (gatewayModule) return gatewayModule;
-  gatewayModule = (await runtimeImport("discord.js")) as GatewayModule;
-  return gatewayModule;
+  if (bot.gatewayModule) return bot.gatewayModule;
+  bot.gatewayModule = (await loadDiscordJs()) as unknown as GatewayModule;
+  return bot.gatewayModule;
 }
 
 /** Start the gateway client (idempotent). Returns a stop handle. */
 export function startDiscordBot(): () => void {
-  if (client || retryTimer || starting) return () => stopDiscordBot();
-  starting = true;
+  if (bot.client || bot.retryTimer || bot.starting) return () => stopDiscordBot();
+  bot.starting = true;
   void boot();
   return () => stopDiscordBot();
 }
 
 export async function stopDiscordBot(): Promise<void> {
-  starting = false;
-  waitingForConfig = false;
-  if (xpTimer) { clearInterval(xpTimer); xpTimer = null; }
-  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
-  const c = client;
-  client = null;
+  bot.starting = false;
+  bot.waitingForConfig = false;
+  if (bot.xpTimer) { clearInterval(bot.xpTimer); bot.xpTimer = null; }
+  if (bot.retryTimer) { clearTimeout(bot.retryTimer); bot.retryTimer = null; }
+  const c = bot.client;
+  bot.client = null;
   if (c) await c.destroy().catch(() => undefined);
+  setStatus("stopped");
   log.info("stopped");
 }
 
@@ -496,19 +597,22 @@ async function boot(): Promise<void> {
     const { getDiscordSettings } = await import("./discord-settings");
     const cfg = await getDiscordSettings();
     if (!cfg.botToken || !cfg.guildId) {
-      if (!waitingForConfig) {
+      if (!bot.waitingForConfig) {
         log.info("no bot token / guild configured — waiting for Settings → Discord configuration");
-        waitingForConfig = true;
+        bot.waitingForConfig = true;
       }
-      starting = false;
+      if (bot.status.state !== "unconfigured") setStatus("unconfigured");
+      bot.starting = false;
       scheduleRetry();
       return;
     }
-    waitingForConfig = false;
+    bot.waitingForConfig = false;
+    // Keep the reason for the last failure visible while the retry is in flight.
+    setStatus("connecting", { error: bot.status.error });
 
     // discord.js is big and only needed by the gateway; defer the import so
     // the panel boots fast and the next build stays lean.
-    const discordMod = (await runtimeImport("discord.js")) as {
+    const discordMod = (await loadDiscordJs()) as unknown as {
       Client: new (opts: { intents: number[]; partials: number[] }) => GatewayClient;
       GatewayIntentBits: Record<string, number>;
       Partials: Record<string, number>;
@@ -527,14 +631,19 @@ async function boot(): Promise<void> {
       // the DM-only !etverify command appear dead while guild commands work.
       partials: [Partials.Channel],
     });
-    client = asClient(discordClient);
+    bot.client = asClient(discordClient);
     void Client;
 
-    discordClient.once("ready", () => {
-      log.info(`logged in as ${discordClient.user?.tag ?? "unknown"}`);
-      if (!xpTimer) {
-        xpTimer = setInterval(() => void syncVerifiedUsersXp(), XP_SYNC_INTERVAL_MS);
-        xpTimer.unref?.();
+    // "clientReady" is the current name; "ready" is deprecated in discord.js 14
+    // and removed in 15.
+    discordClient.once("clientReady", () => {
+      // A newer client replaced this one while it was connecting.
+      if (bot.client !== asClient(discordClient)) return;
+      setStatus("online", { tag: discordClient.user?.tag ?? null });
+      log.info(`logged in as ${discordClient.user?.tag ?? "unknown"} — listening for ${PREFIX}commands`);
+      if (!bot.xpTimer) {
+        bot.xpTimer = setInterval(() => void syncVerifiedUsersXp(), XP_SYNC_INTERVAL_MS);
+        bot.xpTimer.unref?.();
         void syncVerifiedUsersXp();
       }
     });
@@ -554,21 +663,16 @@ async function boot(): Promise<void> {
     });
 
     await discordClient.login(cfg.botToken);
-    starting = false;
+    bot.starting = false;
   } catch (e: unknown) {
-    starting = false;
-    const dead = client;
-    client = null;
+    bot.starting = false;
+    const dead = bot.client;
+    bot.client = null;
     if (dead) await dead.destroy().catch(() => undefined);
     const msg = e instanceof Error ? e.message : String(e);
-    if (/Privileged|intent/i.test(msg)) {
-      log.error(
-        `login refused: ${msg.slice(0, 300)} — enable "Server Members Intent" and ` +
-          `"Message Content Intent" in the Discord Developer Portal → Bot → Privileged Gateway Intents.`
-      );
-    } else {
-      log.error(`login failed: ${msg.slice(0, 300)}`);
-    }
+    const explained = describeBotLoginError(msg);
+    setStatus("error", { error: explained });
+    log.error(explained === `Login failed: ${msg.slice(0, 300)}` ? explained : `${explained} [${msg.slice(0, 300)}]`);
     // Self-heal: retry once a minute; a fixed token or intent takes effect
     // without a panel restart. Guarded so only one retry arms.
     scheduleRetry();
@@ -595,6 +699,10 @@ async function handleMessage(message: MessageView): Promise<void> {
   const cmd = (parts[0] || "").toLowerCase();
   const arg = parts.slice(1).join(" ").trim();
   const cooldown = COOLDOWNS[cmd] ?? 0;
+  if (cmd in COOLDOWNS || cmd === "etall") {
+    bot.status.commandsHandled++;
+    bot.status.lastCommandAt = Date.now();
+  }
 
   if (cooldown > 0) {
     const wait = cooldownRemaining(`${message.author.id}:${cmd}`, cooldown);
@@ -701,8 +809,8 @@ async function handleMessage(message: MessageView): Promise<void> {
       // Best-effort role grant (needs the guild cached by the gateway).
       try {
         const cfg = await loadBotConfig();
-        if (client && cfg) {
-          const guild = await client.guilds.fetch(cfg.guildId);
+        if (bot.client && cfg) {
+          const guild = await bot.client.guilds.fetch(cfg.guildId);
           const roleId = await ensureVerifiedRole(guild);
           const member = await guild.members.fetch(message.author.id);
           await member.roles.add(roleId).catch(() => undefined);
@@ -736,7 +844,7 @@ async function handleMessage(message: MessageView): Promise<void> {
       // wins; from a DM the configured guild is used (the original scanned
       // its mutual guilds as a last resort — same effective outcome).
       const cfg = await loadBotConfig();
-      if (!client || !cfg) {
+      if (!bot.client || !cfg) {
         await message.reply({ content: "❌ The bot is not connected right now." });
         return;
       }
@@ -744,7 +852,7 @@ async function handleMessage(message: MessageView): Promise<void> {
       let member: MemberView;
       try {
         const guildId = !message.guild || message.guild.id === cfg.guildId ? cfg.guildId : message.guild.id;
-        guild = await client.guilds.fetch(guildId);
+        guild = await bot.client.guilds.fetch(guildId);
         member = message.guild && message.member
           ? (message.member as MemberView)
           : await guild.members.fetch(message.author.id);
@@ -803,8 +911,8 @@ async function handleMessage(message: MessageView): Promise<void> {
       }
       try {
         const cfg = await loadBotConfig();
-        if (client && cfg) {
-          const guild = await client.guilds.fetch(cfg.guildId);
+        if (bot.client && cfg) {
+          const guild = await bot.client.guilds.fetch(cfg.guildId);
           const role = guild.roles.cache.get("ET Verified");
           if (role) {
             const member = await guild.members.fetch(message.author.id);
@@ -845,7 +953,7 @@ const ROLE_COLOR_TTL_MS = 10 * 60_000;
  */
 export async function rosterRoleColors(names: string[]): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
-  if (!client || !names || names.length === 0) return out;
+  if (!bot.client || !names || names.length === 0) return out;
   try {
     const { matchRoleColors, rosterKey } = await import("./discord-roster");
     const cfg = await loadBotConfig();
@@ -875,7 +983,7 @@ export async function rosterRoleColors(names: string[]): Promise<Record<string, 
         : null;
       if (!cached || now - cached.at >= ROLE_COLOR_TTL_MS) {
         try {
-          const guild = await client.guilds.fetch(cfg.guildId);
+          const guild = await bot.client.guilds.fetch(cfg.guildId);
           const member = await guild.members.fetch(v.discordId);
           hex = memberTopRoleHex(member);
         } catch {
@@ -938,9 +1046,9 @@ async function handleInteraction(interaction: unknown): Promise<void> {
   } catch {
     return;
   }
-  if (!client) return;
+  if (!bot.client) return;
   try {
-    const guild = await client.guilds.fetch(guildId);
+    const guild = await bot.client.guilds.fetch(guildId);
     if (i.user.id !== guild.ownerId) {
       await i.reply?.({ content: "❌ This button is only for the server owner.", ephemeral: true });
       return;
@@ -961,9 +1069,9 @@ export async function syncVerifiedUsersXp(): Promise<void> {
     const source = await loadEtStatsData();
     if (!source) return;
     const cfg = await loadBotConfig();
-    if (!client || !cfg) return;
+    if (!bot.client || !cfg) return;
 
-    const guild = await client.guilds.fetch(cfg.guildId);
+    const guild = await bot.client.guilds.fetch(cfg.guildId);
     // Original behaviour: without Manage Nicknames the whole run is pointless.
     if (!botCanManageNicks(guild)) {
       log.warn("XP sync skipped — bot lacks the Manage Nicknames permission");

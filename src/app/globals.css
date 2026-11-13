@@ -269,3 +269,16 @@ summary:focus-visible,
     scroll-behavior: auto !important;
   }
 }
+
+/* ── Install / update status meter ────────────────────────────────────────────
+   Shown while a step has no measurable percentage (extracting, apt, a download
+   of unknown size): a segment sliding across the track says "working" without
+   pretending to know how far along it is. */
+@keyframes gsm-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+.gsm-progress-indeterminate { animation: gsm-progress-slide 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .gsm-progress-indeterminate { animation: none; width: 100%; opacity: 0.45; }
+}

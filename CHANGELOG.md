@@ -6,6 +6,72 @@ All notable changes to GameServer Manager are documented here.
 
 ## [Unreleased]
 
+### 🤖 The Discord chat bot never logged in — `!` commands were dead in production
+
+`!etwho`, `!etallofoz`, `!stats` and the rest got no reply, with nothing on the
+settings page to say why. Two defects, one hiding behind the other:
+
+- **The gateway library could not load in a production build.** The bot loaded
+  discord.js through a helper that passed the package name as a variable, on
+  the theory that the bundler would leave it alone. Turbopack instead compiles
+  a non-literal `import()` into a stub that always rejects with *"Cannot find
+  module as expression is too dynamic"*. So after `next build` the bot failed
+  before it ever contacted Discord, logged `login failed` once a minute, and
+  retried forever. The unit tests run the source directly, not the bundle, so
+  they never saw it. The import is now a literal `import("discord.js")`; the package
+  was already in `serverExternalPackages`, which is the supported way to keep
+  it out of the bundle. Verified against the build output: the stub is gone
+  and the import resolves to `node_modules/discord.js`.
+- **Two copies of the bot.** Next bundles the bot module once for the boot hook
+  and once for the API routes, and its connection state lived in module
+  variables. Saving the Discord settings "restarted" a copy that had never
+  started while the boot copy kept its own connection — two gateway clients,
+  which would have answered every command twice once login worked. The state
+  now lives in one shared object, so there is exactly one bot per process.
+- **The settings page says what the bot is doing.** Settings → Discord shows
+  the live gateway state: online (with the bot's tag and how many commands it
+  has received), connecting, not configured, disabled, or the reason the last
+  login failed in plain terms — privileged intents off, token rejected,
+  library missing, Discord unreachable — each with the fix.
+- Listens for `clientReady` instead of the deprecated `ready` event.
+
+### 📊 Live status meter for game server installs and updates
+
+Installing or updating a server used to be a disabled button and a wait of
+anywhere from two to forty minutes, with the log only appearing at the end. The
+server card now shows a live meter for the whole run.
+
+- **What is being downloaded and installed, as it happens.** The meter names
+  the current step and item ("Downloading game files — Valheim (AppID:
+  896660)", "Downloading etlegacy-v2.83.1-x86_64.tar.gz", "Installing mod:
+  legacy", "Creating the pre-update backup", "Writing server config and start
+  scripts", "Verifying installed files"), with percent, bytes done / total,
+  download speed, time remaining and elapsed time. Steps with no measurable
+  size (extracting, apt) show a moving bar rather than an invented number.
+- **Details on demand.** "Show details" lists the steps completed so far and a
+  live tail of the installer output, with progress-bar redraws collapsed the
+  way a terminal would show them.
+- **Reads the tools' own output.** `src/lib/install-progress.ts` understands
+  SteamCMD (`Update state … progress: 42.10 (bytes / total)`, its self-update,
+  and the success line), curl and wget meters, apt/dpkg, and the templates'
+  own announcements. Because the templates run curl silently, install/update
+  scripts get a small bash prelude that makes *file* downloads announce
+  themselves and report a percentage; metadata calls (JSON APIs, HEAD probes,
+  anything captured into a variable) are passed through untouched.
+- **Everywhere an install or update runs.** Single install/update, "Install
+  All", batch update, staged rollout, and scheduled updates — and a run started
+  by someone else or by the scheduler shows up too, since the meter follows the
+  server's `installing` status. `GET /api/servers/{id}/progress` serves it,
+  with the same access rule as the console log (owner, admin, or operator
+  collaborator).
+- **Remote nodes.** Node agent **v1.1.0** adds `/rpc/install-progress`, which
+  the panel polls only while someone is watching. Older agents keep working:
+  the install runs as before and the meter says the agent needs updating to
+  show download details.
+- **Cleaner final logs.** Progress-bar redraws are stripped from the saved
+  install/update log, so the real output is no longer buried.
+
+
 ### 🔌 "Unknown Webhook" (10015) — the panel says what it means and repairs it
 
 Discord answers a deleted webhook with `{"message": "Unknown Webhook", "code":

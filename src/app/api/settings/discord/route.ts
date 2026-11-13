@@ -14,6 +14,14 @@ async function requireAdmin(req: NextRequest) {
   return (await hasPermission(auth.userId, "panel.settings", auth.keyScope)) ? auth : null;
 }
 
+async function chatBotStatus() {
+  if (process.env.GSM_DISABLE_DISCORD_BOT === "true") {
+    return { state: "disabled" as const, tag: null, error: null, since: 0, commandsHandled: 0, lastCommandAt: null };
+  }
+  const { getDiscordBotStatus } = await import("@/lib/discord-bot");
+  return getDiscordBotStatus();
+}
+
 /**
  * GET /api/settings/discord
  *
@@ -41,6 +49,9 @@ export async function GET(req: NextRequest) {
       botReady: Boolean(s.botToken && s.guildId),
       oauthClientId: s.oauthClientId,
       oauthConfigured: isOauthConfigured(s),
+      // Live gateway state of the chat-command bot, so "the commands do
+      // nothing" has an answer on the settings page instead of in the logs.
+      bot: await chatBotStatus(),
     });
   } catch (e: unknown) {
     return apiError(e, "Could not read Discord settings", 500);

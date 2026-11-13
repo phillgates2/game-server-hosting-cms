@@ -11,6 +11,15 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { getTemplateBySlug, getExpectedArtifactsBySlug, type TemplateVariable } from "@/db/seeds";
 import { renderConfigFile, resolveConfigFiles } from "@/lib/config-render";
 import { apiError } from "@/lib/api-error";
+import {
+  attachRemoteSource,
+  beginProgress,
+  collapseCarriageReturns,
+  feedProgress,
+  finishProgress,
+  setProgressStage,
+  withProgressHelpers,
+} from "@/lib/install-progress";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,7 +55,7 @@ async function findBash(): Promise<string> {
 function runScript(
   shellPath: string,
   scriptPath: string,
-  options: { cwd: string; env: Record<string, string>; timeout: number }
+  options: { cwd: string; env: Record<string, string>; timeout: number; onOutput?: (chunk: string) => void }
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     let stdout = "";
@@ -66,8 +75,10 @@ function runScript(
       }
     }, options.timeout);
 
-    child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
-    child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    // Feed the live status meter; it must never be able to break an install.
+    const emit = (text: string) => { try { options.onOutput?.(text); } catch { /* ignore */ } };
+    child.stdout?.on("data", (chunk: Buffer) => { const t = chunk.toString(); stdout += t; emit(t); });
+    child.stderr?.on("data", (chunk: Buffer) => { const t = chunk.toString(); stderr += t; emit(t); });
 
     child.on("error", (err: Error) => {
       if (!finished) {
@@ -81,6 +92,9 @@ function runScript(
       if (!finished) {
         finished = true;
         clearTimeout(timer);
+        // Progress-bar redraws are for the live meter, not the final log.
+        stdout = collapseCarriageReturns(stdout);
+        stderr = collapseCarriageReturns(stderr);
         if (code === 0) {
           resolve({ stdout, stderr });
         } else {
@@ -391,10 +405,39 @@ async function verifyInstalledArtifacts(installPath: string, renderedStartComman
   return { checks, missing };
 }
 
+/** The live-meter run this request owns (set once the install is claimed). */
+interface ProgressRun { serverId: number; token: number }
+
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  ctx: { params: Promise<{ id: string }> }
 ) {
+  // The body below has many exits; closing the status meter here guarantees
+  // every one of them (success, failure, throw) ends the run exactly once.
+  const run: { current: ProgressRun | null } = { current: null };
+  let res: NextResponse;
+  try {
+    res = await installServer(req, ctx, run);
+  } catch (e: unknown) {
+    if (run.current) finishProgress(run.current.serverId, run.current.token, { ok: false, error: e instanceof Error ? e.message : "Install failed" });
+    throw e;
+  }
+  if (run.current) {
+    let error: string | null = null;
+    if (!res.ok) {
+      const data = (await res.clone().json().catch(() => null)) as { error?: string } | null;
+      error = data?.error || "Install failed";
+    }
+    finishProgress(run.current.serverId, run.current.token, { ok: res.ok, error });
+  }
+  return res;
+}
+
+async function installServer(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+  run: { current: ProgressRun | null }
+): Promise<NextResponse> {
   const auth = await getCurrentUser(req.headers);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!(await hasPermission(auth.userId, "servers.install", auth.keyScope))) {
@@ -459,6 +502,14 @@ export async function POST(
       .set({ status: "installing", updatedAt: new Date() })
       .where(eq(gameServers.id, server.id));
 
+    const progressToken = beginProgress({
+      serverId: server.id,
+      kind: "install",
+      title: server.gameName || server.name,
+      remote: !server.nodeIsLocal,
+    });
+    run.current = { serverId: server.id, token: progressToken };
+
     // Remote nodes without an agent URL cannot install anything.
     if (!server.nodeIsLocal && !server.nodeApiUrl) {
       await db.update(gameServers).set({ status: "install_failed", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
@@ -491,7 +542,7 @@ export async function POST(
     normalizeTemplateBooleans(variables, latestTemplate?.variables);
     const script = replaceTemplateVariables(installScriptSource, variables);
 
-    const fullScript = `#!/usr/bin/env bash
+    const fullScript = withProgressHelpers(`#!/usr/bin/env bash
 set -e
 
 echo "=== GameServer Manager Install ==="
@@ -513,13 +564,18 @@ ${script}
 
 echo ""
 echo "=== Installation Complete ==="
-`;
+`);
 
     // Remote node: ship the rendered script to the agent, which runs it
     // contained inside GSM_SERVERS_ROOT. (Stage 48: the old code POSTed to
     // an /install endpoint the agent never had, so remote installs 404'd.)
     if (!server.nodeIsLocal) {
       try {
+        const { remoteInstallOutput } = await import("@/lib/node-client");
+        const progressEndpoint = { apiUrl: server.nodeApiUrl!, apiKey: server.nodeApiKey || "" };
+        attachRemoteSource(server.id, progressToken, (offset) =>
+          remoteInstallOutput(progressEndpoint, effectiveInstallPath, offset)
+        );
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 30 * 60_000);
         const res = await fetch(`${server.nodeApiUrl!.replace(/\/$/, "")}/rpc/install`, {
@@ -534,6 +590,7 @@ echo "=== Installation Complete ==="
         clearTimeout(timer);
 
         const data = (await res.json().catch(() => null)) as { ok?: boolean; exitCode?: number; output?: string } | null;
+        if (data?.output) data.output = collapseCarriageReturns(data.output);
         if (!res.ok || !data?.ok) {
           await db.update(gameServers).set({ status: "install_failed", updatedAt: new Date() }).where(eq(gameServers.id, server.id));
           return NextResponse.json({
@@ -544,6 +601,7 @@ echo "=== Installation Complete ==="
 
         // Ship the panel-generated files (env/start/stop/configs/readme) to
         // the remote box too — without them the server can never start.
+        setProgressStage(server.id, progressToken, "configuring", "Writing server config and start scripts");
         const { remoteFs } = await import("@/lib/node-client");
         const nodeEndpoint = { apiUrl: server.nodeApiUrl!, apiKey: server.nodeApiKey || "" };
         const fileSet = buildServerFileSet({
@@ -652,7 +710,10 @@ echo "=== Installation Complete ==="
         cwd: tempDir,
         env,
         timeout: 1000 * 60 * 45, // 45 min
+        onOutput: (chunk) => feedProgress(server.id, progressToken, chunk),
       });
+
+      setProgressStage(server.id, progressToken, "configuring", "Writing server config and start scripts");
 
       const generatedFiles = await materializeServerFiles({
         installPath: effectiveInstallPath,
@@ -665,6 +726,7 @@ echo "=== Installation Complete ==="
       });
 
       const forwardedPorts = await applyServerPortForwarding(server);
+      setProgressStage(server.id, progressToken, "verifying", "Verifying installed files");
       const renderedStartCommand = startCommandSource ? replaceTemplateVariables(startCommandSource, variables) : "";
       const explicitArtifacts = server.gameSlug ? getExpectedArtifactsBySlug(server.gameSlug) : [];
       const verification = await verifyInstalledArtifacts(effectiveInstallPath, renderedStartCommand, explicitArtifacts);

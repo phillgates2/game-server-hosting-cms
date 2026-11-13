@@ -21,6 +21,9 @@
  *   /rpc/install   → { installPath, script, timeoutMs? }  (Stage 48: remote
  *                     game installs — the panel ships the rendered install
  *                     script, the agent runs it contained in SERVERS_ROOT)
+ *   /rpc/install-progress → { installPath, offset }  output a running install
+ *                     has produced since `offset`, for the panel's live
+ *                     status meter → { running, offset, output }
  *   /rpc/disk      → { path }
  *
  * Threat model: the network between panel and agent is not trusted. The key
@@ -46,7 +49,24 @@ import {
 import { resolve, sep, join, relative, basename, extname } from "node:path";
 import { hostname, loadavg, cpus } from "node:os";
 
-export const AGENT_VERSION = "1.0.0";
+export const AGENT_VERSION = "1.1.0";
+
+/**
+ * Output of install/update scripts, keyed by contained install dir, so the
+ * panel can show a live status meter while /rpc/install is still running.
+ * `total` counts every character ever produced; `output` is the bounded tail.
+ */
+const installJobs = new Map();
+const INSTALL_JOB_BUFFER = 200_000;
+const INSTALL_JOB_RETAIN_MS = 5 * 60_000;
+
+/** Slice a job's buffered output from an absolute character offset. */
+export function installOutputSince(job, offset) {
+  if (!job) return { running: false, offset: 0, output: "" };
+  const start = job.total - job.output.length;
+  const from = Math.min(Math.max(Number(offset) || 0, start), job.total);
+  return { running: job.running, offset: job.total, output: job.output.slice(from - start) };
+}
 const MAX_BODY_BYTES = 32 * 1024 * 1024; // migration chunks ride through JSON
 const STOP_GRACE_MS = 5_000;
 
@@ -679,15 +699,29 @@ export function createAgentHandler(cfg) {
           const result = await new Promise((resolveP) => {
             let output = "";
             let done = false;
+            const job = { output: "", total: 0, running: true };
+            installJobs.set(dir, job);
+            const endJob = () => {
+              job.running = false;
+              const t = setTimeout(() => {
+                if (installJobs.get(dir) === job) installJobs.delete(dir);
+              }, INSTALL_JOB_RETAIN_MS);
+              t.unref?.();
+            };
             const append = (chunk) => {
-              output += chunk.toString();
+              const text = chunk.toString();
+              output += text;
               if (output.length > 200_000) output = output.slice(-200_000);
+              job.total += text.length;
+              job.output += text;
+              if (job.output.length > INSTALL_JOB_BUFFER) job.output = job.output.slice(-INSTALL_JOB_BUFFER);
             };
             const child = spawn("bash", [scriptPath], { cwd: dir });
             const timer = setTimeout(() => {
               if (done) return;
               done = true;
               child.kill("SIGKILL");
+              endJob();
               resolveP({ ok: false, exitCode: -1, output: output.slice(-20_000) + "\n[killed: install timed out]" });
             }, timeoutMs);
             child.stdout.on("data", append);
@@ -696,6 +730,7 @@ export function createAgentHandler(cfg) {
               if (done) return;
               done = true;
               clearTimeout(timer);
+              endJob();
               resolveP({ ok: false, exitCode: -1, output: String(e.message || e) });
             });
             child.on("close", (code) => {
@@ -703,6 +738,9 @@ export function createAgentHandler(cfg) {
               done = true;
               clearTimeout(timer);
               rm(scriptPath).catch(() => undefined);
+              endJob();
+              // Progress-bar redraws (\r) are for the live meter, not the final log.
+              output = output.replace(/[^\n\r]*\r(?!\n)/g, "");
               resolveP({ ok: code === 0, exitCode: code ?? -1, output: output.slice(-20_000) });
             });
           });
@@ -710,6 +748,12 @@ export function createAgentHandler(cfg) {
         } catch (e) {
           return send(res, 500, { ok: false, exitCode: -1, output: String((e && e.message) || e) });
         }
+      }
+
+      if (url === "/rpc/install-progress") {
+        const dir = containedPath(root, body.installPath);
+        if (!dir) return send(res, 400, { error: "installPath outside the allowed root" });
+        return send(res, 200, installOutputSince(installJobs.get(dir), body.offset));
       }
 
       if (url === "/rpc/disk") {

@@ -285,4 +285,55 @@ describe("node agent end-to-end", () => {
     const evil2 = await rpc("/rpc/backup", { action: "restore", installPath: srv, name: "backup-foo.tar.gz; rm -rf /" });
     assert.equal(evil2.status, 400);
   });
+
+  test("install-progress: output of a running install is readable mid-run", async () => {
+    const srv = join(root, "srv-progress");
+    // Nothing has run there yet.
+    const idle = await rpc("/rpc/install-progress", { installPath: srv, offset: 0 });
+    assert.equal(idle.status, 200);
+    assert.deepEqual(idle.data, { running: false, offset: 0, output: "" });
+
+    const script = [
+      "#!/usr/bin/env bash",
+      'echo " Update state (0x61) downloading, progress: 40.00 (40 / 100)"',
+      "sleep 1.5",
+      "printf '##  50.0%%\\r#### 100.0%%\\n' >&2",
+      'echo "Success! App \'1\' fully installed."',
+    ].join("\n");
+    const install = rpc("/rpc/install", { installPath: srv, script });
+
+    // Poll like the panel does until the first line shows up.
+    let offset = 0;
+    let seen = "";
+    let sawRunning = false;
+    for (let i = 0; i < 40 && !seen.includes("progress: 40.00"); i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      const p = await rpc("/rpc/install-progress", { installPath: srv, offset });
+      assert.equal(p.status, 200);
+      seen += String(p.data.output);
+      offset = Number(p.data.offset);
+      sawRunning = sawRunning || p.data.running === true;
+    }
+    assert.match(seen, /progress: 40\.00/);
+    assert.equal(sawRunning, true, "the install was still running when its output was read");
+    assert.doesNotMatch(seen, /Success!/);
+
+    const done = await install;
+    assert.equal(done.status, 200);
+    assert.equal(done.data.ok, true);
+    // Final log: bar redraws collapsed to their last state.
+    assert.doesNotMatch(String(done.data.output), /50\.0%/);
+    assert.match(String(done.data.output), /#### 100\.0%/);
+
+    // The remainder is served from the saved offset, exactly once.
+    const rest = await rpc("/rpc/install-progress", { installPath: srv, offset });
+    assert.equal(rest.data.running, false);
+    assert.match(String(rest.data.output), /Success! App '1' fully installed\./);
+    const again = await rpc("/rpc/install-progress", { installPath: srv, offset: Number(rest.data.offset) });
+    assert.equal(again.data.output, "");
+
+    // Containment applies here like everywhere else.
+    const esc = await rpc("/rpc/install-progress", { installPath: "/etc", offset: 0 });
+    assert.equal(esc.status, 400);
+  });
 });

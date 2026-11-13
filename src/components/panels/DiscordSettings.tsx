@@ -29,6 +29,15 @@ interface DiscordConfig {
   extraServers: string;
   masterUrls: string;
   botReady: boolean;
+  /** Live gateway state of the chat-command bot. */
+  bot?: {
+    state: "stopped" | "unconfigured" | "connecting" | "online" | "error" | "disabled";
+    tag: string | null;
+    error: string | null;
+    since: number;
+    commandsHandled: number;
+    lastCommandAt: number | null;
+  };
   oauthClientId: string;
   oauthConfigured: boolean;
 }
@@ -71,6 +80,18 @@ export default function DiscordSettings() {
   const [boardBotReady, setBoardBotReady] = useState(false);
   const [boardBusy, setBoardBusy] = useState<number | "interval" | null>(null);
   const [boardMsg, setBoardMsg] = useState<{ kind: "ok" | "err" | "info"; text: string } | null>(null);
+
+  // Status only: must not overwrite fields the admin is in the middle of editing.
+  const refreshBotStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/settings/discord", { cache: "no-store" });
+      if (!res.ok) return;
+      const data: DiscordConfig = await res.json();
+      setCfg((prev) => (prev ? { ...prev, bot: data.bot } : data));
+    } catch {
+      /* keep the last known status */
+    }
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -391,6 +412,8 @@ export default function DiscordSettings() {
           )}
         </div>
 
+        {cfg?.bot && <ChatBotStatus bot={cfg.bot} onRefresh={() => void refreshBotStatus()} />}
+
         <details className="text-xs text-text-muted bg-bg-secondary rounded-lg p-3">
           <summary className="cursor-pointer text-text-secondary font-medium">🤖 Chat bot commands (WolfET-style)</summary>
           <p className="mt-2 leading-relaxed">
@@ -597,5 +620,68 @@ export default function DiscordSettings() {
         )}
       </div>
     </form>
+  );
+}
+
+/**
+ * Live state of the chat-command bot's gateway connection. Without this the
+ * only sign of a bot that never logged in was silence in Discord.
+ */
+function ChatBotStatus({ bot, onRefresh }: { bot: NonNullable<DiscordConfig["bot"]>; onRefresh: () => void }) {
+  const view: Record<typeof bot.state, { dot: string; tone: string; title: string; hint: string }> = {
+    online: {
+      dot: "bg-success",
+      tone: "border-success/30 bg-success/5",
+      title: `Chat bot online${bot.tag ? ` as ${bot.tag}` : ""}`,
+      hint:
+        bot.commandsHandled > 0
+          ? `${bot.commandsHandled} command${bot.commandsHandled === 1 ? "" : "s"} received since it connected.`
+          : "Connected and listening. If !etwho gets no reply, check that the bot can View Channel, Send Messages and Embed Links in that channel, and that Message Content Intent is enabled.",
+    },
+    connecting: {
+      dot: "bg-warning",
+      tone: "border-warning/30 bg-warning/5",
+      title: "Chat bot connecting…",
+      hint: bot.error || "Logging in to Discord.",
+    },
+    error: {
+      dot: "bg-danger",
+      tone: "border-danger/30 bg-danger/5",
+      title: "Chat bot is not connected — commands will not work",
+      hint: bot.error || "The last login attempt failed. It retries every minute.",
+    },
+    unconfigured: {
+      dot: "bg-text-muted",
+      tone: "border-border bg-bg-secondary",
+      title: "Chat bot not configured",
+      hint: "Save a bot token and server ID to start the command bot.",
+    },
+    stopped: {
+      dot: "bg-text-muted",
+      tone: "border-border bg-bg-secondary",
+      title: "Chat bot is not running",
+      hint: "It starts with the panel. If this persists after a restart, check that GSM_DISABLE_AUTOSTART is not set.",
+    },
+    disabled: {
+      dot: "bg-text-muted",
+      tone: "border-border bg-bg-secondary",
+      title: "Chat bot disabled",
+      hint: "GSM_DISABLE_DISCORD_BOT=true is set in the panel environment.",
+    },
+  };
+  const v = view[bot.state] ?? view.stopped;
+  return (
+    <div className={`rounded-lg border p-3 text-xs ${v.tone}`} role="status">
+      <div className="flex items-center justify-between gap-3">
+        <p className="flex items-center gap-2 font-medium text-text-primary">
+          <span className={`inline-block h-2 w-2 rounded-full ${v.dot}`} aria-hidden="true" />
+          {v.title}
+        </p>
+        <button type="button" onClick={onRefresh} className="shrink-0 text-text-muted hover:text-text-primary underline-offset-2 hover:underline">
+          Refresh
+        </button>
+      </div>
+      <p className="mt-1 leading-relaxed text-text-secondary break-words">{v.hint}</p>
+    </div>
   );
 }

@@ -2,6 +2,13 @@ import { access, chmod, constants, mkdtemp, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
+import {
+  beginProgress,
+  collapseCarriageReturns,
+  feedProgress,
+  finishProgress,
+  withProgressHelpers,
+} from "./install-progress";
 
 async function findBash(): Promise<string> {
   for (const p of ["/usr/bin/bash", "/bin/bash", "/usr/local/bin/bash"]) {
@@ -22,12 +29,27 @@ export async function runSteamUpdate(options: {
   /** SteamCMD directory (node configuration); defaults to /opt/steamcmd. */
   steamcmdDir?: string;
   timeoutMs?: number;
+  /** When set, the run is tracked for the live status meter of this server. */
+  progressServerId?: number;
 }): Promise<{ stdout: string; stderr: string }> {
-  return runUpdateScript({
-    installPath: options.installPath,
-    script: buildSteamUpdateScript(options),
-    timeoutMs: options.timeoutMs,
-  });
+  const serverId = options.progressServerId;
+  const token =
+    serverId === undefined ? null : beginProgress({ serverId, kind: "update", title: options.gameName });
+  try {
+    const result = await runUpdateScript({
+      installPath: options.installPath,
+      script: buildSteamUpdateScript(options),
+      timeoutMs: options.timeoutMs,
+      onOutput: token === null ? undefined : (chunk) => feedProgress(serverId!, token, chunk),
+    });
+    if (token !== null) finishProgress(serverId!, token, { ok: true });
+    return result;
+  } catch (e: unknown) {
+    if (token !== null) {
+      finishProgress(serverId!, token, { ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+    throw e;
+  }
 }
 
 export function buildSteamUpdateScript(options: {
@@ -77,12 +99,14 @@ export async function runUpdateScript(options: {
   installPath: string;
   script: string;
   timeoutMs?: number;
+  /** Receives stdout/stderr as it is produced (live status meter). */
+  onOutput?: (chunk: string) => void;
 }): Promise<{ stdout: string; stderr: string }> {
   const bashPath = await findBash();
   const timeoutMs = options.timeoutMs ?? 1000 * 60 * 30;
   const tempDir = await mkdtemp(join(/* turbopackIgnore: true */ tmpdir(), "gsm-update-"));
   const scriptPath = join(/* turbopackIgnore: true */ tempDir, "update.sh");
-  await writeFile(scriptPath, options.script, "utf8");
+  await writeFile(scriptPath, withProgressHelpers(options.script), "utf8");
   await chmod(scriptPath, 0o755);
 
   try {
@@ -110,11 +134,22 @@ export async function runUpdateScript(options: {
         }
       }, timeoutMs);
 
+      const emit = (text: string) => {
+        try {
+          options.onOutput?.(text);
+        } catch {
+          /* the meter must never break an update */
+        }
+      };
       child.stdout?.on("data", (d: Buffer) => {
-        stdout += d.toString();
+        const text = d.toString();
+        stdout += text;
+        emit(text);
       });
       child.stderr?.on("data", (d: Buffer) => {
-        stderr += d.toString();
+        const text = d.toString();
+        stderr += text;
+        emit(text);
       });
       child.on("error", (e: Error) => {
         if (!done) {
@@ -127,6 +162,9 @@ export async function runUpdateScript(options: {
         if (!done) {
           done = true;
           clearTimeout(timer);
+          // Progress-bar redraws are for the live meter, not the final log.
+          stdout = collapseCarriageReturns(stdout);
+          stderr = collapseCarriageReturns(stderr);
           if (code === 0) {
             resolve({ stdout, stderr });
           } else {
