@@ -6,6 +6,35 @@ All notable changes to GameServer Manager are documented here.
 
 ## [Unreleased]
 
+### 🤖 The Discord chat bot never logged in — `!` commands were dead in production
+
+`!etwho`, `!etallofoz`, `!stats` and the rest got no reply, with nothing on the
+settings page to say why. Two defects, one hiding behind the other:
+
+- **The gateway library could not load in a production build.** The bot loaded
+  discord.js through a helper that passed the package name as a variable, on
+  the theory that the bundler would leave it alone. Turbopack instead compiles
+  a non-literal `import()` into a stub that always rejects with *"Cannot find
+  module as expression is too dynamic"*. So after `next build` the bot failed
+  before it ever contacted Discord, logged `login failed` once a minute, and
+  retried forever. The unit tests run the source directly, not the bundle, so
+  they never saw it. The import is now a literal `import("discord.js")`; the package
+  was already in `serverExternalPackages`, which is the supported way to keep
+  it out of the bundle. Verified against the build output: the stub is gone
+  and the import resolves to `node_modules/discord.js`.
+- **Two copies of the bot.** Next bundles the bot module once for the boot hook
+  and once for the API routes, and its connection state lived in module
+  variables. Saving the Discord settings "restarted" a copy that had never
+  started while the boot copy kept its own connection — two gateway clients,
+  which would have answered every command twice once login worked. The state
+  now lives in one shared object, so there is exactly one bot per process.
+- **The settings page says what the bot is doing.** Settings → Discord shows
+  the live gateway state: online (with the bot's tag and how many commands it
+  has received), connecting, not configured, disabled, or the reason the last
+  login failed in plain terms — privileged intents off, token rejected,
+  library missing, Discord unreachable — each with the fix.
+- Listens for `clientReady` instead of the deprecated `ready` event.
+
 ### 📊 Live status meter for game server installs and updates
 
 Installing or updating a server used to be a disabled button and a wait of

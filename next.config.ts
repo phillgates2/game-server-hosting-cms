@@ -52,9 +52,11 @@ const csp = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
-  // The gateway bot is loaded at runtime via a non-analyzable import; keep it
-  // out of the bundler so server bundles stay small on memory-constrained
-  // hosts. (sql.js was deliberately dropped — a zero-dependency SQLite reader
+  // The gateway bot's library stays out of the bundler (server bundles stay
+  // small on memory-constrained hosts) and is resolved from node_modules at
+  // runtime. This entry is what makes the literal `import("discord.js")` in
+  // src/lib/discord-bot.ts work — do not replace that with a variable
+  // specifier: Turbopack turns those into a stub that always throws. (sql.js was deliberately dropped — a zero-dependency SQLite reader
   // replaced it, see src/lib/sqlite-reader.ts.)
   serverExternalPackages: ["discord.js"],
   outputFileTracingExcludes: {

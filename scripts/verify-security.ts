@@ -852,6 +852,9 @@ console.log("\nH2/H3 auth enforcement wiring");
     "discord.js stays out of the server bundle and the sqlite reader is dep-free",
     /serverExternalPackages/.test(read("../next.config.ts")) &&
       /discord\.js/.test(read("../next.config.ts")) &&
+      // A variable-specifier import compiles to a stub that always throws
+      // under Turbopack; the bot must import its gateway library literally.
+      /import\("discord\.js"\)/.test(botMod) && !/runtimeImport/.test(botMod) &&
       /readSqliteTable/.test(read("../src/lib/sqlite-reader.ts")) &&
       !/sql\.js/.test(read("../src/lib/et-stats.ts"))
   );
