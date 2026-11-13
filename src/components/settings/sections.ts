@@ -136,8 +136,8 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionMeta[] = [
     icon: "🔔",
     group: "integrations",
     blurb:
-      "Notifications, the bot, a channel per server, and backfill for servers that predate the bot.",
-    keywords: ["discord", "bot", "channel", "webhook", "notifications", "backfill", "guild"],
+      "Connect your community with a guided setup: notifications, automatic channels, live status boards and Discord sign-in.",
+    keywords: ["discord", "bot", "channel", "webhook", "notifications", "backfill", "guild", "setup", "guide", "how to", "token", "intents", "permissions", "oauth", "login", "status board", "commands"],
     saveMode: "immediate",
     fieldKeys: [],
   },

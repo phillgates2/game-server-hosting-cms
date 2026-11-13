@@ -562,7 +562,7 @@ Two places to configure things, split by who they are for:
 
 | Where | What |
 |:--|:--|
-| **Settings** *(Administration)* | Eight screens: **Accounts & registration** (self-registration, default server quota, age verification with the Australian 16+ minimum), **Sign-in & sessions** (login attempt limit, session length, IP allowlist), **Retention & backups** (data retention, backup retention, pre-update auto-backup, export/restore), **Automation** (idle auto-stop, weekly fleet digest, scheduled-task announcements), **Host alerts** (CPU/RAM/disk thresholds and mute windows), **Outbound webhook** (with delivery log), **Discord** (webhook, bot, channels, backfill) and the **Public status page** embed codes |
+| **Settings** *(Administration)* | Eight screens: **Accounts & registration** (self-registration, default server quota, age verification with the Australian 16+ minimum), **Sign-in & sessions** (login attempt limit, session length, IP allowlist), **Retention & backups** (data retention, backup retention, pre-update auto-backup, export/restore), **Automation** (idle auto-stop, weekly fleet digest, scheduled-task announcements), **Host alerts** (CPU/RAM/disk thresholds and mute windows), **Outbound webhook** (with delivery log), **Discord** (guided setup, notifications, bot & channels, status boards, sign-in) and the **Public status page** embed codes |
 | **Site Editor** *(✏️ on the public site)* | Panel name, hero text, footer, announcements, navigation links, chat widget, **custom CSS**, and the **Terms of Service / Privacy Policy** text |
 
 Everything in **Settings** overrides the matching environment variable, so you
@@ -587,6 +587,29 @@ one search away:
   **Discard** puts every pending change back.
 
 <details>
+<summary><b>🧭 Discord setup guide and tabs</b></summary>
+
+<br>
+
+**Settings → Discord** opens on a setup guide rather than a wall of credentials.
+Choose the path you need:
+
+| Tab | What it does |
+|:--|:--|
+| **Setup guide** | Webhook quick start, four-step bot setup, a copyable invite link with only the permissions the panel uses, optional WolfET permissions, and troubleshooting. |
+| **Notifications** | Panel-wide fallback webhook, inline Discord instructions, and a test that uses the URL in the field without saving it. |
+| **Bot & channels** | Write-only bot token, server/category IDs, connection check and live gateway status, automatic channels, existing-server backfill, and WolfET discovery settings. |
+| **Status boards** | Per-server board controls and the refresh interval. These apply immediately with their own buttons. |
+| **Discord sign-in** | OAuth client ID/secret, a copyable redirect URL, and the existing 2FA/age-gate rules. |
+
+Configuration drafts are kept while you switch tabs and saved with one **Save
+changes** bar. Only changed fields are sent; leaving a saved bot token or OAuth
+secret blank keeps it. The guide's bot Application ID is only used to build an
+invite link and is never stored as a credential.
+
+</details>
+
+<details>
 <summary><b>🔔 Giving existing servers a Discord channel</b></summary>
 
 <br>
@@ -596,7 +619,7 @@ that already existed do not — and a channel someone deletes by hand in Discord
 leaves the panel posting into a webhook that silently returns 404, because
 webhook delivery never throws.
 
-**Settings → Discord → Existing servers** fixes both:
+**Settings → Discord → Bot & channels → Existing servers** fixes both:
 
 | Button | Does |
 |:--|:--|

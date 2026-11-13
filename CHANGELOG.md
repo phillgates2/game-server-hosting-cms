@@ -6,6 +6,20 @@ All notable changes to GameServer Manager are documented here.
 
 ## [Unreleased]
 
+### 🧭 Discord settings: a guided setup instead of one long credential form
+
+- **Settings → Discord** is now split into **Setup guide**, **Notifications**,
+  **Bot & channels**, **Status boards** and **Discord sign-in**. A compact
+  summary shows what is configured, and drafts survive switching tabs.
+- The guide explains the webhook-only path and the bot path separately, with
+  step-by-step Discord/Developer Portal instructions, a copyable least-privilege
+  bot invite (optional WolfET permissions), intent/role-hierarchy notes, and
+  troubleshooting for offline bots, silent commands and deleted webhooks.
+- Configuration saves only changed fields through the existing admin-only
+  endpoint; blank bot/OAuth secret inputs still keep stored credentials. Status
+  board controls keep their own immediate Apply/action buttons. Load failures,
+  validation errors and test/verify results are visible and retryable.
+
 ### 🤖 The Discord chat bot never logged in — `!` commands were dead in production
 
 `!etwho`, `!etallofoz`, `!stats` and the rest got no reply, with nothing on the
@@ -28,7 +42,7 @@ settings page to say why. Two defects, one hiding behind the other:
   started while the boot copy kept its own connection — two gateway clients,
   which would have answered every command twice once login worked. The state
   now lives in one shared object, so there is exactly one bot per process.
-- **The settings page says what the bot is doing.** Settings → Discord shows
+- **The settings page says what the bot is doing.** Settings → Discord → Bot & channels shows
   the live gateway state: online (with the bot's tag and how many commands it
   has received), connecting, not configured, disabled, or the reason the last
   login failed in plain terms — privileged intents off, token rejected,

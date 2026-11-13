@@ -1,687 +1,472 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { ArrowRight, BookOpen, MessagesSquare, RefreshCw, Save, X } from "lucide-react";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { BTN, Badge, INPUT, SectionCard } from "@/components/settings/settingsUi";
+import { CopyValue, DiscordGuide, PortalLink, type DiscordNavigate } from "@/components/settings/DiscordGuide";
+import { DiscordStatusBoards } from "@/components/settings/DiscordStatusBoards";
+import { fetchWithTimeout, messageForStatus, mutate } from "@/lib/api-client";
+import {
+  DISCORD_FORM_TABS,
+  discordChannelPreview,
+  discordFormChanges,
+  discordFormFromConfig,
+  discordFormPayload,
+  validateDiscordForm,
+  type DiscordConfigResponse,
+  type DiscordFormField,
+  type DiscordFormValues,
+  type DiscordSettingsTab,
+} from "@/lib/discord-form";
 
 /**
- * Discord integration settings.
- *
- * Rendered inside the dashboard Settings panel, but saves through its own
- * endpoint rather than the panel's: the bot token is a credential, so it goes
- * to /api/settings/discord (admin only, write-only, never echoed back) instead
- * of /api/site-settings, whose GET is public.
- *
- * That is also why it keeps its own save button — mixing a credential into a
- * bulk save alongside retention numbers would make it far too easy to leak the
- * token into the wrong endpoint later.
- *
- * Declared at module scope so React keeps a stable component type across
- * renders — nesting it would remount the inputs on every keystroke.
+ * Discord settings, split by job rather than stacked into one credential form.
+ * Configuration is staged across tabs and saved through the admin-only Discord
+ * endpoint. Status-board controls remain immediate actions with their own Apply
+ * button. Bot/OAuth secrets are never read back from the API.
  */
-
-interface DiscordConfig {
-  panelWebhook: string;
-  panelWebhookValid: boolean;
-  hasBotToken: boolean;
-  guildId: string;
-  categoryId: string;
-  autoChannel: boolean;
-  channelPrefix: string;
-  extraServers: string;
-  masterUrls: string;
-  botReady: boolean;
-  /** Live gateway state of the chat-command bot. */
-  bot?: {
-    state: "stopped" | "unconfigured" | "connecting" | "online" | "error" | "disabled";
-    tag: string | null;
-    error: string | null;
-    since: number;
-    commandsHandled: number;
-    lastCommandAt: number | null;
-  };
-  oauthClientId: string;
-  oauthConfigured: boolean;
-}
-
-interface BoardServer {
-  id: number;
-  name: string;
-  gameName: string;
-  status: string;
-  hasWebhook: boolean;
-  enabled: boolean;
-  messageId: string | null;
-  updatedAt: string | null;
-  error: string | null;
-  /** The panel created this channel, so it can rename it (needs the bot). */
-  hasChannel: boolean;
-  /** The 🟢/🔴 channel heading (channel name), updated with or without a board. */
-  heading: { name: string | null; updatedAt: string | null; error: string | null };
-}
-
-const inputCls =
-  "w-full px-3 sm:px-4 py-2.5 bg-bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent";
-
-export default function DiscordSettings() {
-  const [cfg, setCfg] = useState<DiscordConfig | null>(null);
-  const [panelWebhook, setPanelWebhook] = useState("");
-  const [botToken, setBotToken] = useState("");
-  const [guildId, setGuildId] = useState("");
-  const [categoryId, setCategoryId] = useState("");
-  const [channelPrefix, setChannelPrefix] = useState("");
-  const [autoChannel, setAutoChannel] = useState(false);
-  const [extraServers, setExtraServers] = useState("");
-  const [masterUrls, setMasterUrls] = useState("");
-  const [oauthClientId, setOauthClientId] = useState("");
-  const [oauthClientSecret, setOauthClientSecret] = useState("");
+export default function DiscordSettings({ children }: { children?: ReactNode }) {
+  const confirm = useConfirm();
+  const [cfg, setCfg] = useState<DiscordConfigResponse | null>(null);
+  const [form, setForm] = useState<DiscordFormValues | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [tab, setTab] = useState<DiscordSettingsTab>("guide");
   const [busy, setBusy] = useState<"" | "save" | "test" | "verify">("");
-  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
-  const [boards, setBoards] = useState<BoardServer[] | null>(null);
-  const [boardInterval, setBoardInterval] = useState(3);
-  const [boardBotReady, setBoardBotReady] = useState(false);
-  const [boardBusy, setBoardBusy] = useState<number | "interval" | null>(null);
-  const [boardMsg, setBoardMsg] = useState<{ kind: "ok" | "err" | "info"; text: string } | null>(null);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [feedback, setFeedback] = useState<{ kind: "ok" | "err" | "info"; text: string } | null>(null);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [focusTarget, setFocusTarget] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
+  const [inviteAppId, setInviteAppId] = useState("");
+  const [includeEtCommands, setIncludeEtCommands] = useState(false);
+  const [origin] = useState(() => typeof window === "undefined" ? "" : window.location.origin);
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
-  // Status only: must not overwrite fields the admin is in the middle of editing.
-  const refreshBotStatus = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal, initial = false) => {
+    if (initial) setLoading(true);
+    setLoadError(null);
     try {
-      const res = await fetch("/api/settings/discord", { cache: "no-store" });
-      if (!res.ok) return;
-      const data: DiscordConfig = await res.json();
-      setCfg((prev) => (prev ? { ...prev, bot: data.bot } : data));
-    } catch {
-      /* keep the last known status */
-    }
-  }, []);
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/settings/discord");
-      if (!res.ok) return;
-      const data: DiscordConfig = await res.json();
+      const res = await fetchWithTimeout("/api/settings/discord", { cache: "no-store", signal });
+      const data = await res.json().catch(() => null);
+      if (signal?.aborted) return false;
+      if (!res.ok || !data || typeof data.hasBotToken !== "boolean") {
+        setLoadError(messageForStatus(res.ok ? 500 : res.status, data?.error));
+        return false;
+      }
       setCfg(data);
-      setPanelWebhook(data.panelWebhook || "");
-      setGuildId(data.guildId || "");
-      setCategoryId(data.categoryId || "");
-      setChannelPrefix(data.channelPrefix || "");
-      setAutoChannel(Boolean(data.autoChannel));
-      setExtraServers(data.extraServers || "");
-      setMasterUrls(data.masterUrls || "");
-      setOauthClientId(data.oauthClientId || "");
+      setForm(discordFormFromConfig(data));
+      return true;
     } catch {
-      /* leave the form empty; the save call will surface any real problem */
+      if (!signal?.aborted) setLoadError("Could not load Discord settings. Check your connection and try again.");
+      return false;
+    } finally {
+      if (initial && !signal?.aborted) setLoading(false);
     }
   }, []);
 
-  const loadBoards = useCallback(async () => {
-    try {
-      const res = await fetch("/api/settings/discord/boards");
-      if (!res.ok) return;
-      const data = await res.json();
-      setBoards(data.servers || []);
-      setBoardInterval(data.intervalMinutes ?? 3);
-      setBoardBotReady(Boolean(data.botReady));
-    } catch {
-      setBoards([]);
-    }
-  }, []);
-
-  const didLoad = useRef(false);
   useEffect(() => {
-    // Guarded and deferred: the lint rule (rightly) rejects a synchronous
-    // setState inside an effect, and this only ever needs to run once.
-    if (didLoad.current) return;
-    didLoad.current = true;
-    const t = setTimeout(() => {
-      void load();
-      void loadBoards();
-    }, 0);
-    return () => clearTimeout(t);
-  }, [load, loadBoards]);
+    const controller = new AbortController();
+    const timer = setTimeout(() => void load(controller.signal, true), 0);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [load]);
 
-  async function boardAction(body: Record<string, unknown>, label: number | "interval") {
-    setBoardBusy(label);
-    setBoardMsg(null);
-    try {
-      const res = await fetch("/api/settings/discord/boards", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setBoardMsg({ kind: "err", text: data.error || "Request failed" });
-      } else {
-        setBoards(data.servers || []);
-        if (data.intervalMinutes) setBoardInterval(data.intervalMinutes);
-        if (label === "interval") setBoardMsg({ kind: "ok", text: `✅ Boards will refresh every ${data.intervalMinutes} min` });
-        // A deleted webhook is a permanent failure: the board would be posted
-        // to nothing, forever. Show Discord's own reason (10015) with the fix
-        // the backfill section offers, rather than just "updated".
-        else if (data.error) {
-          setBoardMsg({
-            kind: "err",
-            text: data.gone
-              ? `❌ ${data.error}`
-              : data.error,
-          });
-          if (data.gone) void loadBoards();
-        }
-        else if (body.action === "heading") {
-          setBoardMsg({
-            kind: data.skipped ? "info" : "ok",
-            text: data.skipped
-              ? `ℹ️ ${data.message || "The heading was left as it is"}`
-              : `✅ Channel heading is now “${data.name}”`,
-          });
-        } else setBoardMsg({ kind: "ok", text: "✅ Status board updated" });
-      }
-    } catch (e: unknown) {
-      setBoardMsg({ kind: "err", text: e instanceof Error ? e.message : "Request failed" });
-    } finally {
-      setBoardBusy(null);
-    }
+  const savedForm = useMemo(() => cfg ? discordFormFromConfig(cfg) : null, [cfg]);
+  const changes = useMemo(() => form && savedForm ? discordFormChanges(form, savedForm) : [], [form, savedForm]);
+  const errors = useMemo(() => form ? validateDiscordForm(form) : {}, [form]);
+  const visibleErrors = submitAttempted ? errors : Object.fromEntries(
+    Object.entries(errors).filter(([key]) => {
+      const value = form?.[key as DiscordFormField];
+      return key === "panelWebhook" || (typeof value === "string" && value.trim());
+    })
+  );
+
+  useEffect(() => {
+    if (!changes.length) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [changes.length]);
+
+  useEffect(() => {
+    if (!focusTarget) return;
+    const timer = setTimeout(() => {
+      const target = document.getElementById(focusTarget);
+      target?.scrollIntoView({ block: "center", behavior: "smooth" });
+      target?.focus({ preventScroll: true });
+      setFocusTarget(null);
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [focusTarget, tab]);
+
+  // Keep the selected pill visible when a guide/summary link jumps to a tab
+  // that is off-screen in the horizontal strip on phones.
+  useEffect(() => {
+    tabRefs.current[tab]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [tab]);
+
+  const navigate: DiscordNavigate = (nextTab, focusId) => {
+    setTab(nextTab);
+    setFocusTarget(focusId ?? null);
+  };
+
+  function patch(key: DiscordFormField, value: string | boolean) {
+    setForm((previous) => previous ? { ...previous, [key]: value } : previous);
   }
 
-  async function post(body: Record<string, unknown>, kind: "save" | "test" | "verify") {
-    setBusy(kind);
-    setMsg(null);
-    try {
-      const res = await fetch("/api/settings/discord", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setMsg({ kind: "err", text: data.error || "Request failed" });
-      } else if (kind === "verify") {
-        setMsg({ kind: "ok", text: `✅ Connected to “${data.guildName}”` });
-      } else if (kind === "test") {
-        setMsg({ kind: "ok", text: "✅ Test message sent — check the channel" });
-      } else {
-        setMsg({ kind: "ok", text: "✅ Saved" });
-        // The token is never returned, so clear the field once it is stored.
-        setBotToken("");
-        await load();
-      }
-    } catch (e: unknown) {
-      setMsg({ kind: "err", text: e instanceof Error ? e.message : "Request failed" });
-    } finally {
-      setBusy("");
-    }
-  }
-
-  function save(e: React.FormEvent) {
-    e.preventDefault();
-    const body: Record<string, unknown> = {
-      panelWebhook,
-      guildId,
-      categoryId,
-      channelPrefix,
-      autoChannel,
-      extraServers,
-      masterUrls,
+  function fieldProps(key: DiscordFormField) {
+    return {
+      id: `discord-${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`,
+      value: String(form?.[key] ?? ""),
+      onChange: (value: string) => patch(key, value),
+      error: visibleErrors[key],
+      disabled: busy !== "",
     };
-    // Only send the token when the admin actually typed one, so saving other
-    // fields does not wipe the stored credential.
-    if (botToken.trim()) body.botToken = botToken.trim();
-    body.oauthClientId = oauthClientId;
-    // Same write-only rule as the bot token.
-    if (oauthClientSecret.trim()) body.oauthClientSecret = oauthClientSecret.trim();
-    void post(body, "save");
   }
+
+  async function refreshBotStatus() {
+    setStatusBusy(true);
+    try {
+      const res = await fetchWithTimeout("/api/settings/discord", { cache: "no-store" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setFeedback({ kind: "err", text: messageForStatus(res.status, data?.error) });
+        return;
+      }
+      // Status refresh must never replace a credential the admin is editing.
+      setCfg((previous) => previous ? { ...previous, bot: data.bot } : previous);
+    } catch {
+      setFeedback({ kind: "err", text: "Could not refresh the bot status. Check your connection." });
+    } finally {
+      setStatusBusy(false);
+    }
+  }
+
+  async function check(kind: "test" | "verify") {
+    if (!form) return;
+    if (kind === "test" && errors.panelWebhook) {
+      setSubmitAttempted(true);
+      navigate("notifications", "discord-panel-webhook");
+      return;
+    }
+    if (kind === "verify" && errors.guildId) {
+      setSubmitAttempted(true);
+      navigate("bot", "discord-guild-id");
+      return;
+    }
+    setBusy(kind);
+    setFeedback(null);
+    const body = kind === "test"
+      ? { action: "test", panelWebhook: form.panelWebhook }
+      : { action: "verify", botToken: form.botToken.trim() || undefined, guildId: form.guildId };
+    const result = await mutate<{ guildName?: string; error?: string }>("/api/settings/discord", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!result.ok) {
+      setFeedback({ kind: "err", text: result.error || "The check failed." });
+    } else if (kind === "verify") {
+      setFeedback({ kind: "ok", text: `Connected to “${result.data?.guildName || "your Discord server"}”. Server access is working; the chat bot’s gateway status is shown separately below.` });
+      void refreshBotStatus();
+    } else {
+      const unsaved = changes.some((change) => change.key === "panelWebhook");
+      setFeedback({ kind: "ok", text: `Test message sent to the URL in the field. Check Discord.${unsaved ? " Save changes to use this URL for notifications." : ""}` });
+    }
+    setBusy("");
+  }
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    if (!form || busy) return;
+    if (Object.keys(errors).length) {
+      setSubmitAttempted(true);
+      const first = Object.keys(errors)[0] as DiscordFormField;
+      const destination = DISCORD_FORM_TABS.find((entry) => entry.id === (first === "panelWebhook" ? "notifications" : first.startsWith("oauth") ? "signin" : "bot"));
+      navigate(destination?.id ?? "bot", fieldProps(first).id);
+      setFeedback({ kind: "err", text: "Fix the highlighted fields before saving." });
+      return;
+    }
+    if (!changes.length) {
+      setFeedback({ kind: "info", text: "Everything already matches the saved configuration." });
+      return;
+    }
+    setBusy("save");
+    setFeedback(null);
+    const result = await mutate("/api/settings/discord", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(discordFormPayload(form, changes)),
+    });
+    if (!result.ok) {
+      setFeedback({ kind: "err", text: result.error || "Could not save. Your changes are still here." });
+    } else {
+      // The POST succeeded even if the follow-up GET fails: never leave a
+      // just-saved secret sitting in the draft while the operator retries.
+      setForm((previous) => previous ? { ...previous, botToken: "", oauthClientSecret: "" } : previous);
+      const refreshed = await load();
+      setRevision((value) => value + 1);
+      setSubmitAttempted(false);
+      setFeedback(refreshed
+        ? { kind: "ok", text: "Discord settings saved. Your changes are now active." }
+        : { kind: "info", text: "Settings were saved, but the page could not refresh. Retry loading before making more changes." });
+      void refreshBotStatus();
+    }
+    setBusy("");
+  }
+
+  async function discard() {
+    if (!cfg || !changes.length || busy) return;
+    const ok = await confirm({
+      title: "Discard Discord changes?",
+      message: `${changes.length} unsaved change${changes.length === 1 ? "" : "s"} will be reverted. Saved credentials will not be removed.`,
+      confirmLabel: "Discard changes",
+      danger: true,
+    });
+    if (!ok) return;
+    setForm(discordFormFromConfig(cfg));
+    setSubmitAttempted(false);
+    setFeedback({ kind: "info", text: "Unsaved changes discarded." });
+  }
+
+  function tabKeyDown(event: React.KeyboardEvent, index: number) {
+    let next = index;
+    if (event.key === "ArrowRight") next = (index + 1) % DISCORD_FORM_TABS.length;
+    else if (event.key === "ArrowLeft") next = (index - 1 + DISCORD_FORM_TABS.length) % DISCORD_FORM_TABS.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = DISCORD_FORM_TABS.length - 1;
+    else return;
+    event.preventDefault();
+    const id = DISCORD_FORM_TABS[next].id;
+    setTab(id);
+    tabRefs.current[id]?.focus();
+  }
+
+  if (loading && !form) {
+    return <div className="space-y-4" aria-busy="true" aria-label="Loading Discord settings"><div className="h-32 animate-pulse rounded-xl border border-border bg-bg-card" /><div className="h-12 animate-pulse rounded-xl bg-bg-card" /><div className="h-64 animate-pulse rounded-xl border border-border bg-bg-card" /><p className="text-xs text-text-muted">Loading Discord settings…</p></div>;
+  }
+
+  if (!form || !cfg) {
+    return <SectionCard icon="🔌" title="Discord settings unavailable" description={loadError || "The panel did not return a configuration."}><button type="button" onClick={() => void load(undefined, true)} className={BTN.primary}>Try again</button></SectionCard>;
+  }
+
+  const credentialsReady = cfg.botReady || Boolean(form.botToken.trim() && form.guildId.trim());
+  const redirectUrl = origin ? `${origin}/api/auth/discord/callback` : "/api/auth/discord/callback";
+  const summaries = [
+    { tab: "notifications" as const, label: "Notifications", value: cfg.panelWebhookValid ? "Configured" : "Not configured", hint: "Panel webhook", ready: cfg.panelWebhookValid },
+    { tab: "bot" as const, label: "Chat bot", value: cfg.bot?.state === "online" ? "Online" : cfg.botReady ? "Credentials saved" : "Not configured", hint: cfg.bot?.state === "online" ? "Gateway connected" : "Bot & automatic channels", ready: cfg.bot?.state === "online" },
+    { tab: "signin" as const, label: "Discord sign-in", value: cfg.oauthConfigured ? "Enabled" : "Not configured", hint: "OAuth application", ready: cfg.oauthConfigured },
+  ];
 
   return (
-    <form onSubmit={save} className="space-y-4 sm:space-y-6">
-      {/* ── Panel webhook ─────────────────────────────────────────────── */}
-      <div className="bg-bg-card border border-border rounded-xl p-4 sm:p-6 space-y-4">
-        <div>
-          <h3 className="font-semibold text-lg">Panel Webhook</h3>
-          <p className="text-xs text-text-muted mt-1">
-            Used for any server that has no webhook of its own. Create one in Discord under
-            <span className="text-text-secondary"> Server Settings → Integrations → Webhooks</span>.
-          </p>
-        </div>
-
-        <div>
-          <label className="block text-xs text-text-muted mb-1">Webhook URL</label>
-          <input
-            value={panelWebhook}
-            onChange={(e) => setPanelWebhook(e.target.value)}
-            placeholder="https://discord.com/api/webhooks/..."
-            className={inputCls}
-            spellCheck={false}
-          />
-          {panelWebhook && !/^https:\/\/(canary\.|ptb\.)?discord(app)?\.com\/api\/webhooks\/\d+\/[\w-]+$/.test(panelWebhook.trim()) && (
-            <p className="text-[11px] text-warning mt-1">That does not look like a Discord webhook URL.</p>
-          )}
-        </div>
-
-        <button
-          type="button"
-          onClick={() => void post({ panelWebhook, action: "test" }, "test")}
-          disabled={busy !== "" || !panelWebhook.trim()}
-          className="px-4 py-2 bg-accent/15 text-accent rounded-lg text-xs font-medium disabled:opacity-40"
-        >
-          {busy === "test" ? "Sending…" : "Send Test Message"}
-        </button>
-      </div>
-
-      {/* ── Discord login (OAuth) ─────────────────────────────────────── */}
-      <div className="bg-bg-card border border-border rounded-xl p-4 sm:p-6 space-y-4">
-        <div>
-          <h3 className="font-semibold text-lg">Discord Login (OAuth)</h3>
-          <p className="text-xs text-text-muted mt-1">
-            Lets people sign in with Discord instead of a password. Create an
-            application in the <span className="text-text-secondary">Discord Developer Portal</span>,
-            copy its Client ID and Secret here, and add the redirect URL below
-            under <span className="text-text-secondary">OAuth2 → Redirects</span>.{" "}
-            {cfg?.oauthConfigured
-              ? "Sign-in is currently enabled."
-              : "Both fields are needed to enable sign-in."}
-          </p>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Client ID</label>
-            <input
-              value={oauthClientId}
-              onChange={(e) => setOauthClientId(e.target.value)}
-              placeholder="123456789012345678"
-              className={inputCls}
-              spellCheck={false}
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Client Secret</label>
-            <input
-              type="password"
-              value={oauthClientSecret}
-              onChange={(e) => setOauthClientSecret(e.target.value)}
-              placeholder={cfg?.oauthConfigured ? "•••••••• (stored)" : "paste the secret"}
-              className={inputCls}
-              autoComplete="new-password"
-              spellCheck={false}
-            />
-            <p className="text-[11px] text-text-muted mt-1">Write-only: saved secrets are never shown again.</p>
-          </div>
-        </div>
-
-        <div className="text-[11px] text-text-muted space-y-1">
-          <p>Redirect URL: <code className="text-text-secondary">{typeof window !== "undefined" ? `${window.location.origin}/api/auth/discord/callback` : "/api/auth/discord/callback"}</code></p>
-          <p>Scope used: <code className="text-text-secondary">identify email</code>. Sign-in matches accounts by verified email; accounts with 2FA always use password + code.</p>
-          <p>While age verification is on, Discord sign-in works for existing accounts only — new accounts must register with a date of birth (Australian minimum-age law).</p>
-        </div>
-      </div>
-
-      {/* ── Bot / auto channels ───────────────────────────────────────── */}
-      <div className="bg-bg-card border border-border rounded-xl p-4 sm:p-6 space-y-4">
-        <div>
-          <h3 className="font-semibold text-lg">Automatic Channels</h3>
-          <p className="text-xs text-text-muted mt-1">
-            Give each new game server its own Discord channel. This needs a{" "}
-            <strong className="text-text-secondary">bot</strong>, not just a webhook — webhooks can only
-            post to a channel that already exists, they cannot create one.
-          </p>
-        </div>
-
-        <details className="text-xs text-text-muted bg-bg-secondary rounded-lg p-3">
-          <summary className="cursor-pointer text-text-secondary font-medium">How do I set the bot up?</summary>
-          <ol className="mt-2 space-y-1 list-decimal list-inside">
-            <li>Open the <span className="text-accent">Discord Developer Portal</span> → New Application.</li>
-            <li>Under <em>Bot</em>, click Reset Token and copy it.</li>
-            <li>Under <em>OAuth2 → URL Generator</em>, tick <em>bot</em>, then the
-              <em> Manage Channels</em> and <em> Manage Webhooks</em> permissions.</li>
-            <li>Open the generated URL and invite the bot to your server.</li>
-            <li>In Discord, enable <em>Advanced → Developer Mode</em>, then right-click your server
-              and <em>Copy Server ID</em>.</li>
-          </ol>
-        </details>
-
-        <div>
-          <label className="block text-xs text-text-muted mb-1">
-            Bot Token {cfg?.hasBotToken && <span className="text-success">— a token is saved</span>}
-          </label>
-          <input
-            type="password"
-            value={botToken}
-            onChange={(e) => setBotToken(e.target.value)}
-            placeholder={cfg?.hasBotToken ? "•••••••• (leave blank to keep)" : "Paste the bot token"}
-            className={inputCls}
-            spellCheck={false}
-            autoComplete="new-password"
-          />
-          <p className="text-[11px] text-text-muted mt-1">
-            Stored server-side and never sent back to the browser.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Server (Guild) ID</label>
-            <input value={guildId} onChange={(e) => setGuildId(e.target.value)} placeholder="123456789012345678" className={inputCls} spellCheck={false} />
-          </div>
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Category ID (optional)</label>
-            <input value={categoryId} onChange={(e) => setCategoryId(e.target.value)} placeholder="Nest new channels here" className={inputCls} spellCheck={false} />
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => void post({ botToken: botToken.trim() || undefined, guildId, action: "verify" }, "verify")}
-          disabled={busy !== "" || (!botToken.trim() && !cfg?.hasBotToken) || !guildId.trim()}
-          className="px-4 py-2 bg-accent/15 text-accent rounded-lg text-xs font-medium disabled:opacity-40"
-        >
-          {busy === "verify" ? "Checking…" : "Verify Bot Connection"}
-        </button>
-
-        <div className="border-t border-border pt-4 space-y-4">
-          <label className="flex items-start gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={autoChannel}
-              onChange={(e) => setAutoChannel(e.target.checked)}
-              className="rounded mt-0.5 w-4 h-4 accent-accent"
-            />
-            <span>
-              <span className="text-sm font-medium">Create a channel for every new server</span>
-              <span className="block text-[11px] text-text-muted">
-                On creation the panel makes the channel, adds a webhook to it, and uses that webhook
-                for all of that server&apos;s notifications. Deleting the server removes the channel.
-              </span>
-            </span>
-          </label>
-
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Channel Name Prefix (optional)</label>
-            <input value={channelPrefix} onChange={(e) => setChannelPrefix(e.target.value)} placeholder="gs-" className={inputCls} spellCheck={false} />
-            <p className="text-[11px] text-text-muted mt-1">
-              &ldquo;{channelPrefix}My Server&rdquo; becomes{" "}
-              <code className="text-accent">
-                #{`${channelPrefix}my-server`.toLowerCase().replace(/[^\w\s-]/g, "").trim().replace(/[\s_]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "my-server"}
-              </code>
-            </p>
-          </div>
-
-          {autoChannel && !cfg?.botReady && !botToken.trim() && (
-            <p className="text-[11px] text-warning">
-              A bot token and server ID are required before channels can be created.
-            </p>
-          )}
-        </div>
-
-        {cfg?.bot && <ChatBotStatus bot={cfg.bot} onRefresh={() => void refreshBotStatus()} />}
-
-        <details className="text-xs text-text-muted bg-bg-secondary rounded-lg p-3">
-          <summary className="cursor-pointer text-text-secondary font-medium">🤖 Chat bot commands (WolfET-style)</summary>
-          <p className="mt-2 leading-relaxed">
-            With a bot token and server ID configured, the panel also runs the chat command bot:
-            {" "}<code className="text-accent">!etwho</code>, <code className="text-accent">!etallofoz</code>,{" "}
-            <code className="text-accent">!stats &lt;player&gt;</code>, <code className="text-accent">!ettop10</code>,{" "}
-            <code className="text-accent">!etverify &lt;GUID&gt;</code>, <code className="text-accent">!etsync</code> and{" "}
-            <code className="text-accent">!desync</code> — plus the status in the channel name
-            (🟢 up / 🔴 down, never amber) and a 10-minute XP nickname sync for verified users.
-          </p>
-          <p className="mt-2 leading-relaxed">
-            Enable the <strong>Server Members Intent</strong> and <strong>Message Content Intent</strong> in the{" "}
-            <span className="text-accent">Discord Developer Portal → Bot → Privileged Gateway Intents</span>,
-            or the bot logs the refusal and retries. Player XP comes from the game&apos;s{" "}
-            <code className="text-accent">user.sqlite</code> in the ET server&apos;s install directory
-            (override with <code className="text-accent">GSM_ET_USER_SQLITE</code>); disable the whole bot with{" "}
-            <code className="text-accent">GSM_DISABLE_DISCORD_BOT=true</code>.
-          </p>
-
-          <div className="mt-3 space-y-3 border-t border-border pt-3">
+    <div className="space-y-5">
+      <div className="overflow-hidden rounded-xl border border-[#5865F2]/30 bg-gradient-to-br from-[#5865F2]/10 via-bg-card to-bg-card p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#5865F2] text-white shadow-lg shadow-[#5865F2]/20"><MessagesSquare size={23} aria-hidden /></span>
             <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1">
-                Extra ET servers for <code className="text-accent">!etallofoz</code>
-              </label>
-              <textarea
-                value={extraServers}
-                onChange={(e) => setExtraServers(e.target.value)}
-                rows={3}
-                spellCheck={false}
-                placeholder={"203.44.23.44:27960\nfriends-server.duckdns.org:27960:27961"}
-                className={`${inputCls} font-mono text-xs`}
-              />
-              <p className="text-[11px] text-text-muted mt-1">
-                ET servers that are <em>not</em> installed in the panel — one per line as{" "}
-                <code className="text-accent">host:port</code>, add <code className="text-accent">:queryPort</code>{" "}
-                if getstatus is answered elsewhere. <code className="text-accent">#</code> starts a comment.
-                Also settable via <code className="text-accent">GSM_ET_EXTRA_SERVERS</code>.
-              </p>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1">
-                Master server(s) for automatic discovery
-              </label>
-              <input
-                value={masterUrls}
-                onChange={(e) => setMasterUrls(e.target.value)}
-                spellCheck={false}
-                placeholder={"master0.etmaster.net, master.etlegacy.com"}
-                className={inputCls}
-              />
-              <p className="text-[11px] text-text-muted mt-1">
-                Optional — queried for the community server list when <code className="text-accent">!etallofoz</code> runs;
-                discovered servers are probed in parallel and shown with a <span className="text-accent">🌐</span> label,
-                capped at 25, and never duplicated against panel servers. Also settable via{" "}
-                <code className="text-accent">GSM_ET_MASTER_URLS</code>. Prefilled with the classic community masters
-                (id Software, etmaster.net, ETLegacy); clear it to disable discovery.
-              </p>
+              <h3 className="text-base font-semibold sm:text-lg">Your servers, in your community</h3>
+              <p className="mt-1 max-w-xl text-xs leading-relaxed text-text-secondary">Notifications, live status and Discord sign-in. Follow the guide, connect only what you need, and test it before you finish.</p>
             </div>
           </div>
-        </details>
-      </div>
-
-      {/* ── Live status boards ─────────────────────────────────────────── */}
-      <div className="bg-bg-card border border-border rounded-xl p-4 sm:p-6 space-y-4">
-        <div>
-          <h3 className="font-semibold text-lg">📋 Live Status Boards</h3>
-          <p className="text-xs text-text-muted mt-1">
-            One message per server that stays in the channel and keeps updating: 🟢/🔴 status, current
-            map, and who is online. Refreshed automatically every few minutes — no bot gateway needed,
-            it uses the server&apos;s webhook.
-          </p>
-          <p className="text-xs text-text-muted mt-1">
-            The <strong>channel heading</strong> carries the same 🟢/🔴 status (as the community bot
-            does: <code className="text-accent">🟢 et: (5) - et_beach</code> /{" "}
-            <code className="text-accent">🔴 et: Server Offline</code>). It updates on its own —
-            including when no board is posted here — as long as the panel created the channel and a
-            bot token is configured, and it changes as soon as a server starts, stops or crashes.
-          </p>
+          {tab !== "guide" && <button type="button" onClick={() => navigate("guide")} className={`${BTN.secondary} inline-flex items-center gap-2`}><BookOpen size={14} aria-hidden />Setup guide</button>}
         </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="text-xs text-text-muted">Refresh every</label>
-          <select
-            value={boardInterval}
-            onChange={(e) => setBoardInterval(Number(e.target.value))}
-            className="px-2 py-1.5 bg-bg-secondary border border-border rounded-lg text-sm"
-          >
-            {[1, 2, 3, 5, 10, 15, 30, 60].map((m) => (
-              <option key={m} value={m}>{m} min</option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={() => void boardAction({ action: "interval", minutes: boardInterval }, "interval")}
-            disabled={boardBusy !== null}
-            className="px-3 py-1.5 bg-accent/15 text-accent rounded-lg text-xs font-medium disabled:opacity-40"
-          >
-            {boardBusy === "interval" ? "Saving…" : "Apply"}
-          </button>
+        <div className="mt-4 grid gap-2 sm:grid-cols-3">
+          {summaries.map((item) => (
+            <button key={item.tab} type="button" onClick={() => navigate(item.tab)} className="rounded-lg border border-border/70 bg-bg-secondary/60 p-3 text-left transition-colors hover:border-accent/40">
+              <span className="flex items-center justify-between gap-2 text-[11px] text-text-muted">{item.label}<ArrowRight size={12} aria-hidden /></span>
+              <span className="mt-1 flex items-center gap-1.5 text-xs font-medium"><span className={`h-1.5 w-1.5 rounded-full ${item.ready ? "bg-success" : "bg-text-muted"}`} aria-hidden />{item.value}</span>
+              <span className="mt-0.5 block text-[10px] text-text-muted">{item.hint}</span>
+            </button>
+          ))}
         </div>
-
-        {boards === null ? (
-          <p className="text-xs text-text-muted">Loading servers…</p>
-        ) : boards.length === 0 ? (
-          <p className="text-xs text-text-muted">No servers yet — create one first.</p>
-        ) : (
-          <ul className="divide-y divide-border">
-            {boards.map((srv) => (
-              <li key={srv.id} className="py-3 flex flex-wrap items-start sm:items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-sm">{srv.name}</span>
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${srv.status === "running" ? "bg-success" : "bg-text-muted"}`} />
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-secondary text-text-muted">
-                      {srv.enabled ? (srv.messageId ? "Live" : "Starting…") : "Off"}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-text-muted mt-0.5">
-                    {srv.gameName}
-                    {!srv.hasWebhook && (
-                      <span className="text-warning"> · no webhook — run “Create missing channels” above</span>
-                    )}
-                    {srv.updatedAt && ` · updated ${new Date(srv.updatedAt).toLocaleString()}`}
-                    {srv.error && <span className="text-danger"> · {srv.error}</span>}
-                  </p>
-                  <p className="text-[11px] text-text-muted mt-0.5">
-                    <span className="text-text-secondary">Heading:</span>{" "}
-                    {srv.heading.name ? (
-                      <span className="font-mono">{srv.heading.name}</span>
-                    ) : (
-                      <span>not updated yet</span>
-                    )}
-                    {srv.heading.updatedAt && ` · ${new Date(srv.heading.updatedAt).toLocaleTimeString()}`}
-                    {!srv.hasChannel && (
-                      <span className="text-warning">
-                        {" "}
-                        · the panel does not own this channel (no channel id) — run “Create missing
-                        channels”
-                      </span>
-                    )}
-                    {srv.hasChannel && !boardBotReady && (
-                      <span className="text-warning"> · needs a bot token to rename the channel</span>
-                    )}
-                    {srv.heading.error && <span className="text-danger"> · {srv.heading.error}</span>}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void boardAction({ serverId: srv.id, action: "heading" }, srv.id)}
-                    disabled={boardBusy !== null || !srv.hasChannel || !boardBotReady}
-                    title="Rename the channel to the live status right now"
-                    className="px-3 py-1.5 bg-bg-secondary border border-border rounded-lg text-xs disabled:opacity-40 hover:border-accent/30"
-                  >
-                    {boardBusy === srv.id ? "Working…" : "Heading"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void boardAction({ serverId: srv.id, action: "refresh" }, srv.id)}
-                    disabled={boardBusy !== null || !srv.hasWebhook}
-                    className="px-3 py-1.5 bg-bg-secondary border border-border rounded-lg text-xs disabled:opacity-40 hover:border-accent/30"
-                  >
-                    {boardBusy === srv.id ? "Refreshing…" : "Refresh"}
-                  </button>
-                  {srv.enabled ? (
-                    <button
-                      type="button"
-                      onClick={() => void boardAction({ serverId: srv.id, action: "disable" }, srv.id)}
-                      disabled={boardBusy !== null}
-                      className="px-3 py-1.5 bg-danger/10 text-danger rounded-lg text-xs disabled:opacity-40"
-                    >
-                      Stop
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => void boardAction({ serverId: srv.id, action: "enable" }, srv.id)}
-                      disabled={boardBusy !== null || !srv.hasWebhook}
-                      className="px-3 py-1.5 bg-success/15 text-success rounded-lg text-xs font-medium disabled:opacity-40"
-                    >
-                      {boardBusy === srv.id ? "Posting…" : "Post board"}
-                    </button>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-        {boardMsg && (
-          <p className={`text-sm ${boardMsg.kind === "ok" ? "text-success" : boardMsg.kind === "info" ? "text-text-secondary" : "text-danger"}`}>{boardMsg.text}</p>
-        )}
       </div>
 
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
-        <button
-          type="submit"
-          disabled={busy !== ""}
-          className="px-6 py-2.5 bg-success hover:opacity-90 text-white rounded-lg text-sm font-medium disabled:opacity-50 w-full sm:w-auto"
-        >
-          {busy === "save" ? "Saving…" : "💾 Save Discord Settings"}
-        </button>
-        {msg && (
-          <span className={`text-sm ${msg.kind === "ok" ? "text-success" : "text-danger"}`}>{msg.text}</span>
-        )}
+      {loadError && <p role="alert" className="rounded-lg border border-warning/30 bg-warning/5 p-3 text-xs text-warning">{loadError} <button type="button" onClick={() => void load()} className="underline">Retry loading</button></p>}
+
+      <div className="-mx-1 overflow-x-auto px-1 pb-1">
+        <div role="tablist" aria-label="Discord settings" className="flex min-w-max gap-1 rounded-xl border border-border bg-bg-secondary/60 p-1">
+          {DISCORD_FORM_TABS.map((entry, index) => {
+            const active = tab === entry.id;
+            const count = changes.filter((change) => change.tab === entry.id).length;
+            return (
+              <button
+                key={entry.id}
+                ref={(node) => { tabRefs.current[entry.id] = node; }}
+                type="button"
+                role="tab"
+                id={`discord-tab-${entry.id}`}
+                aria-selected={active}
+                aria-controls={`discord-panel-${entry.id}`}
+                tabIndex={active ? 0 : -1}
+                onClick={() => setTab(entry.id)}
+                onKeyDown={(event) => tabKeyDown(event, index)}
+                className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${active ? "bg-bg-card text-accent shadow-sm ring-1 ring-border" : "text-text-muted hover:bg-bg-hover hover:text-text-primary"}`}
+              >
+                {entry.label}
+                {count > 0 && <span className="rounded-full bg-accent/15 px-1.5 text-[10px] text-accent" aria-label={`${count} unsaved changes`}>{count}</span>}
+              </button>
+            );
+          })}
+        </div>
       </div>
-    </form>
+
+      <form id="discord-settings-form" onSubmit={(event) => void save(event)}>
+        <div role="tabpanel" id={`discord-panel-${tab}`} aria-labelledby={`discord-tab-${tab}`} tabIndex={0} className="space-y-5 outline-none">
+          {tab === "guide" && <DiscordGuide applicationId={inviteAppId} onApplicationIdChange={setInviteAppId} includeEtCommands={includeEtCommands} onIncludeEtCommandsChange={setIncludeEtCommands} onNavigate={navigate} />}
+
+          {tab === "notifications" && (
+            <SectionCard icon="🔔" title="Panel notifications" description="The fallback destination for servers without their own webhook. A server-specific webhook always takes priority." actions={<Badge tone={cfg.panelWebhookValid ? "success" : "neutral"}>{cfg.panelWebhookValid ? "Configured" : "Not configured"}</Badge>}>
+              <DiscordField {...fieldProps("panelWebhook")} label="Panel webhook URL" placeholder="https://discord.com/api/webhooks/…" hint="Paste the full URL from Discord. Leave empty and save to remove the panel-wide fallback." autoComplete="off" />
+              <details open={!cfg.panelWebhook} className="rounded-lg border border-border bg-bg-secondary/50 p-3 text-xs">
+                <summary className="cursor-pointer font-medium text-text-secondary">How to create a webhook in Discord</summary>
+                <ol className="mt-2 list-inside list-decimal space-y-1.5 leading-relaxed text-text-muted">
+                  <li>Open the destination text channel and choose <strong>Edit Channel</strong>.</li>
+                  <li>Go to <strong>Integrations → Webhooks → New Webhook</strong>. Give it a name and confirm the channel.</li>
+                  <li>Choose <strong>Copy Webhook URL</strong>, paste it above, and press <strong>Save changes</strong>.</li>
+                  <li>Press <strong>Send test message</strong> and check that it appears in Discord.</li>
+                </ol>
+              </details>
+              <div className="flex flex-wrap items-center gap-3">
+                <button type="button" onClick={() => void check("test")} disabled={busy !== "" || !form.panelWebhook.trim() || Boolean(errors.panelWebhook)} className={BTN.secondary}>{busy === "test" ? "Sending…" : "Send test message"}</button>
+                <p className="text-[11px] text-text-muted">Tests the URL in the field without saving it. A test does not change where notifications go.</p>
+              </div>
+              <div className="rounded-lg border border-border bg-bg-secondary/30 p-3 text-[11px] leading-relaxed text-text-muted">
+                <strong className="text-text-secondary">Where will notifications go?</strong> A server’s own webhook first; otherwise this panel webhook. To dedicate a channel to each server, connect a bot and create channels automatically.
+                <button type="button" onClick={() => navigate("bot", "discord-guild-id")} className="ml-1 text-accent hover:underline">Set up channels →</button>
+              </div>
+            </SectionCard>
+          )}
+
+          {tab === "bot" && (
+            <>
+              <SectionCard icon="🤖" title="Bot connection" description="The bot creates channels and runs the WolfET chat commands. A webhook alone cannot do either." actions={<PortalLink>Developer Portal</PortalLink>}>
+                <DiscordField {...fieldProps("botToken")} label="Bot token" type="password" placeholder={cfg.hasBotToken ? "Leave blank to keep the saved token" : "Paste the token from the Bot page"} hint={cfg.hasBotToken ? "A token is saved. It is never sent back to the browser; a new token replaces it only when you save." : "Find this in Developer Portal → your application → Bot → Reset Token. Not the client secret."} autoComplete="new-password" labelExtra={cfg.hasBotToken ? <Badge tone="success">Saved</Badge> : undefined} />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <DiscordField {...fieldProps("guildId")} label="Discord server (guild) ID" placeholder="123456789012345678" hint="Enable Developer Mode in Discord, then right-click the server → Copy Server ID." inputMode="numeric" />
+                  <DiscordField {...fieldProps("categoryId")} label="Category ID (optional)" placeholder="Leave empty for no category" hint="Right-click a category → Copy Category ID. New channels will be grouped there." inputMode="numeric" />
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button type="button" onClick={() => void check("verify")} disabled={busy !== "" || (!form.botToken.trim() && !cfg.hasBotToken) || !form.guildId.trim() || Boolean(errors.guildId)} className={BTN.secondary}>{busy === "verify" ? "Checking…" : "Verify bot connection"}</button>
+                  <p className="text-[11px] text-text-muted">Checks the token and server ID in the fields. Save changes to activate them.</p>
+                </div>
+                {!form.botToken.trim() && !cfg.hasBotToken && <p className="text-[11px] text-text-muted">No token entered. Follow the <button type="button" onClick={() => navigate("guide", "discord-invite-app-id")} className="text-accent hover:underline">setup guide</button> to create and invite your bot.</p>}
+                {cfg.bot && <ChatBotStatus bot={cfg.bot} busy={statusBusy} onRefresh={() => void refreshBotStatus()} />}
+              </SectionCard>
+
+              <SectionCard icon="📺" title="Automatic channels" description="Give each new game server a channel and its own webhook. Existing servers are handled separately below.">
+                <button type="button" role="switch" aria-checked={form.autoChannel} aria-describedby="discord-auto-channel-hint" disabled={busy !== ""} onClick={() => patch("autoChannel", !form.autoChannel)} className={`flex w-full items-start gap-3 rounded-lg border p-4 text-left transition-colors ${form.autoChannel ? "border-accent/40 bg-accent/5" : "border-border bg-bg-secondary/40"}`}>
+                  <span aria-hidden className={`relative mt-0.5 inline-flex h-5 w-9 shrink-0 rounded-full ${form.autoChannel ? "bg-success" : "bg-bg-hover"}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${form.autoChannel ? "left-[18px]" : "left-0.5"}`} /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-center gap-2 text-sm font-medium">Create a channel for every new server<Badge tone={form.autoChannel ? "success" : "neutral"}>{form.autoChannel ? "On" : "Off"}</Badge>{form.autoChannel !== cfg.autoChannel && <Badge tone="accent">Unsaved</Badge>}</span>
+                    <span id="discord-auto-channel-hint" className="mt-1 block text-[11px] leading-relaxed text-text-muted">On creation, the panel creates the channel and webhook. Deleting that game server also removes the channel. This setting does not create channels for servers that already exist.</span>
+                  </span>
+                </button>
+                {form.autoChannel && !credentialsReady && <p className="text-[11px] text-warning">You can stage this setting, but channels need a saved bot token and Discord server ID before they can be created.</p>}
+                <DiscordField {...fieldProps("channelPrefix")} label="Channel name prefix (optional)" placeholder="gs-" hint={<>“My Game Server” becomes <code className="text-accent">{discordChannelPreview(form.channelPrefix)}</code>. Names are lowercased, spaces become dashes, and Discord’s 100-character limit applies.</>} />
+              </SectionCard>
+
+              {children}
+
+              <details className="rounded-xl border border-border bg-bg-card p-4 sm:p-5">
+                <summary className="cursor-pointer text-sm font-semibold">WolfET chat commands & server discovery</summary>
+                <div className="mt-4 space-y-4">
+                  <p className="text-xs leading-relaxed text-text-secondary">With the bot connected, use <code className="text-accent">!etwho</code>, <code className="text-accent">!etallofoz</code>, <code className="text-accent">!stats &lt;player&gt;</code>, <code className="text-accent">!ettop10</code>, <code className="text-accent">!etverify &lt;GUID&gt;</code> (DM only), <code className="text-accent">!etsync</code> and <code className="text-accent">!desync</code>. Verified users can have their XP synced into their nickname every ten minutes.</p>
+                  <p className="rounded-lg border border-warning/25 bg-warning/5 p-3 text-[11px] leading-relaxed text-text-secondary">Enable <strong>Server Members Intent</strong> and <strong>Message Content Intent</strong> in the portal’s Bot → Privileged Gateway Intents. Nickname sync also needs Manage Nicknames and a bot role above the target member. XP comes from the ET server’s <code>user.sqlite</code>; override with <code>GSM_ET_USER_SQLITE</code>. Disable the gateway with <code>GSM_DISABLE_DISCORD_BOT=true</code>.</p>
+                  <DiscordField {...fieldProps("extraServers")} label="Extra ET servers for !etallofoz" multiline rows={3} placeholder={"203.44.23.44:27960\nfriends-server.duckdns.org:27960:27961"} hint={<>Servers not installed in this panel. One <code>host:port</code> per line; append <code>:queryPort</code> if different. <code>#</code> starts a comment. Also available as <code>GSM_ET_EXTRA_SERVERS</code>.</>} />
+                  <DiscordField {...fieldProps("masterUrls")} label="Master servers for discovery (optional)" placeholder="master0.etmaster.net, master.etlegacy.com" hint={<>Comma- or space-separated host[:port] entries queried by !etallofoz. Discovered servers are marked 🌐, capped at 25 and deduplicated against panel servers. Clear to disable discovery. Also available as <code>GSM_ET_MASTER_URLS</code>.</>} />
+                </div>
+              </details>
+            </>
+          )}
+
+          {tab === "boards" && <DiscordStatusBoards botReady={cfg.botReady} revision={revision} onNavigate={navigate} />}
+
+          {tab === "signin" && (
+            <SectionCard icon="🔑" title="Sign in with Discord" description="Optional passwordless sign-in for existing accounts. This uses an OAuth application and is separate from the notification webhook." actions={<Badge tone={cfg.oauthConfigured ? "success" : "neutral"}>{cfg.oauthConfigured ? "Enabled" : "Not configured"}</Badge>}>
+              <ol className="list-inside list-decimal space-y-2 rounded-lg border border-border bg-bg-secondary/50 p-3 text-xs leading-relaxed text-text-secondary">
+                <li>Open the <PortalLink>Developer Portal</PortalLink> and create an application (or use the same application as your bot).</li>
+                <li>Copy its <strong>Client ID</strong> and <strong>Client Secret</strong> from OAuth2 into the fields below.</li>
+                <li>In <strong>OAuth2 → Redirects</strong>, add the exact redirect URL below and save in Discord.</li>
+                <li>Press <strong>Save changes</strong> here. Both credentials are required to enable sign-in.</li>
+              </ol>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <DiscordField {...fieldProps("oauthClientId")} label="Client ID" placeholder="123456789012345678" hint="The numeric application ID from General Information / OAuth2." inputMode="numeric" />
+                <DiscordField {...fieldProps("oauthClientSecret")} label="Client secret" type="password" placeholder={cfg.oauthConfigured ? "Leave blank to keep the saved secret" : "Paste the OAuth client secret"} hint="Write-only. A saved secret is never shown again. This is not the bot token." autoComplete="new-password" labelExtra={cfg.oauthConfigured ? <Badge tone="success">Saved</Badge> : undefined} />
+              </div>
+              <CopyValue id="discord-oauth-redirect" label="Redirect URL — add this exact value in Discord" value={redirectUrl} hint="Use the public HTTPS address of this panel. The path must be /api/auth/discord/callback." />
+              <div className="space-y-2 rounded-lg border border-border bg-bg-secondary/30 p-3 text-[11px] leading-relaxed text-text-muted">
+                <p><strong className="text-text-secondary">Scopes:</strong> <code>identify email</code>. Accounts are matched by verified Discord email.</p>
+                <p><strong className="text-text-secondary">Security:</strong> accounts with 2FA still use password + code. While age verification is on, Discord sign-in is for existing accounts only; new accounts must register with a date of birth.</p>
+              </div>
+            </SectionCard>
+          )}
+        </div>
+      </form>
+
+      {(changes.length > 0 || busy === "save" || feedback) && (
+        <div className="sticky bottom-3 z-20 space-y-2 rounded-xl border border-border bg-bg-card/95 p-3 shadow-xl backdrop-blur sm:p-4">
+          {feedback && <div className={`flex items-start justify-between gap-3 text-xs ${feedback.kind === "ok" ? "text-success" : feedback.kind === "err" ? "text-danger" : "text-text-secondary"}`}><p role={feedback.kind === "err" ? "alert" : "status"} className="min-w-0 flex-1 leading-relaxed">{feedback.text}</p><button type="button" onClick={() => setFeedback(null)} aria-label="Dismiss message" className={BTN.ghost}><X size={14} aria-hidden /></button></div>}
+          {(changes.length > 0 || busy === "save") && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-2 first:border-0 first:pt-0"><div><p className="text-sm font-medium">{changes.length} unsaved change{changes.length === 1 ? "" : "s"}</p><p className="mt-0.5 text-[11px] text-text-muted">Across Discord tabs · nothing is active until you save.</p></div><div className="flex items-center gap-2"><button type="button" onClick={() => void discard()} disabled={busy !== ""} className={BTN.secondary}>Discard</button><button type="submit" form="discord-settings-form" disabled={busy !== ""} className={`${BTN.success} inline-flex items-center gap-2`}><Save size={14} aria-hidden />{busy === "save" ? "Saving…" : "Save changes"}</button></div></div>}
+        </div>
+      )}
+    </div>
   );
 }
 
-/**
- * Live state of the chat-command bot's gateway connection. Without this the
- * only sign of a bot that never logged in was silence in Discord.
- */
-function ChatBotStatus({ bot, onRefresh }: { bot: NonNullable<DiscordConfig["bot"]>; onRefresh: () => void }) {
-  const view: Record<typeof bot.state, { dot: string; tone: string; title: string; hint: string }> = {
-    online: {
-      dot: "bg-success",
-      tone: "border-success/30 bg-success/5",
-      title: `Chat bot online${bot.tag ? ` as ${bot.tag}` : ""}`,
-      hint:
-        bot.commandsHandled > 0
-          ? `${bot.commandsHandled} command${bot.commandsHandled === 1 ? "" : "s"} received since it connected.`
-          : "Connected and listening. If !etwho gets no reply, check that the bot can View Channel, Send Messages and Embed Links in that channel, and that Message Content Intent is enabled.",
-    },
-    connecting: {
-      dot: "bg-warning",
-      tone: "border-warning/30 bg-warning/5",
-      title: "Chat bot connecting…",
-      hint: bot.error || "Logging in to Discord.",
-    },
-    error: {
-      dot: "bg-danger",
-      tone: "border-danger/30 bg-danger/5",
-      title: "Chat bot is not connected — commands will not work",
-      hint: bot.error || "The last login attempt failed. It retries every minute.",
-    },
-    unconfigured: {
-      dot: "bg-text-muted",
-      tone: "border-border bg-bg-secondary",
-      title: "Chat bot not configured",
-      hint: "Save a bot token and server ID to start the command bot.",
-    },
-    stopped: {
-      dot: "bg-text-muted",
-      tone: "border-border bg-bg-secondary",
-      title: "Chat bot is not running",
-      hint: "It starts with the panel. If this persists after a restart, check that GSM_DISABLE_AUTOSTART is not set.",
-    },
-    disabled: {
-      dot: "bg-text-muted",
-      tone: "border-border bg-bg-secondary",
-      title: "Chat bot disabled",
-      hint: "GSM_DISABLE_DISCORD_BOT=true is set in the panel environment.",
-    },
+function DiscordField({ id, label, value, onChange, hint, error, disabled, type = "text", placeholder, autoComplete = "off", inputMode, multiline = false, rows = 3, labelExtra }: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  hint?: ReactNode;
+  error?: string;
+  disabled?: boolean;
+  type?: string;
+  placeholder?: string;
+  autoComplete?: string;
+  inputMode?: "numeric" | "text";
+  multiline?: boolean;
+  rows?: number;
+  labelExtra?: ReactNode;
+}) {
+  const shared = {
+    id,
+    value,
+    placeholder,
+    disabled,
+    autoComplete,
+    spellCheck: false,
+    "aria-invalid": Boolean(error),
+    "aria-describedby": `${id}-hint${error ? ` ${id}-error` : ""}`,
+    className: `${INPUT} mt-1 ${error ? "border-danger focus:ring-danger/40" : ""} ${multiline ? "font-mono text-xs" : ""}`,
   };
-  const v = view[bot.state] ?? view.stopped;
   return (
-    <div className={`rounded-lg border p-3 text-xs ${v.tone}`} role="status">
-      <div className="flex items-center justify-between gap-3">
-        <p className="flex items-center gap-2 font-medium text-text-primary">
-          <span className={`inline-block h-2 w-2 rounded-full ${v.dot}`} aria-hidden="true" />
-          {v.title}
-        </p>
-        <button type="button" onClick={onRefresh} className="shrink-0 text-text-muted hover:text-text-primary underline-offset-2 hover:underline">
-          Refresh
-        </button>
-      </div>
-      <p className="mt-1 leading-relaxed text-text-secondary break-words">{v.hint}</p>
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-2"><label htmlFor={id} className="block text-xs font-medium text-text-secondary">{label}</label>{labelExtra}</div>
+      {multiline ? <textarea {...shared} rows={rows} onChange={(event) => onChange(event.target.value)} /> : <input {...shared} type={type} inputMode={inputMode} onChange={(event) => onChange(event.target.value)} />}
+      {hint && <p id={`${id}-hint`} className="mt-1 text-[11px] leading-relaxed text-text-muted">{hint}</p>}
+      {error && <p id={`${id}-error`} role="alert" className="mt-1 text-[11px] font-medium text-danger">{error}</p>}
+    </div>
+  );
+}
+
+function ChatBotStatus({ bot, busy, onRefresh }: { bot: NonNullable<DiscordConfigResponse["bot"]>; busy: boolean; onRefresh: () => void }) {
+  const views: Record<typeof bot.state, { dot: string; tone: string; title: string; hint: string }> = {
+    online: { dot: "bg-success", tone: "border-success/30 bg-success/5", title: `Chat bot online${bot.tag ? ` as ${bot.tag}` : ""}`, hint: bot.commandsHandled > 0 ? `${bot.commandsHandled} command${bot.commandsHandled === 1 ? "" : "s"} received since connecting.` : "Connected and listening. If commands get no reply, check channel permissions and Message Content Intent." },
+    connecting: { dot: "bg-warning", tone: "border-warning/30 bg-warning/5", title: "Chat bot connecting…", hint: bot.error || "Logging in to Discord. Refresh in a moment." },
+    error: { dot: "bg-danger", tone: "border-danger/30 bg-danger/5", title: "Chat bot is not connected", hint: bot.error || "The last login attempt failed. The panel retries every minute; check the token and privileged intents." },
+    unconfigured: { dot: "bg-text-muted", tone: "border-border bg-bg-secondary", title: "Chat bot not configured", hint: "Save a bot token and Discord server ID to start the command bot." },
+    stopped: { dot: "bg-text-muted", tone: "border-border bg-bg-secondary", title: "Chat bot is not running", hint: "It starts with the panel. If this persists, check GSM_DISABLE_AUTOSTART and the panel logs." },
+    disabled: { dot: "bg-text-muted", tone: "border-border bg-bg-secondary", title: "Chat bot disabled", hint: "GSM_DISABLE_DISCORD_BOT=true is set in the panel environment." },
+  };
+  const view = views[bot.state] ?? views.stopped;
+  return (
+    <div role="status" className={`rounded-lg border p-3 text-xs ${view.tone}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2"><p className="flex items-center gap-2 font-medium"><span className={`h-2 w-2 rounded-full ${view.dot}`} aria-hidden />{view.title}</p><button type="button" onClick={onRefresh} disabled={busy} className={`${BTN.ghost} inline-flex items-center gap-1.5`}><RefreshCw size={12} aria-hidden />{busy ? "Refreshing…" : "Refresh status"}</button></div>
+      <p className="mt-1 break-words leading-relaxed text-text-secondary">{view.hint}</p>
+      {bot.lastCommandAt && <p className="mt-1 text-[10px] text-text-muted">Last command: {new Date(bot.lastCommandAt).toLocaleString()}</p>}
     </div>
   );
 }
