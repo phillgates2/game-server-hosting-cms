@@ -458,9 +458,9 @@ export default function SettingsPanel() {
         <p className="max-w-2xl text-[11px] leading-relaxed text-text-muted">
           Draft screens share one <b className="text-text-secondary">Save changes</b>{" "}
           bar at the bottom. Screens marked{" "}
-          <Badge tone="neutral">Saves on each control</Badge> apply as soon as you
-          press their own button. Everything here overrides the matching
-          environment variables.
+          <Badge tone="neutral">Own save controls</Badge> use their own save or
+          apply buttons. Everything here overrides the matching environment
+          variables.
         </p>
 
         <div className="relative w-full sm:w-72">
@@ -631,7 +631,7 @@ export default function SettingsPanel() {
               <Badge tone={meta.saveMode === "draft" ? "accent" : "neutral"}>
                 {meta.saveMode === "draft"
                   ? "Shared save"
-                  : "Saves on each control"}
+                  : "Own save controls"}
               </Badge>
               {meta.draftSection && (
                 <button
@@ -693,10 +693,9 @@ export default function SettingsPanel() {
 
           {meta.id === "webhook" && <WebhookBlock />}
           {meta.id === "discord" && (
-            <>
-              <DiscordSettings />
+            <DiscordSettings>
               <DiscordBackfillBlock />
-            </>
+            </DiscordSettings>
           )}
           {meta.id === "status" && <PublicStatusBlock />}
         </div>

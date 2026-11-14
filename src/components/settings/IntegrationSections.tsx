@@ -529,6 +529,7 @@ export function DiscordBackfillBlock() {
 
   return (
     <SectionCard
+      id="discord-existing-servers"
       icon="📺"
       title="Existing servers"
       description="New servers get a channel automatically. This gives one to servers that existed before the bot was set up, re-creates channels deleted in Discord, and repairs webhooks deleted inside a channel that still exists — otherwise their notifications go nowhere (Discord reports that as ‘Unknown Webhook’, 10015). A bot token and server ID are required; a webhook alone cannot create channels."
