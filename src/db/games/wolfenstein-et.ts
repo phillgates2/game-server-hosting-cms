@@ -275,8 +275,16 @@ fi
 # No fixed file IDs: upstream assigns new IDs for every release.
 # A real User-Agent: some CDN fronts reject the default curl/* identity.
 ETL_UA="GSM-Panel/1.0 (game-server-hosting-cms; ET:Legacy updater)"
-command -v python3 >/dev/null || { echo "ERROR: install Python 3 to resolve ET:Legacy releases" >&2; exit 1; }
-ETL_PAGE=$(curl -fsSL --retry 3 --max-time 60 -A "$ETL_UA" "https://www.etlegacy.com/download")
+ETL_PAGE_URL="https://www.etlegacy.com/download"
+for tool in curl python3 tar unzip; do
+  command -v "$tool" >/dev/null || { echo "ERROR: ET:Legacy requires $tool on the game node. Install it and retry." >&2; exit 1; }
+done
+echo "Checking $ETL_PAGE_URL for the latest stable ET:Legacy release..."
+ETL_PAGE=$(curl -fsSL --retry 3 --max-time 60 -A "$ETL_UA" "$ETL_PAGE_URL") || {
+  curl_status=$?
+  echo "ERROR: Could not fetch $ETL_PAGE_URL. Check the game node's connection to www.etlegacy.com and retry." >&2
+  exit "$curl_status"
+}
 ETL_RELEASE=$(printf '%s' "$ETL_PAGE" | ${pythonCommand(ETLEGACY_RELEASE_PARSER)})
 ETL_VERSION=$(printf '%s\\n' "$ETL_RELEASE" | sed -n '1p')
 if [ "$USE_ARCH" = "x86_64" ]; then
@@ -295,7 +303,7 @@ curl -fL --retry 3 --retry-delay 2 -A "$ETL_UA" -o etlegacy-archive "$ETL_URL" |
   exit 1
 }
 
-# Upstream serves Linux archives as ZIP files (not tar.gz)
+# Download URLs have no extension; accept both ZIP and tar.gz payloads.
 echo "Extracting ET:Legacy $USE_ARCH archive..."
 if unzip -o etlegacy-archive >/dev/null 2>&1; then
   echo "  Extracted as ZIP archive"

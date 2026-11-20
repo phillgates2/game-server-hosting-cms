@@ -1,3 +1,8 @@
+export function formatInstallLogError(data: { error?: string; errorOutput?: string }, fallback: string): string {
+  const summary = data.error || fallback;
+  return data.errorOutput ? `${summary}\n\n[stderr]\n${data.errorOutput}` : summary;
+}
+
 export interface PanelServerLike {
   id: number;
   status: string;

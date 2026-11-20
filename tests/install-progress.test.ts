@@ -18,11 +18,21 @@ import {
   setProgressStage,
   withProgressHelpers,
 } from "../src/lib/install-progress";
+import { formatInstallLogError } from "../src/components/panels/serverPanelUtils";
 import { formatBytes, formatDuration, formatRate } from "../src/lib/install-progress-format";
 import { runUpdateScript } from "../src/lib/server-update-runner";
 import { remoteInstallOutput } from "../src/lib/node-client";
 // @ts-ignore — the agent is a standalone .mjs with no type declarations
 import { installOutputSince } from "../agent/gsm-agent.mjs";
+
+test("install log shows the script diagnostic even when the API sends an exit summary", () => {
+  assert.equal(formatInstallLogError({
+    error: "Script exited with code 1",
+    errorOutput: "ERROR: ET:Legacy requires python3 on the game node.",
+  }, "Install failed"), "Script exited with code 1\n\n[stderr]\nERROR: ET:Legacy requires python3 on the game node.");
+  assert.equal(formatInstallLogError({ error: "Server not found" }, "Install failed"), "Server not found");
+  assert.equal(formatInstallLogError({}, "Install failed"), "Install failed");
+});
 
 test("SteamCMD download lines yield phase, percent and bytes", () => {
   const sig = parseProgressLine(" Update state (0x61) downloading, progress: 42.10 (1234567 / 2932345)");

@@ -21,13 +21,21 @@ const plainHrefPage = `<h2>ET: Legacy stable release 2.99.0 - Test</h2>
 <a href="/download/file/9001"><span>x86_64</span> archive</a>
 <a href="https://www.etlegacy.com/download/file/9002">i386 archive</a>
 <a href="/download/file/9003">All supported archive</a>`;
+// Download buttons need not use specific English platform labels. The
+// filename in the title distinguishes archive links from installer links.
+const filenamePage = `<h2>ET: Legacy stable release <span>2.99.0</span> - Test</h2>
+<a href="/download/file/8999" title="etlegacy-v2.99.0-x86_64.sh">Download the installer</a>
+<a href="#" data-href="/download/file/9001" title="etlegacy-v2.99.0-x86_64.tar.gz">or download the archive (91 MB)</a>
+<a href="/download/file/9002" title="etlegacy-v2.99.0-i386.tar.gz">or download the archive (91 MB)</a>
+<a href="/download/file/9003" title="etlegacy-mod-v2.99.0.zip">Download</a>
+<a href="/download/file/9004" title="etlegacy-v2.98.0-x86_64.tar.gz">x86_64 archive</a>`;
 function parse(source: string, input: string) {
   return spawnSync("python3", ["-c", source], { input, encoding: "utf8" });
 }
 
 describe("latest stable release resolution", () => {
   test("ET engine and mod links resolve together without fixed IDs", () => {
-    for (const input of [page, plainHrefPage]) {
+    for (const input of [page, plainHrefPage, filenamePage]) {
       const result = parse(ETLEGACY_RELEASE_PARSER, input);
       assert.equal(result.status, 0, result.stderr);
       assert.deepEqual(result.stdout.trim().split("\n"), [
@@ -37,7 +45,13 @@ describe("latest stable release resolution", () => {
     }
   });
   test("ET refuses incomplete metadata, nonstable pages and foreign download links", () => {
-    for (const input of ["", page.replace("All supported archive", "missing"), page.replace("stable release", "snapshot"), page.replace("https://www.etlegacy.com/download/file/9002", "https://untrusted.test/download/file/9002")]) {
+    for (const input of [
+      "",
+      page.replace("All supported archive", "missing"),
+      page.replace("stable release", "unstable release"),
+      page.replace("https://www.etlegacy.com/download/file/9002", "https://untrusted.test/download/file/9002"),
+      filenamePage.replace("etlegacy-v2.99.0-x86_64.tar.gz", "etlegacy-v2.98.0-x86_64.tar.gz"),
+    ]) {
       const failed = parse(ETLEGACY_RELEASE_PARSER, input);
       assert.notEqual(failed.status, 0, `input ${JSON.stringify(input.slice(0, 40))} should fail closed`);
       // The reason must reach stderr: the installer runs this parser inside
@@ -74,13 +88,17 @@ describe("latest stable release resolution", () => {
       await writeFile(join(install, "legacy/server.cfg"), "custom config");
       await writeFile(join(install, "etlded"), "old engine");
       for (const name of ["pak0.pk3", "pak1.pk3", "pak2.pk3"]) await writeFile(join(install, "etmain", name), "base assets");
-      await writeFile(join(dir, "page.html"), page);
+      await writeFile(join(dir, "page.html"), filenamePage);
       const zipResult = spawnSync("python3", ["-c", `
-import zipfile, sys
+import io, sys, tarfile, zipfile
 from pathlib import Path
 root = Path(sys.argv[1])
-with zipfile.ZipFile(root / "engine.zip", "w") as z:
-    z.writestr("etlded", "new engine")
+with tarfile.open(root / "engine.tar.gz", "w:gz") as t:
+    engine = b"new engine"
+    info = tarfile.TarInfo("etlegacy-v2.99.0-x86_64/etlded")
+    info.size = len(engine)
+    info.mode = 0o755
+    t.addfile(info, io.BytesIO(engine))
 with zipfile.ZipFile(root / "mod.zip", "w") as z:
     z.writestr("legacy/qagame.mp.x86_64.so", "new mod")
     z.writestr("legacy/legacy_v2.99.0.pk3", "new assets")
@@ -95,17 +113,28 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 case "$url" in
-  https://www.etlegacy.com/download) cat "$FIXTURE/page.html" ;;
-  */9001) cp "$FIXTURE/engine.zip" "$out" ;;
+  https://www.etlegacy.com/download)
+    if [ "$PAGE_OFFLINE" = "1" ]; then
+      echo 'curl: (6) Could not resolve host: www.etlegacy.com' >&2
+      exit 6
+    fi
+    cat "$FIXTURE/page.html" ;;
+  */9001) cp "$FIXTURE/engine.tar.gz" "$out" ;;
   */9003) cp "$FIXTURE/$MOD_ARCHIVE" "$out" ;;
   *) echo "Unexpected URL: $url" >&2; exit 1 ;;
 esac
 `, { mode: 0o755 });
       const script = wolfensteinET.installScript.split("# ── Step 4:")[0]
         .replaceAll("{{INSTALL_PATH}}", install).replaceAll("{{ET_MOD}}", "legacy");
-      const run = (archive: string) => spawnSync("bash", ["-c", script], {
-        encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FIXTURE: dir, MOD_ARCHIVE: archive },
+      const run = (archive: string, pageOffline = false) => spawnSync("bash", ["-c", script], {
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FIXTURE: dir, MOD_ARCHIVE: archive, PAGE_OFFLINE: pageOffline ? "1" : "0" },
       });
+      const offline = run("mod.zip", true);
+      assert.equal(offline.status, 6);
+      assert.match(offline.stderr, /curl: \(6\) Could not resolve host/);
+      assert.match(offline.stderr, /Could not fetch https:\/\/www\.etlegacy\.com\/download/);
+      assert.doesNotMatch(offline.stdout, /Downloading ET:Legacy/);
       const updated = run("mod.zip");
       assert.equal(updated.status, 0, updated.stdout + updated.stderr);
       assert.match(updated.stdout, /Resolved ET:Legacy stable release: 2.99.0/);
