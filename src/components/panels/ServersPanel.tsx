@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useToast } from "@/components/ToastProvider";
 import { useConfirm, useConfirmChoice } from "@/components/ConfirmDialog";
-import { groupServersByNode, sortServersForPanel, summarizeServerStatus } from "./serverPanelUtils";
+import { formatInstallLogError, groupServersByNode, sortServersForPanel, summarizeServerStatus } from "./serverPanelUtils";
 import MetricsChart from "@/components/MetricsChart";
 import InstallProgressMeter from "@/components/InstallProgressMeter";
 import type { MetricPoint } from "@/lib/metrics-history";
@@ -792,9 +792,8 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
       // Show the downloader's own output — on failure the script's stderr
       // (where curl/release-resolver errors land) is the only clue to the
       // cause, and a bare "Exit 1" toast hides it.
-      const updateError = data.errorOutput ? `${data.error || "Update failed"}\n\n[stderr]\n${data.errorOutput}` : (data.error || "Update failed");
       if (!res.ok) {
-        setInstallLog({ title: "Update Log", output: data.output || "", error: updateError, success: false });
+        setInstallLog({ title: "Update Log", output: data.output || "", error: formatInstallLogError(data, "Update failed"), success: false });
         toast.error("Update Failed", data.error || "Check the update log for details.");
       } else {
         setInstallLog({ title: "Update Log", output: data.output || "", error: "", success: true });
@@ -946,9 +945,15 @@ export default function ServersPanel({ user }: { user: AuthUser }) {
     if (!ok) return;
     setInstallingId(id); setInstallLog(null);
     try {
-      const res = await fetch(`/api/servers/${id}/install`, { method: "POST" }); const data = await res.json();
-      if (!res.ok) { setInstallLog({ title: "Install Log", output: data.output || "", error: data.error || data.errorOutput || "Install failed", success: false }); toast.error("Install Failed", data.error || "Check the install log for details."); }
-      else { setInstallLog({ title: "Install Log", output: data.output || "", error: data.errorOutput || "", success: true }); toast.success("Files Installed", "Game files are ready. You can now Start the server."); }
+      const res = await fetch(`/api/servers/${id}/install`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setInstallLog({ title: "Install Log", output: data.output || "", error: formatInstallLogError(data, "Install failed"), success: false });
+        toast.error("Install Failed", data.error || "Check the install log for details.");
+      } else {
+        setInstallLog({ title: "Install Log", output: data.output || "", error: data.errorOutput || "", success: true });
+        toast.success("Files Installed", "Game files are ready. You can now Start the server.");
+      }
       loadData();
     } catch (e) { toast.error("Install Error", e instanceof Error ? e.message : "Failed"); } finally { setInstallingId(null); }
   }
